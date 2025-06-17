@@ -26,11 +26,11 @@ end
 
 function AutoDispatcher:dispatch(game)
     -- This dispatcher tries to assign one trip to any available vehicle.
-    for _, vehicle in ipairs(game.state.vehicles) do
-        if #game.state.trips.pending == 0 then return end -- No more trips to assign
+    for _, vehicle in ipairs(game.entities.vehicles) do
+        if #game.entities.trips.pending == 0 then return end -- No more trips to assign
 
         if vehicle:isAvailable(game) then
-            local trip_to_assign = table.remove(game.state.trips.pending, 1)
+            local trip_to_assign = table.remove(game.entities.trips.pending, 1)
             vehicle:assignTrip(trip_to_assign, game)
         end
     end

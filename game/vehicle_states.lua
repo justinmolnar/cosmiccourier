@@ -107,7 +107,11 @@ function States.GoToPickup:enter(vehicle, game)
     print(string.format("Bike %d going to pickup.", vehicle.id))
     local current_pos = vehicle:getCurrentGridPos(game)
     local start_node = game.map:findNearestRoadTile(current_pos)
-    local end_node = game.map:findNearestRoadTile(vehicle.trip_queue[1].start_plot)
+    
+    -- Get the start plot from the current leg of the trip
+    local current_trip = vehicle.trip_queue[1]
+    local end_node = game.map:findNearestRoadTile(current_trip.legs[current_trip.current_leg].start_plot)
+
     vehicle.path = game.pathfinder.findPath(game.map.grid, start_node, end_node)
     if vehicle.path then table.remove(vehicle.path, 1) end
 end
@@ -126,10 +130,13 @@ end
 States.DoPickup = State:new()
 States.DoPickup.name = "Picking Up"
 function States.DoPickup:enter(vehicle, game)
-    local pickup_location = vehicle.trip_queue[1].start_plot
+    local current_trip_leg = vehicle.trip_queue[1].legs[vehicle.trip_queue[1].current_leg]
+    local pickup_location = current_trip_leg.start_plot
+
     local trips_to_pickup, remaining_trips = {}, {}
     for _, trip in ipairs(vehicle.trip_queue) do
-        if trip.start_plot.x == pickup_location.x and trip.start_plot.y == pickup_location.y then
+        local leg = trip.legs[trip.current_leg]
+        if leg.start_plot.x == pickup_location.x and leg.start_plot.y == pickup_location.y then
             table.insert(trips_to_pickup, trip)
         else
             table.insert(remaining_trips, trip)
@@ -161,7 +168,8 @@ function States.GoToDropoff:enter(vehicle, game)
     local best_path, shortest_len = nil, math.huge
     
     for _, trip in ipairs(vehicle.cargo) do
-        local end_node = game.map:findNearestRoadTile(trip.end_plot)
+        local leg = trip.legs[trip.current_leg]
+        local end_node = game.map:findNearestRoadTile(leg.end_plot)
         if not start_node or not end_node then break end
         if end_node.x ~= start_node.x or end_node.y ~= start_node.y then
             local path = game.pathfinder.findPath(game.map.grid, start_node, end_node)
@@ -197,26 +205,24 @@ function States.DoDropoff:enter(vehicle, game)
     local current_pos = vehicle:getCurrentGridPos(game)
     
     for i, trip in ipairs(vehicle.cargo) do
-        local plot = trip.end_plot
+        local leg = trip.legs[trip.current_leg]
+        local plot = leg.end_plot
         local destination_road_tile = game.map:findNearestRoadTile(plot)
 
         if destination_road_tile and current_pos.x == destination_road_tile.x and current_pos.y == destination_road_tile.y then
             -- Calculate the final total payout
             local final_payout = trip.base_payout + trip.speed_bonus
-            game.state:addMoney(final_payout)
             
-            -- Create the multi-line text for the popup
-            local bonus_text = string.format("$%.f", trip.speed_bonus)
-            local payout_text = string.format("$%.f\n+ %s\nSpeed Bonus!", trip.base_payout, bonus_text)
-
-            -- Create and add the new floating text object to the list
-            table.insert(game.state.floating_texts, {
-                text = payout_text,
+            -- Publish an event with all the relevant data from the delivery
+            local event_data = {
+                payout = final_payout,
+                bonus = trip.speed_bonus,
+                base = trip.base_payout,
                 x = vehicle.px,
                 y = vehicle.py,
-                timer = C.EFFECTS.PAYOUT_TEXT_LIFESPAN_SEC,
-                alpha = 1
-            })
+                vehicle_id = vehicle.id
+            }
+            game.EventBus:publish("package_delivered", event_data)
 
             print(string.format("Bike %d delivered a package! Payout: $%d ($%d base + $%d bonus)", vehicle.id, math.floor(final_payout), trip.base_payout, math.floor(trip.speed_bonus)))
             
@@ -229,7 +235,34 @@ function States.DoDropoff:enter(vehicle, game)
         table.remove(vehicle.cargo, trip_index_to_remove)
     end
 
+    -- This state was added in the bugfix step. It should remain.
+    if not States.DecideNextAction then
+        States.DecideNextAction = State:new()
+        States.DecideNextAction.name = "Deciding"
+        function States.DecideNextAction:enter(v, g)
+            if #v.cargo > 0 then v:changeState(States.GoToDropoff, g)
+            elseif #v.trip_queue > 0 then v:changeState(States.GoToPickup, g)
+            else v:changeState(States.ReturningToDepot, g) end
+        end
+    end
     vehicle:changeState(States.DecideNextAction, game)
+end
+--------------------------------------------------------------------------------
+-- State: Decide Next Action (Instantaneous)
+--------------------------------------------------------------------------------
+States.DecideNextAction = State:new()
+States.DecideNextAction.name = "Deciding"
+function States.DecideNextAction:enter(vehicle, game)
+    if #vehicle.cargo > 0 then
+        -- If we still have packages to deliver, go find the next one.
+        vehicle:changeState(States.GoToDropoff, game)
+    elseif #vehicle.trip_queue > 0 then
+        -- If we have pending pickups, go get them.
+        vehicle:changeState(States.GoToPickup, game)
+    else
+        -- If we have no work to do, go home.
+        vehicle:changeState(States.ReturningToDepot, game)
+    end
 end
 
 return States

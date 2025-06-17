@@ -24,15 +24,23 @@ function Client:update(dt, game)
             self.trip_timer = love.math.random(C_GAMEPLAY.TRIP_GENERATION_MIN_SEC, C_GAMEPLAY.TRIP_GENERATION_MAX_SEC)
         end
         
-        if #game.state.trips.pending < C_GAMEPLAY.MAX_PENDING_TRIPS then
+        if #game.entities.trips.pending < C_GAMEPLAY.MAX_PENDING_TRIPS then
             local end_plot = game.map:getRandomBuildingPlot()
             if end_plot then
                 -- Create a new trip with a base payout and a starting speed bonus
                 local new_trip = Trip:new(C_GAMEPLAY.BASE_TRIP_PAYOUT, C_GAMEPLAY.INITIAL_SPEED_BONUS)
-                new_trip.start_plot = self.plot
-                new_trip.end_plot = end_plot
+                
+                -- Add the first (and only, for now) leg to the trip
+                table.insert(new_trip.legs, {
+                    start_plot = self.plot,
+                    end_plot = end_plot
+                })
 
-                table.insert(game.state.trips.pending, new_trip)
+                -- REMOVED: The backward compatibility hack is no longer needed.
+                -- new_trip.start_plot = self.plot
+                -- new_trip.end_plot = end_plot
+
+                table.insert(game.entities.trips.pending, new_trip)
                 if not game.state.rush_hour.active then
                     print("New trip generated!")
                 end

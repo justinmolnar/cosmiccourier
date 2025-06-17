@@ -1,15 +1,14 @@
 -- main.lua
 -- The main entry point. Owns all game systems.
 
-local SIDEBAR_WIDTH = 280
-
 function love.load()
     local C = require("core.constants")
 
     -- The Game object holds all our systems.
     Game = {
         C = C, -- Add the constants table to our Game object
-        state = require("core.state"):new(C),
+        EventBus = require("core.event_bus"),
+        state = nil, -- state needs access to Game, so we initialize it after
         time = require("core.time"):new(),
         map = require("game.map"):new(C),
         entities = require("game.entities"):new(),
@@ -17,9 +16,14 @@ function love.load()
         event_spawner = require("game.event_spawner"):new(C),
         pathfinder = require("lib.pathfinder"),
         fonts = {},
-        debug_mode = false
+        debug_mode = false,
+        ui = nil, -- Initialize UI module placeholder
     }
     
+    -- State needs a reference to the Game object to subscribe to events
+    Game.state = require("core.state"):new(C, Game)
+    Game.ui = require("ui.ui"):new(C, Game) -- Create the UI module
+
     Game.map:generate()
     Game.entities:init(Game) -- Pass the Game object for dependency access
     
@@ -55,6 +59,7 @@ function love.update(dt)
     Game.entities:update(dt, Game)
     Game.autodispatcher:update(dt, Game)
     Game.event_spawner:update(dt, Game)
+    Game.ui:update(dt, Game) -- This line was missing
 end
 
 function love.draw()
@@ -67,7 +72,7 @@ function love.draw()
     love.graphics.setColor(Game.C.MAP.COLORS.UI_BG)
     love.graphics.rectangle("fill", 0, 0, sidebar_w, screen_h)
     
-    Game.state:draw(Game)
+    Game.ui:draw(Game)
     
     love.graphics.setScissor() -- Disable scissor
 
@@ -81,30 +86,36 @@ function love.draw()
     Game.entities:draw(Game)
 
     -- Draw the hover line and pins HERE, inside the map's scissor and coordinate system.
-    if Game.state.hovered_trip_index then
-        local trip = Game.state.trips.pending[Game.state.hovered_trip_index]
-        if trip then
-            local start_node = Game.map:findNearestRoadTile(trip.start_plot)
-            local end_node = Game.map:findNearestRoadTile(trip.end_plot)
-            local path = Game.pathfinder.findPath(Game.map.grid, start_node, end_node)
+    if Game.ui.hovered_trip_index then
+        -- FIX: Get trips from the correct module (entities, not state)
+        local trip = Game.entities.trips.pending[Game.ui.hovered_trip_index]
+        if trip and trip.legs[trip.current_leg] then
+            -- FIX: Get start/end plots from the trip's leg structure
+            local leg = trip.legs[trip.current_leg]
+            local start_node = Game.map:findNearestRoadTile(leg.start_plot)
+            local end_node = Game.map:findNearestRoadTile(leg.end_plot)
             
-            if path then
-                local pixel_path = {}
-                for _, node in ipairs(path) do
-                    local px, py = Game.map:getPixelCoords(node.x, node.y)
-                    table.insert(pixel_path, px)
-                    table.insert(pixel_path, py)
+            if start_node and end_node then
+                local path = Game.pathfinder.findPath(Game.map.grid, start_node, end_node)
+                
+                if path then
+                    local pixel_path = {}
+                    for _, node in ipairs(path) do
+                        local px, py = Game.map:getPixelCoords(node.x, node.y)
+                        table.insert(pixel_path, px)
+                        table.insert(pixel_path, py)
+                    end
+                    
+                    local hover_color = Game.C.MAP.COLORS.HOVER
+                    love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.7)
+                    love.graphics.setLineWidth(3)
+                    love.graphics.line(pixel_path)
+                    love.graphics.setLineWidth(1)
+                    
+                    love.graphics.setColor(hover_color)
+                    love.graphics.circle("fill", pixel_path[1], pixel_path[2], 5)
+                    love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], 5)
                 end
-                
-                local hover_color = Game.C.MAP.COLORS.HOVER
-                love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.7)
-                love.graphics.setLineWidth(3)
-                love.graphics.line(pixel_path)
-                love.graphics.setLineWidth(1)
-                
-                love.graphics.setColor(hover_color)
-                love.graphics.circle("fill", pixel_path[1], pixel_path[2], 5)
-                love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], 5)
             end
         end
     end
@@ -125,7 +136,7 @@ function love.mousepressed(x, y, button)
     if button == 1 then
         -- If the click is inside the sidebar...
         if x < Game.C.UI.SIDEBAR_WIDTH then
-            Game.state:handle_click(x, y, Game)
+            Game.ui:handle_click(x, y, Game)
         else
             -- The click is in the game world, so we must translate the coordinate
             -- and then check for clicks on the event spawner first.

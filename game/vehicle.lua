@@ -1,6 +1,4 @@
--- game/vehicle.lua
-local Pathfinder = require("lib.pathfinder")
-
+-- game/vehicle.lua (The new base vehicle file)
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
@@ -35,35 +33,6 @@ function Vehicle:changeState(newState, game)
     end
 end
 
-function Vehicle:findBestNextDelivery(game)
-    if #self.cargo == 0 then return nil, nil end
-
-    local current_pos = self:getCurrentGridPos(game)
-    local start_node = game.map:findNearestRoadTile(current_pos)
-
-    local best_trip = nil
-    local best_path = nil
-    local shortest_path_len = math.huge
-
-    -- Find the nearest neighbor by checking the path length to every item in our cargo
-    for _, trip in ipairs(self.cargo) do
-        local end_node = game.map:findNearestRoadTile(trip.end_plot)
-        
-        -- BUG FIX: Only consider paths that actually go somewhere.
-        if end_node.x ~= start_node.x or end_node.y ~= start_node.y then
-            local path = game.pathfinder.findPath(game.map.grid, start_node, end_node)
-
-            if path and #path < shortest_path_len then
-                shortest_path_len = #path
-                best_path = path
-                best_trip = trip
-            end
-        end
-    end
-
-    return best_trip, best_path
-end
-
 function Vehicle:assignTrip(trip, game)
     if not self:isAvailable(game) then return end
 
@@ -81,8 +50,6 @@ function Vehicle:update(dt, game)
 end
 
 function Vehicle:isAvailable(game)
-    -- FIX: Check against the total number of trips (queued + cargo)
-    -- instead of just the queue.
     local total_load = #self.trip_queue + #self.cargo
     return total_load < game.state.upgrades.vehicle_capacity
 end
@@ -93,33 +60,30 @@ function Vehicle:getCurrentGridPos(game)
     return {x = grid_x, y = grid_y}
 end
 
+-- The generic draw function. Specific vehicle types can override this.
 function Vehicle:draw(game)
-    if self == game.state.selected_vehicle then
+    if self == game.entities.selected_vehicle then
         love.graphics.setColor(1, 1, 0) -- Yellow circle for selected
-        love.graphics.circle("line", self.px, self.py, 16) -- Made circle larger
+        love.graphics.circle("line", self.px, self.py, 16)
     end
 
-    love.graphics.setFont(game.fonts.emoji)
-    love.graphics.setColor(0, 0, 0) -- Black
-    love.graphics.print("🚲", self.px - 14, self.py - 14)
-    love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
+    -- Default drawing if a subclass doesn't provide its own
+    love.graphics.setColor(1,0,1) -- Magenta square as placeholder
+    love.graphics.rectangle("fill", self.px - 8, self.py - 8, 16, 16)
+    love.graphics.setColor(1,1,1)
 
-
-    -- === DEBUG DRAWING ===
+    -- Draw debug info
     if game.debug_mode then
         local C = game.C
         local debug_x = self.px + 20
         local debug_y = self.py - 20
         local line_h = 15
-
-        -- Prepare debug text
         local state_name = self.state and self.state.name or "N/A"
         local path_count = self.path and #self.path or 0
         local target_text = "None"
         if self.path and self.path[1] then
             target_text = string.format("(%d, %d)", self.path[1].x, self.path[1].y)
         end
-
         local debug_lines = {
             string.format("ID: %d | State: %s", self.id, state_name),
             string.format("Path Nodes: %d", path_count),
@@ -127,37 +91,26 @@ function Vehicle:draw(game)
             string.format("Cargo: %d | Queue: %d", #self.cargo, #self.trip_queue),
             string.format("Pos: %d, %d", math.floor(self.px), math.floor(self.py))
         }
-
-        -- Draw a background for the text
         love.graphics.setColor(0, 0, 0, 0.7)
         love.graphics.rectangle("fill", debug_x - 5, debug_y - 5, 200, #debug_lines * line_h + 10)
-
-        -- Draw the text
-        love.graphics.setColor(0, 1, 0) -- Green debug text
+        love.graphics.setColor(0, 1, 0)
         for i, line in ipairs(debug_lines) do
             love.graphics.print(line, debug_x, debug_y + (i-1) * line_h)
         end
-        love.graphics.setColor(1, 1, 1) -- Reset color
-
-        -- Draw the vehicle's current path
+        love.graphics.setColor(1, 1, 1)
         if self.path and #self.path > 0 then
             local pixel_path = {}
-            -- Manually add the vehicle's current position as the start of the line
             table.insert(pixel_path, self.px)
             table.insert(pixel_path, self.py)
-            -- Add all nodes from the path
             for _, node in ipairs(self.path) do
                 local px, py = game.map:getPixelCoords(node.x, node.y)
                 table.insert(pixel_path, px)
                 table.insert(pixel_path, py)
             end
-            
-            love.graphics.setColor(1, 0, 1, 0.8) -- Magenta
+            love.graphics.setColor(1, 0, 1, 0.8)
             love.graphics.setLineWidth(2)
             love.graphics.line(pixel_path)
-
-            -- Draw circles on each node of the path
-            for i = 3, #pixel_path, 2 do -- Start from the first real node
+            for i = 3, #pixel_path, 2 do
                 love.graphics.circle("fill", pixel_path[i], pixel_path[i+1], 3)
             end
             love.graphics.setLineWidth(1)

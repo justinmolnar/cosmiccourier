@@ -53,15 +53,15 @@ local C = {
         SPEED           = 75,
         CLIENT          = 500,
         AUTO_DISPATCH   = 1000,
-        CAPACITY        = 100,
+        CAPACITY        = 2500,
         FRENZY_DURATION = 5000,
 
         -- Cost increase multipliers
         BIKE_MULT       = 1.15,
         SPEED_MULT      = 1.5,
-        CLIENT_MULT     = 2,
-        CAPACITY_MULT   = 3,
-        FRENZY_DURATION_MULT = 2.5,
+        CLIENT_MULT     = 1.2,
+        CAPACITY_MULT   = 1.5,
+        FRENZY_DURATION_MULT = 1.5,
 
         -- Upgrade multipliers
         SPEED_UPGRADE_MULT = 1.2,
