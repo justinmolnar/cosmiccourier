@@ -1,0 +1,55 @@
+Game Design Document: Logistics Idler (Version 2.0)
+1. High-Concept
+A 2D, top-down incremental/idler game where the player builds a logistics empire from a single bike courier, scaling up to manage complex, multi-modal, interplanetary supply chains worth trillions of dollars.
+
+2. Genre & Core Loop
+Genre: Epic Incremental / Logistics Simulation. The game starts as a simple active-idler and evolves into a complex simulation of a massive logistics network.
+The Core Loops: The game has two distinct, evolving loops.
+Early-Game Loop (Local Operations): The initial gameplay cycle focuses on completing single-stage, local deliveries. The player uses the money earned to purchase more vehicles and linear upgrades (speed, capacity) to grow their local business.
+Mid/Endgame Loop (Logistics Chains): The focus shifts from direct delivery to network management. The player earns money by successfully managing multi-stage Logistics Chains. Profit is used to unlock new tiers of transportation (trucks, trains, ships, spaceships) and upgrade critical Hubs (depots, stations, spaceports) to increase the network's throughput and unlock exponentially more valuable trips.
+3. Core Gameplay Mechanics
+Map System & The "Zoom Out" Mechanic:
+
+The game begins on a procedurally generated city map.
+A core progression mechanic is the ability to "zoom out," revealing larger map tiers: the full city, the continent, the planet, and eventually the solar system.
+Each map tier unlocks new vehicle types and corresponding hubs.
+The Trip & Logistics Chain System:
+
+Simple Trips: Early-game jobs are simple, point-to-point deliveries with a single vehicle.
+Logistics Chains: Late-game jobs are complex, multi-stage journeys. A single Trip object is composed of a sequence of Legs, where each leg requires a specific vehicle type.
+Example: A package might travel by Bike to a depot, by Truck to a spaceport, by Spaceship to another planet, and then by Bike again for final delivery.
+Speed Bonus: All trips have a base_payout and a ticking speed_bonus. The bonus decays from the moment the trip is created, making overall network speed and efficiency paramount for maximizing profit on long, complex journeys.
+Hubs & Warehousing:
+
+Hubs are critical transfer points in the logistics chain (Depots, Train Stations, Shipping Docks, Spaceports).
+Packages wait at hubs for the next available vehicle in the chain.
+Hubs are upgradeable entities, allowing for increased storage capacity, faster loading/unloading times, and unlocking more advanced dispatching capabilities.
+Vehicles & Transportation Tiers:
+
+Tier 1 (Local): Bikes, Cars. Used for final-mile delivery within a city.
+Tier 2 (Regional): Trucks, Trains. Used for moving goods between cities and hubs on the same continent.
+Tier 3 (Global): Cargo Ships, Planes. Used for intercontinental transport between docks and airports.
+Tier 4 (Interplanetary): Rockets, Space Freighters. Used for the most lucrative late-game trips between planets.
+Dispatching & Automation (Tiered Progression):
+
+Manual Dispatch: The player's initial interaction.
+Local Auto-Dispatcher: An early-game upgrade for automatically assigning local bike trips.
+Hub Managers: The core of the mid-game automation. The player must purchase and upgrade specialized AI dispatchers for each hub (e.g., "Depot Managers" for trucks, "Flight Planners" for spaceports) to manage the flow of goods through the logistics chain.
+Player-Activated Events:
+
+A "Golden Cookie"-style clickable icon appears randomly on the map.
+Clicking it triggers a "Rush Hour" frenzy—a timed buff where clients generate new local trips at a massively increased rate, rewarding active players.
+4. Player Experience & Goals
+The Player's Journey: The player evolves from a hands-on courier dispatcher into the CEO of a massive, interplanetary corporation, shifting their focus from micro-management to macro-level network optimization.
+The "Package Tracker": A key UI feature allowing the player to select any package in a complex logistics chain and follow its entire journey. The UI will display the package's full itinerary and current status (e.g., "Status: Awaiting Loading at North City Spaceport"), making the immense scale of the player's network feel tangible and personal.
+Visual Feedback: The game will utilize satisfying visual cues like floating text for payouts and path visualizations for hovered trips to make the experience rewarding and intuitive.
+5. Technical Stack
+Framework: LÖVE (LÖVE2D)
+Language: Lua
+Architecture: The core vehicle logic is driven by a robust, class-based State Machine to handle complex behaviors cleanly. Game configuration is managed via a central constants.lua file.
+Graphics: 2D, top-down. UI is managed in a dedicated sidebar viewport created with love.graphics.setScissor.
+6. Future Expansion (Post-Core Vision)
+Once this core vision of a multi-modal, interplanetary logistics chain is complete, further expansion can focus on long-term idler mechanics:
+
+Offline Earnings: Calculating profits earned while the game is closed.
+Prestige System: A system to reset progress in exchange for powerful, permanent global bonuses, providing near-infinite replayability.
