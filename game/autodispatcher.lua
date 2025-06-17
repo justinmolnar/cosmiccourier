@@ -25,13 +25,28 @@ function AutoDispatcher:update(dt, game)
 end
 
 function AutoDispatcher:dispatch(game)
-    -- This dispatcher tries to assign one trip to any available vehicle.
-    for _, vehicle in ipairs(game.entities.vehicles) do
-        if #game.entities.trips.pending == 0 then return end -- No more trips to assign
+    if #game.entities.trips.pending == 0 then return end
 
-        if vehicle:isAvailable(game) then
-            local trip_to_assign = table.remove(game.entities.trips.pending, 1)
-            vehicle:assignTrip(trip_to_assign, game)
+    -- For each pending trip, try to find a matching vehicle
+    for i = #game.entities.trips.pending, 1, -1 do
+        local trip_to_assign = game.entities.trips.pending[i]
+        local required_type = trip_to_assign.legs[trip_to_assign.current_leg].vehicleType
+
+        -- Find an available vehicle of the required type
+        local found_vehicle = nil
+        for _, vehicle in ipairs(game.entities.vehicles) do
+            -- In the future, vehicle objects should have a .type property
+            -- For now, we assume all vehicles are the required "bike" type
+            if vehicle:isAvailable(game) then 
+                found_vehicle = vehicle
+                break -- Use the first one we find
+            end
+        end
+
+        if found_vehicle then
+            -- We found a match, assign the trip and remove it from the pending list
+            found_vehicle:assignTrip(trip_to_assign, game)
+            table.remove(game.entities.trips.pending, i)
         end
     end
 end

@@ -4,11 +4,10 @@
 function love.load()
     local C = require("core.constants")
 
-    -- The Game object holds all our systems.
     Game = {
-        C = C, -- Add the constants table to our Game object
+        C = C,
         EventBus = require("core.event_bus"),
-        state = nil, -- state needs access to Game, so we initialize it after
+        state = nil,
         time = require("core.time"):new(),
         map = require("game.map"):new(C),
         entities = require("game.entities"):new(),
@@ -17,24 +16,29 @@ function love.load()
         pathfinder = require("lib.pathfinder"),
         fonts = {},
         debug_mode = false,
-        ui = nil, -- Initialize UI module placeholder
+        ui = nil,
     }
     
-    -- State needs a reference to the Game object to subscribe to events
     Game.state = require("core.state"):new(C, Game)
-    Game.ui = require("ui.ui"):new(C, Game) -- Create the UI module
+    Game.ui = require("ui.ui"):new(C, Game)
 
     Game.map:generate()
-    Game.entities:init(Game) -- Pass the Game object for dependency access
+    Game.entities:init(Game)
     
     local uiFont = love.graphics.newFont(C.UI.FONT_PATH_MAIN, C.UI.FONT_SIZE_UI)
+    local uiFontSmall = love.graphics.newFont(C.UI.FONT_PATH_MAIN, C.UI.FONT_SIZE_UI_SMALL)
     local emojiFont = love.graphics.newFont(C.UI.FONT_PATH_EMOJI, C.UI.FONT_SIZE_EMOJI)
+    local emojiFontUI = love.graphics.newFont(C.UI.FONT_PATH_EMOJI, C.UI.FONT_SIZE_EMOJI_UI) -- Load large UI emoji font
 
-    uiFont:setFallbacks(emojiFont)
-    emojiFont:setFallbacks(uiFont)
+    uiFont:setFallbacks(emojiFontUI, emojiFont) -- Add fallbacks
+    uiFontSmall:setFallbacks(emojiFontUI, emojiFont)
+    emojiFont:setFallbacks(uiFont, uiFontSmall)
+    emojiFontUI:setFallbacks(uiFont, uiFontSmall)
 
     Game.fonts.ui = uiFont
+    Game.fonts.ui_small = uiFontSmall
     Game.fonts.emoji = emojiFont
+    Game.fonts.emoji_ui = emojiFontUI -- Add large UI emoji font to the table
 
     love.graphics.setFont(Game.fonts.ui)
 end
@@ -50,6 +54,11 @@ function love.keypressed(key)
         Game.state.money = Game.state.money + 10000
         print("DEBUG: Added 10,000 money.")
     end
+end
+
+function love.mousewheelmoved(x, y)
+    -- Pass the vertical scroll amount (y) to the UI
+    Game.ui:handle_scroll(y)
 end
 
 function love.update(dt)
@@ -133,20 +142,28 @@ function love.draw()
 end
 
 function love.mousepressed(x, y, button)
+    -- First, give the UI a chance to handle the press for drag-scrolling
+    if Game.ui:handle_mouse_down(x, y, button) then
+        -- The press was on a scrollbar, so the event is fully handled. Do nothing else.
+        return
+    end
+
+    -- If no scrollbar was dragged, proceed with normal click logic
     if button == 1 then
-        -- If the click is inside the sidebar...
         if x < Game.C.UI.SIDEBAR_WIDTH then
+            -- FIX: Pass the correct x, y, and Game arguments
             Game.ui:handle_click(x, y, Game)
         else
-            -- The click is in the game world, so we must translate the coordinate
-            -- and then check for clicks on the event spawner first.
             local world_x = x - Game.C.UI.SIDEBAR_WIDTH
             local event_handled = Game.event_spawner:handle_click(world_x, y, Game)
             
-            -- If the event icon wasn't clicked, then check for entities.
             if not event_handled then
                 Game.entities:handle_click(world_x, y, Game)
             end
         end
     end
+end
+
+function love.mousereleased(x, y, button)
+    Game.ui:handle_mouse_up(x, y, button) -- Notify UI of mouse release
 end

@@ -15,35 +15,42 @@ end
 function Client:update(dt, game)
     local C_GAMEPLAY = game.C.GAMEPLAY
     local C_EVENTS = game.C.EVENTS
+    local upgrades = game.state.upgrades
 
     self.trip_timer = self.trip_timer - dt
     if self.trip_timer <= 0 then
-        if game.state.rush_hour.active then
-            self.trip_timer = love.math.random(C_EVENTS.FRENZY_TRIP_MIN_SEC, C_EVENTS.FRENZY_TRIP_MAX_SEC)
-        else
-            self.trip_timer = love.math.random(C_GAMEPLAY.TRIP_GENERATION_MIN_SEC, C_GAMEPLAY.TRIP_GENERATION_MAX_SEC)
-        end
+        -- Reset timer using new upgradeable multipliers
+        local min_time = C_GAMEPLAY.TRIP_GENERATION_MIN_SEC * upgrades.trip_gen_min_mult
+        local max_time = C_GAMEPLAY.TRIP_GENERATION_MAX_SEC * upgrades.trip_gen_max_mult
+        self.trip_timer = love.math.random(min_time, max_time)
         
-        if #game.entities.trips.pending < C_GAMEPLAY.MAX_PENDING_TRIPS then
-            local end_plot = game.map:getRandomBuildingPlot()
-            if end_plot then
-                -- Create a new trip with a base payout and a starting speed bonus
-                local new_trip = Trip:new(C_GAMEPLAY.BASE_TRIP_PAYOUT, C_GAMEPLAY.INITIAL_SPEED_BONUS)
+        -- Use new upgradeable max pending trips value
+        if #game.entities.trips.pending < upgrades.max_pending_trips then
+            local trips_to_generate = 1
+            -- Check if we should generate a bulk order
+            if love.math.random() < upgrades.multi_trip_chance then
+                trips_to_generate = upgrades.multi_trip_amount
+                print("Bulk order generated!")
+            end
+
+            for i = 1, trips_to_generate do
+                -- Check the cap again inside the loop in case we fill it up
+                if #game.entities.trips.pending >= upgrades.max_pending_trips then break end
                 
-                -- Add the first (and only, for now) leg to the trip
-                table.insert(new_trip.legs, {
-                    start_plot = self.plot,
-                    end_plot = end_plot
-                })
-
-                -- REMOVED: The backward compatibility hack is no longer needed.
-                -- new_trip.start_plot = self.plot
-                -- new_trip.end_plot = end_plot
-
-                table.insert(game.entities.trips.pending, new_trip)
-                if not game.state.rush_hour.active then
-                    print("New trip generated!")
+                local end_plot = game.map:getRandomBuildingPlot()
+                if end_plot then
+                    local new_trip = Trip:new(C_GAMEPLAY.BASE_TRIP_PAYOUT, C_GAMEPLAY.INITIAL_SPEED_BONUS)
+                    table.insert(new_trip.legs, {
+                        start_plot = self.plot,
+                        end_plot = end_plot,
+                        vehicleType = "bike" 
+                    })
+                    table.insert(game.entities.trips.pending, new_trip)
                 end
+            end
+            
+            if not game.state.rush_hour.active and trips_to_generate == 1 then
+                print("New trip generated!")
             end
         end
     end

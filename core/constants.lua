@@ -2,12 +2,16 @@
 -- A central file for all game constants and configuration values.
 
 local C = {
+    -- This is the C.UI table object. Replace the existing UI table inside your core/constants.lua file.
+-- This is the C.UI table object. Replace the existing UI table inside your core/constants.lua file.
     UI = {
         SIDEBAR_WIDTH       = 280,
         FONT_PATH_MAIN      = "assets/fonts/arial.ttf",
         FONT_PATH_EMOJI     = "assets/fonts/NotoEmoji.ttf",
         FONT_SIZE_UI        = 16,
+        FONT_SIZE_UI_SMALL  = 12,
         FONT_SIZE_EMOJI     = 28,
+        FONT_SIZE_EMOJI_UI  = 32, -- ADD THIS LINE for a crisp UI icon
         
         -- Layout numbers for the sidebar
         PADDING             = 10,
@@ -37,7 +41,7 @@ local C = {
     },
 
     GAMEPLAY = {
-        INITIAL_MONEY           = 100,
+        INITIAL_MONEY           = 150,
         INITIAL_BIKE_SPEED      = 80,
         BASE_TRIP_PAYOUT        = 50,  -- Renamed from TRIP_PAYOUT
         INITIAL_SPEED_BONUS     = 100, -- The starting value of the speed bonus for each trip

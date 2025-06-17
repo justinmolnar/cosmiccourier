@@ -1,7 +1,6 @@
 -- game/entities.lua
 local Client = require("game.client")
 local Vehicle = require("game.vehicle")
-local Bike = require("game.bike")
 
 local Entities = {}
 Entities.__index = Entities
@@ -37,22 +36,39 @@ function Entities:addClient(game)
     end
 end
 
-function Entities:addVehicle(game)
+function Entities:addVehicle(game, vehicleType)
+    if not vehicleType then
+        print("ERROR: addVehicle called without a vehicleType.")
+        return
+    end
+
     if self.depot_plot then
+        local VehicleClass = require("game." .. vehicleType)
+        if not VehicleClass then
+            print("ERROR: Could not find vehicle class for type: " .. vehicleType)
+            return
+        end
+
         local new_id = #self.vehicles + 1
-        -- Create a new Bike, not a generic Vehicle
-        local new_vehicle = Bike:new(new_id, self.depot_plot, game)
+        local new_vehicle = VehicleClass:new(new_id, self.depot_plot, game)
         table.insert(self.vehicles, new_vehicle)
-        print("New vehicle #" .. new_id .. " purchased.")
+        print("New " .. vehicleType .. " #" .. new_id .. " purchased.")
     end
 end
 
 function Entities:update(dt, game)
-    -- Update trip speed bonuses
+    -- Tick down the speed bonus for ALL active trips
+    -- 1. Pending trips
     for _, trip in ipairs(self.trips.pending) do
-        trip.speed_bonus = trip.speed_bonus - dt
-        if trip.speed_bonus < 0 then
-            trip.speed_bonus = 0
+        trip.speed_bonus = math.max(0, trip.speed_bonus - dt)
+    end
+    -- 2. Trips assigned to vehicles (in queue or cargo)
+    for _, vehicle in ipairs(self.vehicles) do
+        for _, trip in ipairs(vehicle.trip_queue) do
+            trip.speed_bonus = math.max(0, trip.speed_bonus - dt)
+        end
+        for _, trip in ipairs(vehicle.cargo) do
+            trip.speed_bonus = math.max(0, trip.speed_bonus - dt)
         end
     end
 
@@ -60,7 +76,7 @@ function Entities:update(dt, game)
     for _, client in ipairs(self.clients) do
         client:update(dt, game)
     end
-
+    
     -- Update vehicles
     for _, vehicle in ipairs(self.vehicles) do
         vehicle:update(dt, game)

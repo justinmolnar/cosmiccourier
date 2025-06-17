@@ -6,6 +6,8 @@ function love.conf(t)
     t.window.width = 1280
     t.window.height = 720
     
+    t.console = true -- ADD THIS LINE to enable the console window
+
     -- We don't need the physics module for this game, so we can disable it
     -- to save a little memory.
     t.modules.physics = false

@@ -3,38 +3,157 @@ local UI = {}
 UI.__index = UI
 
 function UI:new(C, game)
+    local Accordion = require("ui.accordion")
     local instance = setmetatable({}, UI)
     
     instance.hovered_trip_index = nil
-
-    local p = C.UI.PADDING
-    local w = C.UI.SIDEBAR_WIDTH - (p * 2)
-    instance.buttons = {
-        { id="buy_bike",         event="ui_buy_bike_clicked",         x=p, y=C.UI.BUTTONS_Y_START + (C.UI.BUTTONS_Y_STEP * 0), w=w, h=C.UI.BUTTON_HEIGHT, text="Buy Bike",         cost_key="bike" },
-        { id="upgrade_speed",    event="ui_upgrade_speed_clicked",    x=p, y=C.UI.BUTTONS_Y_START + (C.UI.BUTTONS_Y_STEP * 1), w=w, h=C.UI.BUTTON_HEIGHT, text="Upgrade Speed",    cost_key="speed" },
-        { id="upgrade_capacity", event="ui_upgrade_capacity_clicked", x=p, y=C.UI.BUTTONS_Y_START + (C.UI.BUTTONS_Y_STEP * 2), w=w, h=C.UI.BUTTON_HEIGHT, text="Upgrade Capacity",   cost_key="capacity" },
-        { id="upgrade_frenzy",   event="ui_upgrade_frenzy_clicked",   x=p, y=C.UI.BUTTONS_Y_START + (C.UI.BUTTONS_Y_STEP * 3), w=w, h=C.UI.BUTTON_HEIGHT, text="Upgrade Frenzy Time",cost_key="frenzy_duration" },
-        { id="buy_client",       event="ui_buy_client_clicked",       x=p, y=C.UI.BUTTONS_Y_START + (C.UI.BUTTONS_Y_STEP * 5), w=w, h=C.UI.BUTTON_HEIGHT, text="New Client",       cost_key="client" },
-        { id="buy_autodisp",     event="ui_buy_autodisp_clicked",     x=p, y=C.UI.BUTTONS_Y_START + (C.UI.BUTTONS_Y_STEP * 6), w=w, h=C.UI.BUTTON_HEIGHT, text="Auto-Dispatcher",  cost_key="auto_dispatch" },
-    }
+    instance.hovered_upgrade_id = nil
+    
+    -- Create instances of the accordion for all our lists
+    instance.trips_accordion = Accordion:new("Pending Trips", true, 120)
+    instance.upgrades_accordion = Accordion:new("Upgrades", true, 250)
+    instance.vehicles_accordion = Accordion:new("Vehicles", false, 150) -- Starts closed
+    instance.clients_accordion = Accordion:new("Clients", false, 150) -- Starts closed
+    
+    instance.sorted_upgrades = {}
+    
+    -- This will hold the calculated positions of UI elements each frame
+    instance.layout_cache = {}
 
     return instance
 end
 
+function UI:handle_scroll(dy)
+    local mx, my = love.mouse.getPosition()
+    -- Give each accordion a chance to handle the scroll
+    if self.trips_accordion:handle_scroll(mx, my, dy) then return end
+    if self.upgrades_accordion:handle_scroll(mx, my, dy) then return end
+end
+
+function UI:handle_mouse_down(x, y, button)
+    if self.trips_accordion:handle_mouse_down(x, y, button) then return true end
+    if self.upgrades_accordion:handle_mouse_down(x, y, button) then return true end
+    if self.vehicles_accordion:handle_mouse_down(x, y, button) then return true end
+    if self.clients_accordion:handle_mouse_down(x, y, button) then return true end
+    return false
+end
+
+function UI:handle_mouse_up(x, y, button)
+    self.trips_accordion:handle_mouse_up(x, y, button)
+    self.upgrades_accordion:handle_mouse_up(x, y, button)
+    self.vehicles_accordion:handle_mouse_up(x, y, button)
+    self.clients_accordion:handle_mouse_up(x, y, button)
+end
+
 function UI:update(dt, game)
     local C = game.C
+    local state = game.state
     local mx, my = love.mouse.getPosition()
-    self.hovered_trip_index = nil -- Reset each frame
-
-    -- This check is now self-contained in the UI module
-    if mx < C.UI.SIDEBAR_WIDTH then
-        -- FIX: Get trips from the correct module (entities, not state)
-        for i, trip in ipairs(game.entities.trips.pending) do
-            local y_pos = C.UI.TRIP_LIST_Y_START + (i * C.UI.TRIP_LIST_Y_STEP)
-            if my > y_pos and my < y_pos + C.UI.TRIP_LIST_Y_STEP and mx > C.UI.PADDING and mx < C.UI.SIDEBAR_WIDTH - C.UI.PADDING then
-                self.hovered_trip_index = i
-                break
+    
+    local available_upgrades = {}
+    for id, upgrade_data in pairs(state.AllUpgrades) do
+        local current_level = state.upgrades_purchased[id] or 0
+        if current_level < upgrade_data.max_level then
+            local should_show = false
+            if current_level > 0 then should_show = true
+            else
+                if state.upgrades_discovered[id] then should_show = true
+                else
+                    if state.money >= (upgrade_data.cost * 0.75) then
+                        state.upgrades_discovered[id] = "discovered"
+                        should_show = true
+                    end
+                end
+                if state.upgrades_discovered[id] == "discovered" and state.money >= (upgrade_data.cost * 0.90) then
+                    state.upgrades_discovered[id] = "price_revealed"
+                end
             end
+            if should_show then
+                local cost = upgrade_data.cost * (upgrade_data.cost_multiplier ^ current_level)
+                table.insert(available_upgrades, { id = id, data = upgrade_data, display_cost = cost, level = current_level })
+            end
+        end
+    end
+    table.sort(available_upgrades, function(a, b) return a.display_cost < b.display_cost end)
+    self.sorted_upgrades = available_upgrades
+
+    self.trips_accordion:update(#game.entities.trips.pending * C.UI.TRIP_LIST_Y_STEP, my)
+    self.upgrades_accordion:update(#self.sorted_upgrades * 55, my)
+    self.vehicles_accordion:update((#game.entities.vehicles * 30) + 40, my)
+    self.clients_accordion:update((#game.entities.clients * 20) + 40, my)
+
+    self:_doLayout(game)
+    
+    self.hovered_trip_index, self.hovered_upgrade_id, self.hovered_vehicle_id, self.hovered_client_id = nil, nil, nil, nil
+    if mx < C.UI.SIDEBAR_WIDTH then
+        if self.trips_accordion.is_open and mx > self.trips_accordion.x and mx < self.trips_accordion.x + self.trips_accordion.w and my > self.trips_accordion.y + self.trips_accordion.header_h and my < self.trips_accordion.y + self.trips_accordion.header_h + self.trips_accordion.content_h then
+            local y_in_content = my - (self.trips_accordion.y + self.trips_accordion.header_h) + self.trips_accordion.scroll_y
+            local index = math.floor(y_in_content / C.UI.TRIP_LIST_Y_STEP) + 1
+            if index > 0 and index <= #game.entities.trips.pending then self.hovered_trip_index = index end
+        end
+        if self.upgrades_accordion.is_open and mx > self.upgrades_accordion.x and mx < self.upgrades_accordion.x + self.upgrades_accordion.w and my > self.upgrades_accordion.y + self.upgrades_accordion.header_h and my < self.upgrades_accordion.y + self.upgrades_accordion.header_h + self.upgrades_accordion.content_h then
+            local y_in_content = my - (self.upgrades_accordion.y + self.upgrades_accordion.header_h) + self.upgrades_accordion.scroll_y
+            local index = math.floor(y_in_content / 55) + 1
+            if index > 0 and index <= #self.sorted_upgrades then self.hovered_upgrade_id = self.sorted_upgrades[index].id end
+        end
+    end
+end
+
+function UI:_doLayout(game)
+    self.layout_cache = {
+        trips = {},
+        upgrades = {},
+        vehicles = {},
+        clients = {},
+        buttons = {}
+    }
+    local C = game.C
+    local p = C.UI.PADDING
+    local w = C.UI.SIDEBAR_WIDTH - (p * 2)
+    local y_cursor = 100
+
+    -- == Trips Accordion ==
+    self.trips_accordion.x, self.trips_accordion.y, self.trips_accordion.w = p, y_cursor, w
+    local content_y = y_cursor + self.trips_accordion.header_h
+    if self.trips_accordion.is_open then
+        for i, trip in ipairs(game.entities.trips.pending) do
+            self.layout_cache.trips[i] = { trip = trip, x = p, y = content_y + ((i-1) * C.UI.TRIP_LIST_Y_STEP), w = w, h = C.UI.TRIP_LIST_Y_STEP }
+        end
+    end
+    y_cursor = y_cursor + self.trips_accordion.header_h + (self.trips_accordion.is_open and self.trips_accordion.content_h or 0) + 10
+
+    -- == Upgrades Accordion ==
+    self.upgrades_accordion.x, self.upgrades_accordion.y, self.upgrades_accordion.w = p, y_cursor, w
+    content_y = y_cursor + self.upgrades_accordion.header_h
+    if self.upgrades_accordion.is_open then
+        for i, upgrade_entry in ipairs(self.sorted_upgrades) do
+            self.layout_cache.upgrades[upgrade_entry.id] = { upgrade_entry = upgrade_entry, x = p, y = content_y + ((i-1) * 55), w = w, h = 50 }
+        end
+    end
+    y_cursor = y_cursor + self.upgrades_accordion.header_h + (self.upgrades_accordion.is_open and self.upgrades_accordion.content_h or 0) + 10
+
+    -- == Vehicles Accordion ==
+    self.vehicles_accordion.x, self.vehicles_accordion.y, self.vehicles_accordion.w = p, y_cursor, w
+    content_y = y_cursor + self.vehicles_accordion.header_h
+    if self.vehicles_accordion.is_open then
+        -- Button is now at the top of the content area
+        self.layout_cache.buttons.hire_vehicle = { x = p + 5, y = content_y + 5, w = w - 10, h = 30 }
+        local list_start_y = content_y + 40 -- List starts below the button
+        for i, vehicle in ipairs(game.entities.vehicles) do
+            self.layout_cache.vehicles[i] = { vehicle = vehicle, x = p, y = list_start_y + ((i-1) * 30), w = w, h = 30 }
+        end
+    end
+    y_cursor = y_cursor + self.vehicles_accordion.header_h + (self.vehicles_accordion.is_open and self.vehicles_accordion.content_h or 0) + 10
+
+    -- == Clients Accordion ==
+    self.clients_accordion.x, self.clients_accordion.y, self.clients_accordion.w = p, y_cursor, w
+    content_y = y_cursor + self.clients_accordion.header_h
+    if self.clients_accordion.is_open then
+        -- Button is now at the top of the content area
+        self.layout_cache.buttons.buy_client = { x = p + 5, y = content_y + 5, w = w - 10, h = 30 }
+        local list_start_y = content_y + 40 -- List starts below the button
+        for i, client in ipairs(game.entities.clients) do
+            self.layout_cache.clients[i] = { client = client, x = p, y = list_start_y + ((i-1) * 20), w = w, h = 20 }
         end
     end
 end
@@ -42,104 +161,89 @@ end
 function UI:draw(game)
     local C = game.C
     local state = game.state
-    local entities = game.entities -- A shortcut to the entities module
+    local entities = game.entities
     love.graphics.setFont(game.fonts.ui)
     love.graphics.setColor(1, 1, 1)
 
-    -- Draw main stats at the top of the sidebar
-    love.graphics.print("Money: $" .. math.floor(state.money), C.UI.PADDING, C.UI.STATS_Y_START + (C.UI.STATS_Y_STEP * 0))
-    love.graphics.print("Bikes: " .. #entities.vehicles, C.UI.PADDING, C.UI.STATS_Y_START + (C.UI.STATS_Y_STEP * 1))
-    love.graphics.print("Clients: " .. #entities.clients, C.UI.PADDING, C.UI.STATS_Y_START + (C.UI.STATS_Y_STEP * 2))
-    
+    love.graphics.print("Money: $" .. math.floor(state.money), 10, 10)
+    love.graphics.print("Bikes: " .. #entities.vehicles, 10, 30)
+    love.graphics.print("Clients: " .. #entities.clients, 10, 50)
     if state.rush_hour.active then
         love.graphics.setColor(1,1,0)
-        local timer_text = string.format("RUSH HOUR: %ds", math.ceil(state.rush_hour.timer))
-        love.graphics.printf(timer_text, 0, C.UI.STATS_Y_START + (C.UI.STATS_Y_STEP * 3.5), C.UI.SIDEBAR_WIDTH, "center")
-        love.graphics.setColor(1,1,1)
+        love.graphics.printf(string.format("RUSH HOUR: %ds", math.ceil(state.rush_hour.timer)), 0, 70, C.UI.SIDEBAR_WIDTH, "center")
     end
 
-    love.graphics.line(C.UI.PADDING, C.UI.DIVIDER_Y, C.UI.SIDEBAR_WIDTH - C.UI.PADDING, C.UI.DIVIDER_Y)
-
-    -- Draw Pending Trips UI
-    love.graphics.print("Pending Trips:", C.UI.PADDING, C.UI.TRIP_LIST_Y_START)
-    for i, trip in ipairs(entities.trips.pending) do
-        local y_pos = C.UI.TRIP_LIST_Y_START + (i * C.UI.TRIP_LIST_Y_STEP)
-        -- Create the dynamic text showing the base + ticking bonus
-        local bonus = math.floor(trip.speed_bonus)
-        local trip_text = string.format("Trip %d: $%d + $%d", i, trip.base_payout, bonus)
-        
-        if i == self.hovered_trip_index then
-            local hover_color = C.MAP.COLORS.HOVER
-            love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.2)
-            love.graphics.rectangle("fill", C.UI.PADDING / 2, y_pos - 2, C.UI.SIDEBAR_WIDTH - C.UI.PADDING, C.UI.TRIP_LIST_Y_STEP)
-            love.graphics.setColor(1, 1, 1)
-        end
-
-        love.graphics.print(trip_text, C.UI.PADDING + 5, y_pos)
-    end
-
-    -- Draw selected vehicle info
-    if entities.selected_vehicle then
-        local v = entities.selected_vehicle
-        local status_name = v.state and v.state.name or "Unknown"
-        local capacity_text = string.format("Bike %d | Status: %s | Capacity: %d/%d", v.id, status_name, #v.cargo + #v.trip_queue, state.upgrades.vehicle_capacity)
-        love.graphics.print(capacity_text, C.UI.PADDING, love.graphics.getHeight() - (C.UI.PADDING * 8))
-        love.graphics.print("Cargo (" .. #v.cargo .. "):", C.UI.PADDING, love.graphics.getHeight() - (C.UI.PADDING * 7))
-        love.graphics.print("Queue (" .. #v.trip_queue .. "):", C.UI.PADDING, love.graphics.getHeight() - (C.UI.PADDING * 5))
-    end
-
-    -- Draw UI Buttons
-    for _, btn in ipairs(self.buttons) do
-        local cost = state.costs[btn.cost_key]
-        local btn_text = ""
-        if btn.id == "upgrade_capacity" then
-            btn_text = string.format("%s (%d->%d)", btn.text, state.upgrades.vehicle_capacity, state.upgrades.vehicle_capacity + 1)
-        elseif btn.id == "upgrade_frenzy" then
-            btn_text = string.format("%s (%ds->%ds)", btn.text, state.upgrades.frenzy_duration, state.upgrades.frenzy_duration + C.EVENTS.DURATION_UPGRADE_AMOUNT)
-        else
-            btn_text = btn.text
-        end
-
-        if state.money < cost then
-            love.graphics.setColor(0.5, 0.5, 0.5)
-        else
-            love.graphics.setColor(1, 1, 1)
-        end
-        love.graphics.rectangle("line", btn.x, btn.y, btn.w, btn.h)
-
-        if btn.id == "buy_autodisp" and state.upgrades.auto_dispatch_unlocked then
-            love.graphics.printf("PURCHASED", btn.x, btn.y + 8, btn.w, "center")
-        else
-            local cost_text = string.format("%s ($%d)", btn_text, cost)
-            love.graphics.printf(cost_text, btn.x, btn.y + 8, btn.w, "center")
+    self.trips_accordion:beginDraw()
+    if self.trips_accordion.is_open then
+        for i, l in ipairs(self.layout_cache.trips) do
+            love.graphics.setColor(1,1,1)
+            local bonus = math.floor(l.trip.speed_bonus)
+            local text = string.format("Trip %d: $%d + $%d", i, l.trip.base_payout, bonus)
+            if self.hovered_trip_index == i then love.graphics.setColor(1, 1, 0, 0.2); love.graphics.rectangle("fill", l.x, l.y-2, l.w, l.h+4) end
+            love.graphics.setColor(1,1,1); love.graphics.print(text, l.x + 5, l.y)
         end
     end
+    self.trips_accordion:endDraw(); self.trips_accordion:drawScrollbar()
+    
+    self.upgrades_accordion:beginDraw()
+    if self.upgrades_accordion.is_open then
+        for id, l in pairs(self.layout_cache.upgrades) do
+            local upgrade_entry = l.upgrade_entry
+            local cost = upgrade_entry.display_cost; local upgrade = upgrade_entry.data; local level = upgrade_entry.level
+            if self.hovered_upgrade_id == id then love.graphics.setColor(1, 1, 0, 0.1); love.graphics.rectangle("fill", l.x, l.y, l.w, l.h) end
+            if state.money < cost then love.graphics.setColor(0.5,0.5,0.5) else love.graphics.setColor(1,1,1) end
+            love.graphics.setFont(game.fonts.emoji_ui); love.graphics.print(upgrade.icon, l.x+5, l.y+5); love.graphics.setFont(game.fonts.ui)
+            love.graphics.print(upgrade.name, l.x+45, l.y+7); love.graphics.setFont(game.fonts.ui_small); love.graphics.print(upgrade.description, l.x+45, l.y+28)
+            local text = level > 0 and ("$"..math.floor(cost)) or (state.upgrades_discovered[id] == "price_revealed" and ("$"..math.floor(cost)) or "???")
+            love.graphics.setFont(game.fonts.ui); love.graphics.printf(text, l.x, l.y+15, l.w-10, "right")
+        end
+    end
+    self.upgrades_accordion:endDraw(); self.upgrades_accordion:drawScrollbar()
+
+    self.vehicles_accordion:beginDraw()
+    if self.vehicles_accordion.is_open then
+        for i, l in ipairs(self.layout_cache.vehicles) do
+            local v = l.vehicle; local cap = string.format("%d/%d", #v.cargo + #v.trip_queue, state.upgrades.vehicle_capacity)
+            local text = string.format("Bike %d | %s | %s", v.id, v.state.name, cap)
+            love.graphics.setColor(1,1,1); love.graphics.print(text, l.x + 5, l.y + 5)
+        end
+        local btn = self.layout_cache.buttons.hire_vehicle
+        if btn then love.graphics.setColor(1,1,1); love.graphics.rectangle("line", btn.x, btn.y, btn.w, btn.h); love.graphics.printf("Hire New Bike ($"..state.costs.bike..")", btn.x, btn.y+8, btn.w, "center") end
+    end
+    self.vehicles_accordion:endDraw(); self.vehicles_accordion:drawScrollbar()
+
+    self.clients_accordion:beginDraw()
+    if self.clients_accordion.is_open then
+        for i, l in ipairs(self.layout_cache.clients) do
+            love.graphics.setColor(1,1,1); love.graphics.print("Client #"..i, l.x+5, l.y)
+        end
+        local btn = self.layout_cache.buttons.buy_client
+        if btn then love.graphics.setColor(1,1,1); love.graphics.rectangle("line", btn.x, btn.y, btn.w, btn.h); love.graphics.printf("Market for New Client ($"..state.costs.client..")", btn.x, btn.y+8, btn.w, "center") end
+    end
+    self.clients_accordion:endDraw(); self.clients_accordion:drawScrollbar()
 end
 
 function UI:handle_click(x, y, game)
-    local C = game.C
-    local entities = game.entities -- Get entities module
+    if self.trips_accordion:handle_click(x, y) then return true end
+    if self.upgrades_accordion:handle_click(x, y) then return true end
+    if self.vehicles_accordion:handle_click(x, y) then return true end
+    if self.clients_accordion:handle_click(x, y) then return true end
 
-    -- First, check for clicks on the pending trips list
-    if x > C.UI.PADDING and x < C.UI.SIDEBAR_WIDTH - C.UI.PADDING then 
-        -- Reference the trips list from the entities module
-        for i, trip in ipairs(entities.trips.pending) do
-            local y_pos = C.UI.TRIP_LIST_Y_START + (i * C.UI.TRIP_LIST_Y_STEP)
-            if y > y_pos and y < y_pos + C.UI.TRIP_LIST_Y_STEP then
-                -- Publish an event with the necessary data
-                game.EventBus:publish("ui_assign_trip_clicked", i)
-                return true
-            end
-        end
+    -- Handle clicks on content within open accordions
+    if self.hovered_trip_index then game.EventBus:publish("ui_assign_trip_clicked", self.hovered_trip_index); return true end
+    if self.hovered_upgrade_id then game.EventBus:publish("ui_purchase_upgrade_clicked", self.hovered_upgrade_id); return true end
+
+    -- Handle clicks on the new buttons
+    local hire_btn = self.layout_cache.buttons.hire_vehicle
+    if hire_btn and x > hire_btn.x and x < hire_btn.x + hire_btn.w and y > hire_btn.y and y < hire_btn.y + hire_btn.h then
+        game.EventBus:publish("ui_buy_vehicle_clicked", "bike")
+        return true
     end
 
-    -- If no trip was clicked, check for clicks on the main UI buttons
-    for _, btn in ipairs(self.buttons) do
-        if x > btn.x and x < btn.x + btn.w and y > btn.y and y < btn.y + btn.h then
-            -- Publish the generic event for the clicked button
-            game.EventBus:publish(btn.event)
-            return true
-        end
+    local client_btn = self.layout_cache.buttons.buy_client
+    if client_btn and x > client_btn.x and x < client_btn.x + client_btn.w and y > client_btn.y and y < client_btn.y + client_btn.h then
+        game.EventBus:publish("ui_buy_client_clicked")
+        return true
     end
 
     return false
