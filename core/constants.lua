@@ -32,11 +32,15 @@ local C = {
         NUM_SECONDARY_ROADS  = 40,
         
         COLORS = {
-            GRASS   = {0.2, 0.6, 0.25},
-            ROAD    = {0.2, 0.2, 0.2},
-            PLOT    = {0.7, 0.7, 0.7},
-            UI_BG   = {0.1, 0.1, 0.15},
-            HOVER   = {1, 1, 0},
+            GRASS           = {0.2, 0.6, 0.25},
+            ROAD            = {0.2, 0.2, 0.2},
+            PLOT            = {0.7, 0.7, 0.7},
+            UI_BG           = {0.1, 0.1, 0.15},
+            HOVER           = {1, 1, 0},
+            DOWNTOWN_PLOT   = {0.85, 0.85, 0.8},
+            DOWNTOWN_ROAD   = {0.3, 0.3, 0.1},
+            -- *** ADD THIS NEW COLOR FOR DEBUGGING ***
+            DEBUG_NODE      = {0, 1, 0}, -- Bright Green
         },
 
         SCALES = {

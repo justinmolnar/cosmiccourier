@@ -7,10 +7,10 @@ local Districts = {
         {
             name = "downtown_core",
             type = "commercial",
-            x1_percent = 0.45, y1_percent = 0.45,
-            x2_percent = 0.55, y2_percent = 0.55,
-            density = 0.9,
-            road_density = 0.1,
+            x1_percent = 0.40, y1_percent = 0.40,
+            x2_percent = 0.60, y2_percent = 0.60,
+            density = 0.95,
+            road_density = 0.2,
             center_x_percent = 0.5,
             center_y_percent = 0.5
         },
@@ -97,10 +97,11 @@ local Districts = {
         }
     },
 
+    -- NEW, DENSER SPACING
     ROAD_SPACING = {
-        industrial = 30,    -- Much wider spacing for city scale
-        commercial = 20,
-        residential = 25,
+        industrial = 25,    -- Wider spacing for industrial
+        commercial = 8,     -- Very tight grid for downtown/commercial
+        residential = 15,   -- Medium density for suburbs
         park = 40
     }
 }

@@ -17,6 +17,9 @@ function love.load()
         zoom_controls = nil,
     }
     
+    -- *** ADD THIS LINE TO FIX THE CACHING ISSUE ***
+    Game.map.scale_grids = {}
+
     Game.state = require("core.state"):new(C, Game)
     Game.ui = require("ui.ui"):new(C, Game)
     Game.zoom_controls = require("ui.zoom_controls"):new(C)
