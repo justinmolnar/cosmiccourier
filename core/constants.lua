@@ -1,9 +1,4 @@
--- core/constants.lua
--- A central file for all game constants and configuration values.
-
 local C = {
-    -- This is the C.UI table object. Replace the existing UI table inside your core/constants.lua file.
--- This is the C.UI table object. Replace the existing UI table inside your core/constants.lua file.
     UI = {
         SIDEBAR_WIDTH       = 280,
         FONT_PATH_MAIN      = "assets/fonts/arial.ttf",
@@ -11,9 +6,8 @@ local C = {
         FONT_SIZE_UI        = 16,
         FONT_SIZE_UI_SMALL  = 12,
         FONT_SIZE_EMOJI     = 28,
-        FONT_SIZE_EMOJI_UI  = 32, -- ADD THIS LINE for a crisp UI icon
+        FONT_SIZE_EMOJI_UI  = 32,
         
-        -- Layout numbers for the sidebar
         PADDING             = 10,
         STATS_Y_START       = 10,
         STATS_Y_STEP        = 20,
@@ -26,10 +20,16 @@ local C = {
     },
 
     MAP = {
-        GRID_WIDTH          = 62,
-        GRID_HEIGHT         = 45,
-        TILE_SIZE           = 16,
-        NUM_SECONDARY_ROADS = 40,
+        -- Downtown scale
+        DOWNTOWN_GRID_WIDTH  = 62,
+        DOWNTOWN_GRID_HEIGHT = 45,
+        
+        -- City scale (much larger area)
+        CITY_GRID_WIDTH      = 372,  -- 6x wider
+        CITY_GRID_HEIGHT     = 270,  -- 6x taller
+        
+        TILE_SIZE            = 2,    -- Much smaller tiles for city view
+        NUM_SECONDARY_ROADS  = 40,
         
         COLORS = {
             GRASS   = {0.2, 0.6, 0.25},
@@ -37,22 +37,48 @@ local C = {
             PLOT    = {0.7, 0.7, 0.7},
             UI_BG   = {0.1, 0.1, 0.15},
             HOVER   = {1, 1, 0},
-        }
+        },
+
+        SCALES = {
+            DOWNTOWN = 1,
+            CITY = 2,
+            REGION = 3,
+            PLANET = 4,
+        },
+
+        SCALE_NAMES = {
+            [1] = "Downtown Core",
+            [2] = "Metropolitan Area", 
+            [3] = "Regional Network",
+            [4] = "Planetary Grid",
+        },
     },
 
     GAMEPLAY = {
         INITIAL_MONEY           = 150,
         INITIAL_BIKE_SPEED      = 80,
-        BASE_TRIP_PAYOUT        = 50,  -- Renamed from TRIP_PAYOUT
-        INITIAL_SPEED_BONUS     = 100, -- The starting value of the speed bonus for each trip
+        BASE_TRIP_PAYOUT        = 50,
+        INITIAL_SPEED_BONUS     = 100,
         TRIP_GENERATION_MIN_SEC = 10,
         TRIP_GENERATION_MAX_SEC = 20,
         MAX_PENDING_TRIPS       = 10,
-        AUTODISPATCH_INTERVAL   = 1, -- in seconds
+        AUTODISPATCH_INTERVAL   = 1,
+        BONUS_DECAY_RATE        = 1.0,
+        MIN_DELTA_CALCULATION   = 0.1,
+        CURRENT_MAP_SCALE       = 1,
+    },
+
+    ZOOM = {
+        BUTTONS_APPEAR_THRESHOLD = 75000,
+        PRICE_REVEAL_THRESHOLD   = 90000,
+        METRO_LICENSE_COST       = 50000,
+        ZOOM_BUTTON_SIZE         = 30,
+        ZOOM_BUTTON_MARGIN       = 10,
+        TRANSITION_DURATION      = 0.8,
+        ZOOM_SCALE_FACTOR        = 3.0,
     },
 
     COSTS = {
-        -- Initial costs
         BIKE            = 150,
         SPEED           = 75,
         CLIENT          = 500,
@@ -60,30 +86,28 @@ local C = {
         CAPACITY        = 2500,
         FRENZY_DURATION = 5000,
 
-        -- Cost increase multipliers
         BIKE_MULT       = 1.15,
         SPEED_MULT      = 1.5,
         CLIENT_MULT     = 1.2,
         CAPACITY_MULT   = 1.5,
         FRENZY_DURATION_MULT = 1.5,
 
-        -- Upgrade multipliers
         SPEED_UPGRADE_MULT = 1.2,
     },
 
     EVENTS = {
-        SPAWN_MIN_SEC           = 60,  -- Minimum time in seconds before a new clickable appears
-        SPAWN_MAX_SEC           = 120, -- Maximum time
-        LIFESPAN_SEC            = 15,  -- How long the clickable stays on screen before disappearing
-        INITIAL_DURATION_SEC    = 15,  -- How long the frenzy effect lasts initially
-        DURATION_UPGRADE_AMOUNT = 5,   -- How many seconds each upgrade adds
-        FRENZY_TRIP_MIN_SEC     = 1,   -- The faster trip generation rate
+        SPAWN_MIN_SEC           = 60,
+        SPAWN_MAX_SEC           = 120,
+        LIFESPAN_SEC            = 15,
+        INITIAL_DURATION_SEC    = 15,
+        DURATION_UPGRADE_AMOUNT = 5,
+        FRENZY_TRIP_MIN_SEC     = 1,
         FRENZY_TRIP_MAX_SEC     = 3,
     },
 
     EFFECTS = {
-        PAYOUT_TEXT_LIFESPAN_SEC = 3,   -- How long the text stays on screen
-        PAYOUT_TEXT_FLOAT_SPEED  = -20, -- How fast the text floats upwards (negative is up)
+        PAYOUT_TEXT_LIFESPAN_SEC = 3,
+        PAYOUT_TEXT_FLOAT_SPEED  = -20,
     },
 }
 

@@ -24,7 +24,7 @@ function Entities:init(game)
 
     -- Create the first Bike's depot
     self.depot_plot = game.map:getRandomBuildingPlot()
-    self:addVehicle(game)
+    self:addVehicle(game, "bike")  -- ADD "bike" parameter
 end
 
 function Entities:addClient(game)
@@ -57,20 +57,26 @@ function Entities:addVehicle(game, vehicleType)
 end
 
 function Entities:update(dt, game)
-    -- Tick down the speed bonus for ALL active trips
-    -- 1. Pending trips
+    local C_GAMEPLAY = game.C.GAMEPLAY
+    
+    -- Only decay bonuses for trips that are NOT in transit
+    -- Pending trips (waiting for pickup)
     for _, trip in ipairs(self.trips.pending) do
-        trip.speed_bonus = math.max(0, trip.speed_bonus - dt)
-    end
-    -- 2. Trips assigned to vehicles (in queue or cargo)
-    for _, vehicle in ipairs(self.vehicles) do
-        for _, trip in ipairs(vehicle.trip_queue) do
-            trip.speed_bonus = math.max(0, trip.speed_bonus - dt)
-        end
-        for _, trip in ipairs(vehicle.cargo) do
-            trip.speed_bonus = math.max(0, trip.speed_bonus - dt)
+        if not trip.is_in_transit then
+            trip.speed_bonus = math.max(0, trip.speed_bonus - (dt * C_GAMEPLAY.BONUS_DECAY_RATE))
+            trip.last_update_time = love.timer.getTime()
         end
     end
+    
+    -- Future: Hub inventories would also be checked here
+    -- for _, hub in ipairs(self.hubs) do
+    --     for _, trip in ipairs(hub.inventory) do
+    --         if not trip.is_in_transit then
+    --             trip.speed_bonus = math.max(0, trip.speed_bonus - (dt * C_GAMEPLAY.BONUS_DECAY_RATE))
+    --             trip.last_update_time = love.timer.getTime()
+    --         end
+    --     end
+    -- end
 
     -- Update clients
     for _, client in ipairs(self.clients) do

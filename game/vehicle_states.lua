@@ -144,9 +144,12 @@ function States.DoPickup:enter(vehicle, game)
     end
     vehicle.trip_queue = remaining_trips
     for _, trip in ipairs(trips_to_pickup) do
+        -- FREEZE the trip as it enters vehicle cargo
+        trip:freeze()
         table.insert(vehicle.cargo, trip)
     end
-    print(string.format("Bike %d picked up %d packages.", vehicle.id, #trips_to_pickup))
+    
+    print(string.format("Bike %d picked up %d packages (frozen %d timers).", vehicle.id, #trips_to_pickup, #trips_to_pickup))
     
     -- FIX: After picking up, immediately decide the next state here.
     if #vehicle.cargo > 0 then
@@ -210,23 +213,49 @@ function States.DoDropoff:enter(vehicle, game)
         local destination_road_tile = game.map:findNearestRoadTile(plot)
 
         if destination_road_tile and current_pos.x == destination_road_tile.x and current_pos.y == destination_road_tile.y then
-            -- Calculate the final total payout
-            local final_payout = trip.base_payout + trip.speed_bonus
             
-            -- Publish an event with all the relevant data from the delivery
-            local event_data = {
-                payout = final_payout,
-                bonus = trip.speed_bonus,
-                base = trip.base_payout,
-                x = vehicle.px,
-                y = vehicle.py,
-                vehicle_id = vehicle.id
-            }
-            game.EventBus:publish("package_delivered", event_data)
+            -- THAW the trip and apply time-delta calculation
+            local time_in_transit = 0
+            if trip.is_in_transit then
+                time_in_transit = love.timer.getTime() - trip.transit_start_time
+                trip:thaw()
+                print(string.format("Trip thawed after %.2f seconds in transit", time_in_transit))
+            end
 
-            print(string.format("Bike %d delivered a package! Payout: $%d ($%d base + $%d bonus)", vehicle.id, math.floor(final_payout), trip.base_payout, math.floor(trip.speed_bonus)))
+            -- Check if this is the final destination or an intermediate stop
+            local is_final_destination = trip.current_leg >= #trip.legs
             
-            trip_index_to_remove = i
+            if is_final_destination then
+                -- FINAL DELIVERY: Calculate payout and complete the trip
+                local final_payout = trip.base_payout + trip.speed_bonus
+                
+                local event_data = {
+                    payout = final_payout,
+                    bonus = trip.speed_bonus,
+                    base = trip.base_payout,
+                    x = vehicle.px,
+                    y = vehicle.py,
+                    vehicle_id = vehicle.id,
+                    transit_time = time_in_transit
+                }
+                game.EventBus:publish("package_delivered", event_data)
+
+                print(string.format("Bike %d delivered package! $%d ($%d base + $%d bonus) - Transit: %.2fs", 
+                      vehicle.id, math.floor(final_payout), trip.base_payout, 
+                      math.floor(trip.speed_bonus), time_in_transit))
+                
+                trip_index_to_remove = i
+            else
+                -- INTERMEDIATE STOP: Move to next leg and add to hub/depot inventory
+                trip.current_leg = trip.current_leg + 1
+                print(string.format("Trip transferred to leg %d/%d at intermediate stop", trip.current_leg, #trip.legs))
+                
+                -- For now, since we don't have hubs yet, just put it back in pending trips
+                -- In the future, this would go to a hub inventory instead
+                table.insert(game.entities.trips.pending, trip)
+                trip_index_to_remove = i
+            end
+            
             break
         end
     end
@@ -235,16 +264,6 @@ function States.DoDropoff:enter(vehicle, game)
         table.remove(vehicle.cargo, trip_index_to_remove)
     end
 
-    -- This state was added in the bugfix step. It should remain.
-    if not States.DecideNextAction then
-        States.DecideNextAction = State:new()
-        States.DecideNextAction.name = "Deciding"
-        function States.DecideNextAction:enter(v, g)
-            if #v.cargo > 0 then v:changeState(States.GoToDropoff, g)
-            elseif #v.trip_queue > 0 then v:changeState(States.GoToPickup, g)
-            else v:changeState(States.ReturningToDepot, g) end
-        end
-    end
     vehicle:changeState(States.DecideNextAction, game)
 end
 --------------------------------------------------------------------------------

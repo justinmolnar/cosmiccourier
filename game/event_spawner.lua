@@ -8,7 +8,7 @@ function EventSpawner:new(C)
     local instance = setmetatable({}, EventSpawner)
     instance.C = C.EVENTS
     instance.spawn_timer = love.math.random(instance.C.SPAWN_MIN_SEC, instance.C.SPAWN_MAX_SEC)
-    instance.clickable = nil -- This will hold data like {x, y, timer}
+    instance.clickable = nil
     return instance
 end
 
@@ -41,12 +41,14 @@ end
 
 function EventSpawner:draw(game)
     if self.clickable then
-        love.graphics.push()
         love.graphics.setFont(game.fonts.emoji)
         love.graphics.setColor(1, 1, 1)
         -- Pulse effect to draw attention
         local scale = 1 + math.sin(love.timer.getTime() * 5) * 0.1
-        love.graphics.printf("☎️", self.clickable.x - (28*scale/2), self.clickable.y - (28*scale/2), 28 * scale, "center")
+        love.graphics.push()
+        love.graphics.translate(self.clickable.x, self.clickable.y)
+        love.graphics.scale(scale, scale)
+        love.graphics.print("☎️", -14, -14) -- Center the emoji
         love.graphics.pop()
     end
 end

@@ -1,6 +1,3 @@
--- main.lua
--- The main entry point. Owns all game systems.
-
 function love.load()
     local C = require("core.constants")
 
@@ -17,10 +14,12 @@ function love.load()
         fonts = {},
         debug_mode = false,
         ui = nil,
+        zoom_controls = nil,
     }
     
     Game.state = require("core.state"):new(C, Game)
     Game.ui = require("ui.ui"):new(C, Game)
+    Game.zoom_controls = require("ui.zoom_controls"):new(C)
 
     Game.map:generate()
     Game.entities:init(Game)
@@ -28,9 +27,9 @@ function love.load()
     local uiFont = love.graphics.newFont(C.UI.FONT_PATH_MAIN, C.UI.FONT_SIZE_UI)
     local uiFontSmall = love.graphics.newFont(C.UI.FONT_PATH_MAIN, C.UI.FONT_SIZE_UI_SMALL)
     local emojiFont = love.graphics.newFont(C.UI.FONT_PATH_EMOJI, C.UI.FONT_SIZE_EMOJI)
-    local emojiFontUI = love.graphics.newFont(C.UI.FONT_PATH_EMOJI, C.UI.FONT_SIZE_EMOJI_UI) -- Load large UI emoji font
+    local emojiFontUI = love.graphics.newFont(C.UI.FONT_PATH_EMOJI, C.UI.FONT_SIZE_EMOJI_UI)
 
-    uiFont:setFallbacks(emojiFontUI, emojiFont) -- Add fallbacks
+    uiFont:setFallbacks(emojiFontUI, emojiFont)
     uiFontSmall:setFallbacks(emojiFontUI, emojiFont)
     emojiFont:setFallbacks(uiFont, uiFontSmall)
     emojiFontUI:setFallbacks(uiFont, uiFontSmall)
@@ -38,7 +37,7 @@ function love.load()
     Game.fonts.ui = uiFont
     Game.fonts.ui_small = uiFontSmall
     Game.fonts.emoji = emojiFont
-    Game.fonts.emoji_ui = emojiFontUI -- Add large UI emoji font to the table
+    Game.fonts.emoji_ui = emojiFontUI
 
     love.graphics.setFont(Game.fonts.ui)
 end
@@ -57,18 +56,18 @@ function love.keypressed(key)
 end
 
 function love.mousewheelmoved(x, y)
-    -- Pass the vertical scroll amount (y) to the UI
     Game.ui:handle_scroll(y)
 end
 
 function love.update(dt)
-    -- Pass the Game object to all update functions that need it.
     Game.state:update(dt, Game) 
     Game.time:update(dt, Game)
+    Game.map:update(dt)
     Game.entities:update(dt, Game)
     Game.autodispatcher:update(dt, Game)
     Game.event_spawner:update(dt, Game)
-    Game.ui:update(dt, Game) -- This line was missing
+    Game.ui:update(dt, Game)
+    Game.zoom_controls:update(Game)
 end
 
 function love.draw()
@@ -83,23 +82,21 @@ function love.draw()
     
     Game.ui:draw(Game)
     
-    love.graphics.setScissor() -- Disable scissor
+    love.graphics.setScissor()
 
     -- === PASS 2: DRAW THE GAME WORLD ===
     love.graphics.setScissor(sidebar_w, 0, screen_w - sidebar_w, screen_h)
     
     love.graphics.push()
-    love.graphics.translate(sidebar_w, 0) -- Shift the coordinate system
+    love.graphics.translate(sidebar_w, 0)
     
     Game.map:draw()
     Game.entities:draw(Game)
+    Game.event_spawner:draw(Game)
 
-    -- Draw the hover line and pins HERE, inside the map's scissor and coordinate system.
     if Game.ui.hovered_trip_index then
-        -- FIX: Get trips from the correct module (entities, not state)
         local trip = Game.entities.trips.pending[Game.ui.hovered_trip_index]
         if trip and trip.legs[trip.current_leg] then
-            -- FIX: Get start/end plots from the trip's leg structure
             local leg = trip.legs[trip.current_leg]
             local start_node = Game.map:findNearestRoadTile(leg.start_plot)
             local end_node = Game.map:findNearestRoadTile(leg.end_plot)
@@ -129,29 +126,31 @@ function love.draw()
         end
     end
 
-    -- Draw the floating payout texts
     love.graphics.setFont(Game.fonts.ui)
     for _, ft in ipairs(Game.state.floating_texts) do
-        love.graphics.setColor(1, 1, 0.8, ft.alpha) -- Set color with fade
+        love.graphics.setColor(1, 1, 0.8, ft.alpha)
         love.graphics.printf(ft.text, ft.x, ft.y, 150, "center")
     end
     
     love.graphics.pop()
+    love.graphics.setScissor()
 
-    love.graphics.setScissor() -- Disable scissor
+    -- === PASS 3: DRAW ZOOM CONTROLS (outside scissor) ===
+    Game.zoom_controls:draw(Game)
 end
 
 function love.mousepressed(x, y, button)
-    -- First, give the UI a chance to handle the press for drag-scrolling
     if Game.ui:handle_mouse_down(x, y, button) then
-        -- The press was on a scrollbar, so the event is fully handled. Do nothing else.
         return
     end
 
-    -- If no scrollbar was dragged, proceed with normal click logic
     if button == 1 then
+        -- Check zoom controls first (they're outside the scissor area)
+        if Game.zoom_controls:handle_click(x, y, Game) then
+            return
+        end
+        
         if x < Game.C.UI.SIDEBAR_WIDTH then
-            -- FIX: Pass the correct x, y, and Game arguments
             Game.ui:handle_click(x, y, Game)
         else
             local world_x = x - Game.C.UI.SIDEBAR_WIDTH
@@ -165,5 +164,5 @@ function love.mousepressed(x, y, button)
 end
 
 function love.mousereleased(x, y, button)
-    Game.ui:handle_mouse_up(x, y, button) -- Notify UI of mouse release
+    Game.ui:handle_mouse_up(x, y, button)
 end

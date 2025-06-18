@@ -9,7 +9,6 @@ function State:new(C, game)
     
     instance.money = C.GAMEPLAY.INITIAL_MONEY
     
-    -- RE-ADD a costs table to track scaling costs for non-upgrade purchases
     instance.costs = {
         bike = C.COSTS.BIKE,
         client = C.COSTS.CLIENT,
@@ -32,12 +31,15 @@ function State:new(C, game)
     
     instance.rush_hour = { active = false, timer = 0 }
     instance.floating_texts = {}
+    instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
+    instance.metro_license_unlocked = false
 
     -- EVENT LISTENERS
     game.EventBus:subscribe("package_delivered", function(data)
         instance:addMoney(data.payout)
         local bonus_text = string.format("$%.f", data.bonus)
-        local payout_text = string.format("$%.f\n+ %s\nSpeed Bonus!", data.base, bonus_text)
+        local transit_text = data.transit_time and string.format(" (%.1fs)", data.transit_time) or ""
+        local payout_text = string.format("$%.f\n+ %s\nSpeed Bonus!%s", data.base, bonus_text, transit_text)
         table.insert(instance.floating_texts, { text = payout_text, x = data.x, y = data.y, timer = C.EFFECTS.PAYOUT_TEXT_LIFESPAN_SEC, alpha = 1 })
     end)
 
@@ -62,24 +64,47 @@ function State:new(C, game)
         end
     end)
 
-    -- UPDATE this listener to use and scale the cost
     game.EventBus:subscribe("ui_buy_vehicle_clicked", function(vehicleType)
         if not vehicleType then return end
         local cost = instance.costs.bike
         if instance.money >= cost then
             instance.money = instance.money - cost
-            instance.costs.bike = math.floor(instance.costs.bike * C.COSTS.BIKE_MULT) -- Increase cost for next time
+            instance.costs.bike = math.floor(instance.costs.bike * C.COSTS.BIKE_MULT)
             game.entities:addVehicle(game, vehicleType)
         end
     end)
 
-    -- UPDATE this listener to use and scale the cost
     game.EventBus:subscribe("ui_buy_client_clicked", function()
         local cost = instance.costs.client
         if instance.money >= cost then
             instance.money = instance.money - cost
-            instance.costs.client = math.floor(instance.costs.client * C.COSTS.CLIENT_MULT) -- Increase cost for next time
+            instance.costs.client = math.floor(instance.costs.client * C.COSTS.CLIENT_MULT)
             game.entities:addClient(game)
+        end
+    end)
+
+    game.EventBus:subscribe("ui_purchase_metro_license_clicked", function()
+        local cost = C.ZOOM.METRO_LICENSE_COST
+        print("DEBUG: Metro license purchase event received, cost:", cost, "money:", instance.money, "unlocked:", instance.metro_license_unlocked)
+        if instance.money >= cost and not instance.metro_license_unlocked then
+            instance.money = instance.money - cost
+            instance.metro_license_unlocked = true
+            print("Metropolitan Expansion License purchased! City-scale operations unlocked.")
+        end
+    end)
+
+    game.EventBus:subscribe("ui_zoom_out_clicked", function()
+        print("DEBUG: Zoom out event received, current scale:", game.map:getCurrentScale(), "unlocked:", instance.metro_license_unlocked)
+        if instance.metro_license_unlocked and game.map:getCurrentScale() == C.MAP.SCALES.DOWNTOWN then
+            game.map:setScale(C.MAP.SCALES.CITY)
+            print("Zoomed out to city view")
+        end
+    end)
+
+    game.EventBus:subscribe("ui_zoom_in_clicked", function()
+        if game.map:getCurrentScale() == C.MAP.SCALES.CITY then
+            game.map:setScale(C.MAP.SCALES.DOWNTOWN)
+            print("Zoomed in to downtown view")
         end
     end)
 

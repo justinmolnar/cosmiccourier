@@ -166,21 +166,28 @@ function UI:draw(game)
     love.graphics.setColor(1, 1, 1)
 
     love.graphics.print("Money: $" .. math.floor(state.money), 10, 10)
-    love.graphics.print("Bikes: " .. #entities.vehicles, 10, 30)
-    love.graphics.print("Clients: " .. #entities.clients, 10, 50)
+    love.graphics.print("Scale: " .. game.map:getScaleName(), 10, 30)
+    love.graphics.print("Bikes: " .. #entities.vehicles, 10, 50)
+    love.graphics.print("Clients: " .. #entities.clients, 10, 70)
     if state.rush_hour.active then
         love.graphics.setColor(1,1,0)
-        love.graphics.printf(string.format("RUSH HOUR: %ds", math.ceil(state.rush_hour.timer)), 0, 70, C.UI.SIDEBAR_WIDTH, "center")
+        love.graphics.printf(string.format("RUSH HOUR: %ds", math.ceil(state.rush_hour.timer)), 0, 90, C.UI.SIDEBAR_WIDTH, "center")
     end
 
     self.trips_accordion:beginDraw()
     if self.trips_accordion.is_open then
         for i, l in ipairs(self.layout_cache.trips) do
             love.graphics.setColor(1,1,1)
-            local bonus = math.floor(l.trip.speed_bonus)
-            local text = string.format("Trip %d: $%d + $%d", i, l.trip.base_payout, bonus)
-            if self.hovered_trip_index == i then love.graphics.setColor(1, 1, 0, 0.2); love.graphics.rectangle("fill", l.x, l.y-2, l.w, l.h+4) end
-            love.graphics.setColor(1,1,1); love.graphics.print(text, l.x + 5, l.y)
+            local current_bonus = math.floor(l.trip:getCurrentBonus())
+            local status_text = l.trip.is_in_transit and " (moving)" or ""
+            local text = string.format("Trip %d: $%d + $%d%s", i, l.trip.base_payout, current_bonus, status_text)
+            
+            if self.hovered_trip_index == i then 
+                love.graphics.setColor(1, 1, 0, 0.2)
+                love.graphics.rectangle("fill", l.x, l.y-2, l.w, l.h+4) 
+            end
+            love.graphics.setColor(1,1,1)
+            love.graphics.print(text, l.x + 5, l.y)
         end
     end
     self.trips_accordion:endDraw(); self.trips_accordion:drawScrollbar()
@@ -203,9 +210,16 @@ function UI:draw(game)
     self.vehicles_accordion:beginDraw()
     if self.vehicles_accordion.is_open then
         for i, l in ipairs(self.layout_cache.vehicles) do
-            local v = l.vehicle; local cap = string.format("%d/%d", #v.cargo + #v.trip_queue, state.upgrades.vehicle_capacity)
-            local text = string.format("Bike %d | %s | %s", v.id, v.state.name, cap)
-            love.graphics.setColor(1,1,1); love.graphics.print(text, l.x + 5, l.y + 5)
+            local v = l.vehicle
+            local in_transit_count = 0
+            for _, trip in ipairs(v.cargo) do
+                if trip.is_in_transit then in_transit_count = in_transit_count + 1 end
+            end
+            local cap = string.format("%d/%d", #v.cargo + #v.trip_queue, state.upgrades.vehicle_capacity)
+            local transit_info = in_transit_count > 0 and string.format(" (%d moving)", in_transit_count) or ""
+            local text = string.format("Bike %d | %s | %s%s", v.id, v.state.name, cap, transit_info)
+            love.graphics.setColor(1,1,1)
+            love.graphics.print(text, l.x + 5, l.y + 5)
         end
         local btn = self.layout_cache.buttons.hire_vehicle
         if btn then love.graphics.setColor(1,1,1); love.graphics.rectangle("line", btn.x, btn.y, btn.w, btn.h); love.graphics.printf("Hire New Bike ($"..state.costs.bike..")", btn.x, btn.y+8, btn.w, "center") end
