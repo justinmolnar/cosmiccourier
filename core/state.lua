@@ -11,9 +11,8 @@ function State:new(C, game)
     
     instance.costs = {
         bike = C.COSTS.BIKE,
-        truck = C.COSTS.TRUCK, -- NEW
+        truck = C.COSTS.TRUCK,
         client = C.COSTS.CLIENT,
-        truck_speed = C.GAMEPLAY.INITIAL_TRUCK_SPEED,
     }
 
     instance.upgrades_purchased = {}
@@ -21,6 +20,7 @@ function State:new(C, game)
     
     instance.upgrades = {
         bike_speed = C.GAMEPLAY.INITIAL_BIKE_SPEED,
+        truck_speed = C.GAMEPLAY.INITIAL_TRUCK_SPEED, -- ADD THIS LINE
         auto_dispatch_unlocked = false,
         vehicle_capacity = 1,
         frenzy_duration = C.EVENTS.INITIAL_DURATION_SEC,
