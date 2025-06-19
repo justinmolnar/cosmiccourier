@@ -20,43 +20,42 @@ local C = {
     },
 
     MAP = {
-        -- Downtown scale
-        DOWNTOWN_GRID_WIDTH  = 62,
-        DOWNTOWN_GRID_HEIGHT = 45,
-        
-        -- City scale (much larger area)
-        CITY_GRID_WIDTH      = 372,  -- 6x wider
-        CITY_GRID_HEIGHT     = 270,  -- 6x taller
-        
-        TILE_SIZE            = 2,    -- Much smaller tiles for city view
-        NUM_SECONDARY_ROADS  = 40,
-        
-        COLORS = {
-            GRASS           = {0.2, 0.6, 0.25},
-            ROAD            = {0.2, 0.2, 0.2},
-            PLOT            = {0.7, 0.7, 0.7},
-            UI_BG           = {0.1, 0.1, 0.15},
-            HOVER           = {1, 1, 0},
-            DOWNTOWN_PLOT   = {0.85, 0.85, 0.8},
-            DOWNTOWN_ROAD   = {0.3, 0.3, 0.1},
-            -- *** ADD THIS NEW COLOR FOR DEBUGGING ***
-            DEBUG_NODE      = {0, 1, 0}, -- Bright Green
-        },
-
-        SCALES = {
-            DOWNTOWN = 1,
-            CITY = 2,
-            REGION = 3,
-            PLANET = 4,
-        },
-
-        SCALE_NAMES = {
-            [1] = "Downtown Core",
-            [2] = "Metropolitan Area", 
-            [3] = "Regional Network",
-            [4] = "Planetary Grid",
-        },
+    -- Downtown scale
+    DOWNTOWN_GRID_WIDTH  = 62,
+    DOWNTOWN_GRID_HEIGHT = 45,
+    
+    -- City scale (much larger area)
+    CITY_GRID_WIDTH      = 372,
+    CITY_GRID_HEIGHT     = 270,
+    
+    TILE_SIZE            = 2,
+    NUM_SECONDARY_ROADS  = 100, -- Increased from 40 to make downtown denser
+    
+    COLORS = {
+        GRASS           = {0.2, 0.6, 0.25},
+        ROAD            = {0.2, 0.2, 0.2},
+        PLOT            = {0.7, 0.7, 0.7},
+        UI_BG           = {0.1, 0.1, 0.15},
+        HOVER           = {1, 1, 0},
+        DOWNTOWN_PLOT   = {0.85, 0.85, 0.8},
+        DOWNTOWN_ROAD   = {0.3, 0.3, 0.1},
+        DEBUG_NODE      = {0, 1, 0},
     },
+
+    SCALES = {
+        DOWNTOWN = 1,
+        CITY = 2,
+        REGION = 3,
+        PLANET = 4,
+    },
+
+    SCALE_NAMES = {
+        [1] = "Downtown Core",
+        [2] = "Metropolitan Area", 
+        [3] = "Regional Network",
+        [4] = "Planetary Grid",
+    },
+},
 
     GAMEPLAY = {
         INITIAL_MONEY           = 150,

@@ -7,34 +7,39 @@ local States = {}
 -- A shared function for any state that needs to move along a path.
 -- This encapsulates the movement logic so we don't repeat it.
 --------------------------------------------------------------------------------
-local function moveAlongPath(dt, vehicle, game)
+function moveAlongPath(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then return end
 
     local target_node = vehicle.path[1]
-    local target_px, target_py = game.map:getPixelCoords(target_node.x, target_node.y)
+    local target_px, target_py = game.map:getDowntownPixelCoords(target_node.x, target_node.y)
 
     local angle = math.atan2(target_py - vehicle.py, target_px - vehicle.px)
-    local speed = game.state.upgrades.bike_speed
+    
+    -- *** FIX: Adjust the bike's speed based on the current map scale ***
+    local base_speed = game.state.upgrades.bike_speed
+    local current_speed = base_speed
+
+    if game.map:getCurrentScale() ~= game.C.MAP.SCALES.DOWNTOWN then
+        -- If we are zoomed out, we need to scale the speed down.
+        -- The ratio is the size of a city tile divided by the size of a downtown tile.
+        local scale_ratio = game.C.MAP.TILE_SIZE / 16 -- e.g., 2 / 16 = 0.125
+        current_speed = base_speed * scale_ratio
+    end
     
     -- Calculate distance to target
     local dist_x = target_px - vehicle.px
     local dist_y = target_py - vehicle.py
     local dist_sq = dist_x * dist_x + dist_y * dist_y
 
-    -- The distance we will travel this frame
-    local travel_dist = speed * dt
+    -- The distance we will travel this frame, using the correctly scaled speed
+    local travel_dist = current_speed * dt
 
-    -- Check for arrival BEFORE moving
-    -- If the distance we are about to travel is greater than the distance remaining,
-    -- we have arrived.
     if dist_sq < travel_dist * travel_dist then
-        -- DEFINITIVE FIX: Snap position directly to the target node's center.
+        vehicle.grid_anchor = {x = target_node.x, y = target_node.y}
         vehicle.px = target_px
         vehicle.py = target_py
-        -- Now that we are exactly at the node, remove it from the path.
         table.remove(vehicle.path, 1)
     else
-        -- If we have not arrived, move normally.
         vehicle.px = vehicle.px + math.cos(angle) * travel_dist
         vehicle.py = vehicle.py + math.sin(angle) * travel_dist
     end
@@ -75,14 +80,24 @@ States.ReturningToDepot = State:new()
 States.ReturningToDepot.name = "Returning"
 function States.ReturningToDepot:enter(vehicle, game)
     print(string.format("Bike %d returning to depot.", vehicle.id))
-    local current_pos = vehicle:getCurrentGridPos(game)
+    
+    local current_pos = vehicle.grid_anchor -- Use the reliable anchor
     if current_pos.x == vehicle.depot_plot.x and current_pos.y == vehicle.depot_plot.y then
         vehicle.path = {} 
         return
     end
-    local start_node = game.map:findNearestRoadTile(current_pos)
-    local end_node = game.map:findNearestRoadTile(vehicle.depot_plot)
-    vehicle.path = game.pathfinder.findPath(game.map.grid, start_node, end_node)
+
+    local downtown_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
+    local start_node = game.map:findNearestDowntownRoadTile(current_pos)
+    local end_node = game.map:findNearestDowntownRoadTile(vehicle.depot_plot)
+
+    if not start_node or not end_node then
+        print(string.format("ERROR: Bike %d cannot find a path to depot. Stuck!", vehicle.id))
+        vehicle.path = {}
+        return
+    end
+
+    vehicle.path = game.pathfinder.findPath(downtown_grid, start_node, end_node)
     if vehicle.path then table.remove(vehicle.path, 1) end
 end
 
@@ -105,16 +120,26 @@ States.GoToPickup = State:new()
 States.GoToPickup.name = "To Pickup"
 function States.GoToPickup:enter(vehicle, game)
     print(string.format("Bike %d going to pickup.", vehicle.id))
-    local current_pos = vehicle:getCurrentGridPos(game)
-    local start_node = game.map:findNearestRoadTile(current_pos)
     
-    -- Get the start plot from the current leg of the trip
+    local current_pos = vehicle.grid_anchor -- Use the reliable anchor
+    local downtown_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
+    local start_node = game.map:findNearestDowntownRoadTile(current_pos)
+    
     local current_trip = vehicle.trip_queue[1]
-    local end_node = game.map:findNearestRoadTile(current_trip.legs[current_trip.current_leg].start_plot)
+    if not current_trip then return end
+    
+    local end_node = game.map:findNearestDowntownRoadTile(current_trip.legs[current_trip.current_leg].start_plot)
 
-    vehicle.path = game.pathfinder.findPath(game.map.grid, start_node, end_node)
+    if not start_node or not end_node then
+        print(string.format("ERROR: Bike %d cannot find path to pickup. Missing start or end road.", vehicle.id))
+        vehicle.path = {}
+        return
+    end
+
+    vehicle.path = game.pathfinder.findPath(downtown_grid, start_node, end_node)
     if vehicle.path then table.remove(vehicle.path, 1) end
 end
+
 
 function States.GoToPickup:update(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then
@@ -166,28 +191,38 @@ States.GoToDropoff = State:new()
 States.GoToDropoff.name = "To Dropoff"
 function States.GoToDropoff:enter(vehicle, game)
     print(string.format("Bike %d going to dropoff.", vehicle.id))
-    local current_pos = vehicle:getCurrentGridPos(game)
-    local start_node = game.map:findNearestRoadTile(current_pos)
+
+    local current_pos = vehicle.grid_anchor -- Use the reliable anchor
+    local downtown_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
+    local start_node = game.map:findNearestDowntownRoadTile(current_pos)
+    
     local best_path, shortest_len = nil, math.huge
     
+    if not start_node then
+        print(string.format("ERROR: Bike %d cannot find starting road for dropoff. Stuck!", vehicle.id))
+        vehicle.path = {}
+        return
+    end
+
     for _, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
-        local end_node = game.map:findNearestRoadTile(leg.end_plot)
-        if not start_node or not end_node then break end
-        if end_node.x ~= start_node.x or end_node.y ~= start_node.y then
-            local path = game.pathfinder.findPath(game.map.grid, start_node, end_node)
+        local end_node = game.map:findNearestDowntownRoadTile(leg.end_plot)
+        
+        if end_node and (end_node.x ~= start_node.x or end_node.y ~= start_node.y) then
+            local path = game.pathfinder.findPath(downtown_grid, start_node, end_node)
             if path and #path < shortest_len then
                 shortest_len = #path
                 best_path = path
             end
         end
     end
-    -- FIX: Ensure path is never nil. If no path was found, it becomes an empty table.
+
     vehicle.path = best_path or {}
     if #vehicle.path > 0 then 
         table.remove(vehicle.path, 1) 
     end
 end
+
 
 function States.GoToDropoff:update(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then
@@ -205,12 +240,16 @@ States.DoDropoff.name = "Dropping Off"
 function States.DoDropoff:enter(vehicle, game)
     local C = game.C
     local trip_index_to_remove = nil
-    local current_pos = vehicle:getCurrentGridPos(game)
+    
+    -- *** FIX: Use the vehicle's reliable grid_anchor, not the zoom-dependent getCurrentGridPos() ***
+    local current_pos = vehicle.grid_anchor
     
     for i, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
         local plot = leg.end_plot
-        local destination_road_tile = game.map:findNearestRoadTile(plot)
+        
+        -- *** FIX: Use the new, specialized function to find the road tile on the downtown grid ***
+        local destination_road_tile = game.map:findNearestDowntownRoadTile(plot)
 
         if destination_road_tile and current_pos.x == destination_road_tile.x and current_pos.y == destination_road_tile.y then
             

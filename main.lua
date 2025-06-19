@@ -17,12 +17,14 @@ function love.load()
         zoom_controls = nil,
     }
     
-    -- *** ADD THIS LINE TO FIX THE CACHING ISSUE ***
     Game.map.scale_grids = {}
 
     Game.state = require("core.state"):new(C, Game)
     Game.ui = require("ui.ui"):new(C, Game)
     Game.zoom_controls = require("ui.zoom_controls"):new(C)
+
+    -- Set up the event listener for entities AFTER the event bus is created
+    Game.entities.event_bus_listener_setup(Game)
 
     Game.map:generate()
     Game.entities:init(Game)
@@ -65,7 +67,7 @@ end
 function love.update(dt)
     Game.state:update(dt, Game) 
     Game.time:update(dt, Game)
-    Game.map:update(dt)
+    Game.map:update(dt, Game) -- Pass the Game object here
     Game.entities:update(dt, Game)
     Game.autodispatcher:update(dt, Game)
     Game.event_spawner:update(dt, Game)

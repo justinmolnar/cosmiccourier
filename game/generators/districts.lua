@@ -3,12 +3,19 @@
 
 local Districts = {}
 
-function Districts.generateAll(grid, map_w, map_h, downtown_grid)
+function Districts.generateAll(grid, map_w, map_h, downtown_grid, map_instance) -- <<< MODIFY THIS LINE
     local all_districts = {}
     
     -- 1. Place the downtown district
     local downtown_w, downtown_h = #downtown_grid[1], #downtown_grid
     local start_x, start_y = math.floor((map_w - downtown_w) / 2), math.floor((map_h - downtown_h) / 2)
+    
+    -- <<< ADD THIS BLOCK TO STORE THE OFFSET >>>
+    if map_instance then
+        map_instance.downtown_offset = {x = start_x, y = start_y}
+        print("Downtown offset stored at:", start_x, start_y)
+    end
+    
     local downtown_district = {x = start_x, y = start_y, w = downtown_w, h = downtown_h}
     table.insert(all_districts, downtown_district)
     

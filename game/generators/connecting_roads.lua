@@ -33,6 +33,7 @@ function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, hi
         y = start_point.y + start_point.direction.y,
         direction = {x = start_point.direction.x, y = start_point.direction.y},
         path = {{x = start_point.x, y = start_point.y}},
+        visited = {}, -- Fix: Add a table to track visited tiles for this walker
         from_district = start_point.district,
         connection_distance = 25  -- Increased range to find connections more easily
     }
@@ -86,6 +87,16 @@ function ConnectingRoads.stepWalker(walker, grid, districts, highway_points, map
         result.completed_path = walker.path
         return result
     end
+
+    -- FIX: NEW DEATH CONDITION 4: Check for loops by seeing if we have visited this tile before.
+    local visited_key = walker.y .. "," .. walker.x
+    if walker.visited[visited_key] then
+        print("Walker died: detected a loop by re-visiting tile " .. visited_key)
+        -- Return an empty result to indicate failure, preventing a partial road from being drawn.
+        return {} 
+    end
+    -- If not visited, record this tile in our memory.
+    walker.visited[visited_key] = true
     
     -- Walker survives, add current position to path
     table.insert(walker.path, {x = walker.x, y = walker.y})
@@ -196,6 +207,7 @@ function ConnectingRoads.createSplitWalker(original_walker)
         y = original_walker.y,
         direction = new_direction,
         path = {original_walker.path[#original_walker.path]}, -- Start from current position
+        visited = original_walker.visited, -- Share the visited history to prevent immediate loops
         from_district = original_walker.from_district,
         connection_distance = original_walker.connection_distance
     }
@@ -345,26 +357,37 @@ end
 
 function ConnectingRoads.drawThinLine(grid, x1, y1, x2, y2, road_type)
     if not grid or #grid == 0 then return end
-    
     local w, h = #grid[1], #grid
-    local dx, dy = math.abs(x2 - x1), math.abs(y2 - y1)
-    local sx, sy = (x1 < x2) and 1 or -1, (y1 < y2) and 1 or -1
-    local err, x, y = dx - dy, x1, y1
-    
-    while true do
-        if ConnectingRoads.inBounds(x, y, w, h) then
-            -- Only draw if it's not already a highway or other major road
-            local current_type = grid[y][x].type
-            if not ConnectingRoads.isRoadTile(current_type) then
-                grid[y][x].type = road_type
+
+    local dx = x2 - x1
+    local dy = y2 - y1
+
+    -- Check for the dominant axis
+    if math.abs(dx) > math.abs(dy) then
+        -- Line is more horizontal
+        local x_min, x_max = math.min(x1, x2), math.max(x1, x2)
+        for x = x_min, x_max do
+            local y = math.floor(y1 + dy * (x - x1) / dx + 0.5)
+            if ConnectingRoads.inBounds(x, y, w, h) then
+                local current_type = grid[y][x].type
+                if not ConnectingRoads.isRoadTile(current_type) then
+                    grid[y][x].type = road_type
+                end
             end
         end
-        
-        if x == x2 and y == y2 then break end
-        
-        local e2 = 2 * err
-        if e2 > -dy then err = err - dy; x = x + sx end
-        if e2 < dx then err = err + dx; y = y + sy end
+    else
+        -- Line is more vertical (or diagonal)
+        local y_min, y_max = math.min(y1, y2), math.max(y1, y2)
+        for y = y_min, y_max do
+            -- Avoid division by zero for perfectly vertical lines
+            local x = dx == 0 and x1 or math.floor(x1 + dx * (y - y1) / dy + 0.5)
+            if ConnectingRoads.inBounds(x, y, w, h) then
+                local current_type = grid[y][x].type
+                if not ConnectingRoads.isRoadTile(current_type) then
+                    grid[y][x].type = road_type
+                end
+            end
+        end
     end
 end
 

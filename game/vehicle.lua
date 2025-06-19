@@ -16,11 +16,33 @@ function Vehicle:new(id, depot_plot, game)
     instance.cargo = {}      -- Trips picked up and currently being delivered
     instance.path = {}
     
+    -- This is our new reliable grid-based position tracker
+    instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
+    
     -- Initialize the state machine
     instance.state = nil
     instance:changeState(States.Idle, game)
 
     return instance
+end
+
+function Vehicle:recalculatePixelPosition(game)
+    local new_gx, new_gy
+    if game.map:getCurrentScale() == game.C.MAP.SCALES.DOWNTOWN then
+        -- We are zoomed in, use the anchor directly
+        new_gx = self.grid_anchor.x
+        new_gy = self.grid_anchor.y
+    else
+        -- We are zoomed out, we need to apply the downtown offset
+        new_gx = game.map.downtown_offset.x + self.grid_anchor.x
+        new_gy = game.map.downtown_offset.y + self.grid_anchor.y
+    end
+
+    local new_px, new_py = game.map:getPixelCoords(new_gx, new_gy)
+    self.px = new_px
+    self.py = new_py
+    
+    print(string.format("Bike %d position recalculated to (%d, %d)", self.id, self.px, self.py))
 end
 
 function Vehicle:changeState(newState, game)
@@ -54,11 +76,6 @@ function Vehicle:isAvailable(game)
     return total_load < game.state.upgrades.vehicle_capacity
 end
 
-function Vehicle:getCurrentGridPos(game)
-    local grid_x = math.floor(self.px / game.map.tile_size) + 1
-    local grid_y = math.floor(self.py / game.map.tile_size) + 1
-    return {x = grid_x, y = grid_y}
-end
 
 -- The generic draw function. Specific vehicle types can override this.
 function Vehicle:draw(game)

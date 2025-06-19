@@ -11,7 +11,10 @@ local RingRoad = require("game.generators.ringroad")
 local HighwayMerger = require("game.generators.highway_merger")
 local ConnectingRoads = require("game.generators.connecting_roads")
 
--- Helper function to create a grid of a given size and type
+-- =============================================================================
+-- == HELPER FUNCTIONS (Correctly Ordered)
+-- =============================================================================
+
 local function createGrid(width, height, default_type)
     local grid = {}
     for y = 1, height do
@@ -23,10 +26,48 @@ local function createGrid(width, height, default_type)
     return grid
 end
 
--- Helper function to check if a grid coordinate is within the map boundaries
 local function inBounds(x, y, width, height)
     return x >= 1 and x <= width and y >= 1 and y <= height
 end
+
+local function isRoad(tile_type)
+    return tile_type == "road" or
+           tile_type == "downtown_road" or
+           tile_type == "arterial" or
+           tile_type == "highway" or
+           tile_type == "highway_ring" or
+           tile_type == "highway_ns" or
+           tile_type == "highway_ew"
+end
+
+local function floodFill(grid, start_x, start_y, road_check_func)
+    local w, h = #grid[1], #grid
+    if not inBounds(start_x, start_y, w, h) or not road_check_func(grid[start_y][start_x].type) then
+        return 0
+    end
+
+    local count = 0
+    local q = {{x = start_x, y = start_y}}
+    local visited = {[start_y .. "," .. start_x] = true}
+
+    while #q > 0 do
+        local current = table.remove(q, 1)
+        count = count + 1
+
+        local neighbors = {{current.x, current.y - 1}, {current.x, current.y + 1}, {current.x - 1, current.y}, {current.x + 1, current.y}}
+        for _, pos in ipairs(neighbors) do
+            local nx, ny = pos[1], pos[2]
+            local key = ny .. "," .. nx
+            if inBounds(nx, ny, w, h) and not visited[key] and road_check_func(grid[ny][nx].type) then
+                visited[key] = true
+                table.insert(q, {x = nx, y = ny})
+            end
+        end
+    end
+
+    return count
+end
+
 
 function Map:new(C)
     local instance = setmetatable({}, Map)
@@ -36,6 +77,7 @@ function Map:new(C)
     instance.current_scale = C.MAP.SCALES.DOWNTOWN
     instance.scale_grids = {}
     instance.scale_building_plots = {}
+    instance.downtown_offset = {x = 0, y = 0}
     instance.transition_state = { 
         active = false, 
         timer = 0, 
@@ -53,13 +95,11 @@ end
 function Map:generate()
     print("Beginning modular map generation process...")
     
-    -- Generate downtown using dedicated module
     local downtown_grid = Downtown.generateDowntownModule(self.C.MAP)
     self.scale_grids[self.C.MAP.SCALES.DOWNTOWN] = downtown_grid
     self.scale_building_plots[self.C.MAP.SCALES.DOWNTOWN] = self:getPlotsFromGrid(downtown_grid)
     print("Generated Downtown Core...")
 
-    -- Generate city using modular approach
     local city_grid = self:generateCityModuleModular(downtown_grid)
     self.scale_grids[self.C.MAP.SCALES.CITY] = city_grid
     self.scale_building_plots[self.C.MAP.SCALES.CITY] = self:getPlotsFromGrid(city_grid)
@@ -68,7 +108,7 @@ function Map:generate()
     self.grid = self.scale_grids[self.current_scale]
     self.building_plots = self.scale_building_plots[self.current_scale]
     
-    print("Modular map generation complete.")
+    print("Modular map generation complete. Found " .. #self.building_plots .. " valid building plots.")
 end
 
 function Map:generateCityModuleModular(downtown_grid_module)
@@ -76,11 +116,9 @@ function Map:generateCityModuleModular(downtown_grid_module)
     local W, H = C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT
     local grid = createGrid(W, H, "plot")
 
-    -- 1. Generate districts using dedicated module
-    local all_districts = Districts.generateAll(grid, W, H, downtown_grid_module)
+    local all_districts = Districts.generateAll(grid, W, H, downtown_grid_module, self)
     print("Generated districts using Districts module")
 
-    -- 2. Generate ring road using dedicated module
     local ring_road_nodes = RingRoad.generatePath(all_districts, W, H)
     local ring_road_curve = {}
     if #ring_road_nodes > 0 then
@@ -88,12 +126,10 @@ function Map:generateCityModuleModular(downtown_grid_module)
     end
     print("Generated ring road using RingRoad module")
 
-    -- 3. Generate highways using dedicated modules
     local ns_highway_paths = HighwayNS.generatePaths(W, H, all_districts)
     local ew_highway_paths = HighwayEW.generatePaths(W, H, all_districts)
     local all_highway_paths = {}
     
-    -- Combine highway paths (NS first, then EW for proper indexing)
     for _, path in ipairs(ns_highway_paths) do
         table.insert(all_highway_paths, path)
     end
@@ -102,16 +138,13 @@ function Map:generateCityModuleModular(downtown_grid_module)
     end
     print("Generated highways using HighwayNS and HighwayEW modules")
 
-    -- 4. Apply merging logic using dedicated module
     local merged_highway_paths = HighwayMerger.applyMergingLogic(all_highway_paths, ring_road_curve)
     print("Applied highway merging using HighwayMerger module")
 
-    -- 5. Generate connecting roads (future implementation)
     local highway_points = self:extractHighwayPoints(ring_road_curve, merged_highway_paths)
     local connections = ConnectingRoads.generateConnections(grid, all_districts, highway_points, W, H)
     print("Generated connecting roads using ConnectingRoads module")
 
-    -- 6. Draw all roads to the grid
     self:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, connections)
     
     return grid
@@ -120,12 +153,10 @@ end
 function Map:extractHighwayPoints(ring_road_curve, highway_paths)
     local points = {}
     
-    -- Add ring road points
     for _, point in ipairs(ring_road_curve) do
         table.insert(points, point)
     end
     
-    -- Add highway points
     for _, highway_path in ipairs(highway_paths) do
         local highway_curve = self:generateSplinePoints(highway_path, 10)
         for _, point in ipairs(highway_curve) do
@@ -137,7 +168,6 @@ function Map:extractHighwayPoints(ring_road_curve, highway_paths)
 end
 
 function Map:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, connections)
-    -- Draw ring road (BLUE)
     if #ring_road_curve > 1 then
         for i = 1, #ring_road_curve - 1 do
             self:drawThickLineColored(grid, ring_road_curve[i].x, ring_road_curve[i].y, 
@@ -145,16 +175,14 @@ function Map:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, con
         end
     end
     
-    -- Draw merged highways with different colors
     for highway_idx, path_nodes in ipairs(merged_highway_paths) do
         local highway_curve = self:generateSplinePoints(path_nodes, 10)
         local highway_type
         
-        -- Determine highway type based on index (first 2 are N/S, next 2 are E/W)
         if highway_idx <= 2 then
-            highway_type = "highway_ns"  -- North-South highways (RED)
+            highway_type = "highway_ns"
         else
-            highway_type = "highway_ew"  -- East-West highways (GREEN)
+            highway_type = "highway_ew"
         end
         
         for i = 1, #highway_curve - 1 do
@@ -163,7 +191,6 @@ function Map:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, con
         end
     end
     
-    -- Draw connecting roads (future implementation)
     ConnectingRoads.drawConnections(grid, connections)
 end
 
@@ -172,20 +199,63 @@ end
 -- =============================================================================
 
 function Map:getPlotsFromGrid(grid)
-    local plots = {}
-    if not grid or #grid == 0 then return plots end
+    if not grid or #grid == 0 then return {} end
+    -- *** FIX: Swapped w and h to the correct order. ***
     local h, w = #grid, #grid[1]
+    local plots = {}
     
-    for y = 1, h do 
-        for x = 1, w do 
-            if grid[y][x].type == 'plot' or grid[y][x].type == 'downtown_plot' then 
-                table.insert(plots, {x = x, y = y}) 
-            end 
-        end 
+    local MIN_NETWORK_SIZE = 50
+    local visited_roads = {}
+    local valid_road_tiles = {}
+
+    for y = 1, h do
+        for x = 1, w do
+            local key = y .. "," .. x
+            if isRoad(grid[y][x].type) and not visited_roads[key] then
+                local network_tiles = {}
+                local q = {{x=x, y=y}}
+                visited_roads[key] = true
+                
+                while #q > 0 do
+                    local current = table.remove(q, 1)
+                    table.insert(network_tiles, current)
+                    
+                    local neighbors = {{current.x, current.y - 1}, {current.x, current.y + 1}, {current.x - 1, current.y}, {current.x + 1, current.y}}
+                    for _, pos in ipairs(neighbors) do
+                        local nx, ny = pos[1], pos[2]
+                        local nkey = ny .. "," .. nx
+                        if inBounds(nx, ny, w, h) and isRoad(grid[ny][nx].type) and not visited_roads[nkey] then
+                            visited_roads[nkey] = true
+                            table.insert(q, {x=nx, y=ny})
+                        end
+                    end
+                end
+
+                if #network_tiles >= MIN_NETWORK_SIZE then
+                    for _, tile in ipairs(network_tiles) do
+                        table.insert(valid_road_tiles, tile)
+                    end
+                end
+            end
+        end
+    end
+
+    local visited_plots = {}
+    for _, road_tile in ipairs(valid_road_tiles) do
+        local neighbors = {{road_tile.x, road_tile.y - 1}, {road_tile.x, road_tile.y + 1}, {road_tile.x - 1, road_tile.y}, {road_tile.x + 1, road_tile.y}}
+        for _, plot_pos in ipairs(neighbors) do
+            local px, py = plot_pos[1], plot_pos[2]
+            local pkey = py .. "," .. px
+            if inBounds(px, py, w, h) and (grid[py][px].type == 'plot' or grid[py][px].type == 'downtown_plot') and not visited_plots[pkey] then
+                table.insert(plots, {x=px, y=py})
+                visited_plots[pkey] = true
+            end
+        end
     end
     
     return plots
 end
+
 
 function Map:generateSplinePoints(points, num_segments)
     local curve_points = {}
@@ -206,27 +276,38 @@ end
 function Map:drawThickLineColored(grid, x1, y1, x2, y2, road_type, thickness)
     if not grid or #grid == 0 then return end
     local w, h = #grid[1], #grid
-    local dx, dy = math.abs(x2 - x1), math.abs(y2 - y1)
-    local sx, sy = (x1 < x2) and 1 or -1, (y1 < y2) and 1 or -1
-    local err, x, y = dx - dy, x1, y1
     local half_thick = math.floor(thickness / 2)
-    
-    while true do
-        for i = -half_thick, half_thick do
-            for j = -half_thick, half_thick do
-                if inBounds(x + i, y + j, w, h) then
-                    grid[y + j][x + i].type = road_type
+
+    local dx = x2 - x1
+    local dy = y2 - y1
+
+    if math.abs(dx) > math.abs(dy) then
+        local x_min, x_max = math.min(x1, x2), math.max(x1, x2)
+        for x = x_min, x_max do
+            local y = math.floor(y1 + dy * (x - x1) / dx + 0.5)
+            for i = -half_thick, half_thick do
+                for j = -half_thick, half_thick do
+                    if inBounds(x + i, y + j, w, h) then
+                        grid[y + j][x + i].type = road_type
+                    end
                 end
             end
         end
-        
-        if x == x2 and y == y2 then break end
-        
-        local e2 = 2 * err
-        if e2 > -dy then err = err - dy; x = x + sx end
-        if e2 < dx then err = err + dx; y = y + sy end
+    else
+        local y_min, y_max = math.min(y1, y2), math.max(y1, y2)
+        for y = y_min, y_max do
+            local x = dx == 0 and x1 or math.floor(x1 + dx * (y - y1) / dy + 0.5)
+            for i = -half_thick, half_thick do
+                for j = -half_thick, half_thick do
+                    if inBounds(x + i, y + j, w, h) then
+                        grid[y + j][x + i].type = road_type
+                    end
+                end
+            end
+        end
     end
 end
+
 
 -- =============================================================================
 -- == MAP STATE MANAGEMENT & RENDERING
@@ -250,7 +331,7 @@ function Map:setScale(new_scale)
     return true
 end
 
-function Map:update(dt)
+function Map:update(dt, game)
     if self.transition_state.active then
         self.transition_state.timer = self.transition_state.timer + dt
         self.transition_state.progress = self.transition_state.timer / self.transition_state.duration
@@ -261,6 +342,11 @@ function Map:update(dt)
             self.current_scale = self.transition_state.to_scale
             self.grid = self.scale_grids[self.current_scale]
             self.building_plots = self.scale_building_plots[self.current_scale]
+            
+            if game and game.EventBus then
+                game.EventBus:publish("map_scale_changed")
+            end
+            
             print("Transition complete - now at", self.C.MAP.SCALE_NAMES[self.current_scale])
         end
     end
@@ -290,20 +376,18 @@ function Map:drawGrid(grid, alpha)
             local tile = grid[y][x]
             local color = C_MAP.COLORS.PLOT
             
-            if tile.type == "road" or tile.type == "arterial" then 
+            if isRoad(tile.type) then
                 color = C_MAP.COLORS.ROAD
             elseif tile.type == "highway" then 
                 color = {0.1, 0.1, 0.1}
             elseif tile.type == "highway_ring" then 
-                color = {0.2, 0.4, 0.8}  -- Blue for ring roads
+                color = {0.2, 0.4, 0.8}
             elseif tile.type == "highway_ns" then 
-                color = {0.8, 0.2, 0.2}  -- Red for North-South highways
+                color = {0.8, 0.2, 0.2}
             elseif tile.type == "highway_ew" then 
-                color = {0.2, 0.8, 0.2}  -- Green for East-West highways
+                color = {0.2, 0.8, 0.2}
             elseif tile.type == "downtown_plot" then 
                 color = C_MAP.COLORS.DOWNTOWN_PLOT
-            elseif tile.type == "downtown_road" then 
-                color = C_MAP.COLORS.DOWNTOWN_ROAD
             elseif tile.type == "grass" then 
                 color = C_MAP.COLORS.GRASS 
             end
@@ -317,6 +401,42 @@ end
 -- =============================================================================
 -- == PUBLIC API METHODS
 -- =============================================================================
+
+function Map:findNearestDowntownRoadTile(plot)
+    if not plot then return nil end
+    
+    -- Explicitly use the downtown grid for this operation
+    local grid = self.scale_grids[self.C.MAP.SCALES.DOWNTOWN]
+    if not grid or #grid == 0 then return nil end
+    
+    local grid_h, grid_w = #grid, #grid[1]
+    local x, y = plot.x, plot.y
+    
+    for r = 0, 2 do 
+        for dy = -r, r do 
+            for dx = -r, r do 
+                if math.abs(dx) == r or math.abs(dy) == r then
+                    local nx, ny = x + dx, y + dy
+                    if inBounds(nx, ny, grid_w, grid_h) then 
+                        if isRoad(grid[ny][nx].type) then 
+                            return {x = nx, y = ny} 
+                        end 
+                    end
+                end 
+            end 
+        end 
+    end
+    
+    return nil
+end
+
+function Map:getRandomDowntownBuildingPlot()
+    local downtown_plots = self.scale_building_plots[self.C.MAP.SCALES.DOWNTOWN]
+    if downtown_plots and #downtown_plots > 0 then 
+        return downtown_plots[love.math.random(1, #downtown_plots)] 
+    end
+    return nil
+end
 
 function Map:getCurrentScale() 
     return self.current_scale 
@@ -341,7 +461,7 @@ function Map:findNearestRoadTile(plot)
                 if math.abs(dx) == r or math.abs(dy) == r then
                     local nx, ny = x + dx, y + dy
                     if inBounds(nx, ny, grid_w, grid_h) then 
-                        if grid[ny][nx].type == "road" or grid[ny][nx].type == "highway" or grid[ny][nx].type == "downtown_road" then 
+                        if isRoad(grid[ny][nx].type) then 
                             return {x = nx, y = ny} 
                         end 
                     end
@@ -367,6 +487,36 @@ function Map:getPixelCoords(grid_x, grid_y)
     local C_MAP = self.C.MAP
     local tile_size = (#grid[1] == C_MAP.DOWNTOWN_GRID_WIDTH) and 16 or C_MAP.TILE_SIZE
     return (grid_x - 0.5) * tile_size, (grid_y - 0.5) * tile_size
+end
+
+function Map:getDowntownPixelCoords(grid_x, grid_y)
+    local C_MAP = self.C.MAP
+    local DOWNTOWN_TILE_SIZE = 16
+    
+    local local_px = (grid_x - 0.5) * DOWNTOWN_TILE_SIZE
+    local local_py = (grid_y - 0.5) * DOWNTOWN_TILE_SIZE
+
+    if self.current_scale == self.C.MAP.SCALES.DOWNTOWN then
+        return local_px, local_py
+    else
+        local city_tile_size = C_MAP.TILE_SIZE
+        
+        local downtown_offset_px = (self.downtown_offset.x - 0.5) * city_tile_size
+        local downtown_offset_py = (self.downtown_offset.y - 0.5) * city_tile_size
+
+        local scale_ratio = city_tile_size / DOWNTOWN_TILE_SIZE
+        local scaled_local_px = local_px * scale_ratio
+        local scaled_local_py = local_py * scale_ratio
+        
+        return downtown_offset_px + scaled_local_px, downtown_offset_py + scaled_local_py
+    end
+end
+
+function Map:getCurrentTileSize()
+    local grid = self.scale_grids[self.current_scale] or self.grid
+    if not grid or #grid == 0 then return 16 end
+    local C_MAP = self.C.MAP
+    return (#grid[1] == C_MAP.DOWNTOWN_GRID_WIDTH) and 16 or C_MAP.TILE_SIZE
 end
 
 return Map

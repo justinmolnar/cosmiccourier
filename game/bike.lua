@@ -15,6 +15,11 @@ end
 
 -- Override the draw method for bikes
 function Bike:draw(game)
+    -- *** ADD THIS CHECK: If we are not in the downtown view, do not draw the bike. ***
+    if game.map:getCurrentScale() ~= game.C.MAP.SCALES.DOWNTOWN then
+        return
+    end
+
     -- Call the parent's draw function to draw the selection circle and debug info
     Vehicle.draw(self, game)
 

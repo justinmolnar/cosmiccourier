@@ -15,9 +15,30 @@ function Entities:new()
     instance.trips = { pending = {} }
     instance.selected_vehicle = nil
 
+    -- This is a placeholder. The 'game' object isn't available right at this moment.
+    -- We will set up the real subscription in main.lua's love.load function.
+    instance.event_bus_listener_setup = function(game)
+        game.EventBus:subscribe("map_scale_changed", function()
+            print("Map scale changed! Recalculating all entity positions...")
+            
+            -- Recalculate for vehicles
+            for _, vehicle in ipairs(instance.vehicles) do
+                if vehicle.recalculatePixelPosition then
+                    vehicle:recalculatePixelPosition(game)
+                end
+            end
+    
+            -- Recalculate for clients
+            for _, client in ipairs(instance.clients) do
+                if client.recalculatePixelPosition then
+                    client:recalculatePixelPosition(game)
+                end
+            end
+        end)
+    end
+
     return instance
 end
-
 function Entities:init(game)
     -- Create the first Client
     self:addClient(game)
@@ -90,8 +111,28 @@ function Entities:update(dt, game)
 end
 
 function Entities:draw(game)
+    -- *** ADD THIS NEW BLOCK TO DRAW THE DEPOT ***
+    if self.depot_plot then
+        local depot_gx, depot_gy -- Grid X and Grid Y
+        
+        if game.map:getCurrentScale() == game.C.MAP.SCALES.DOWNTOWN then
+            -- In downtown view, use the plot's local coordinates
+            depot_gx = self.depot_plot.x
+            depot_gy = self.depot_plot.y
+        else
+            -- In city view, calculate the position using the stored offset
+            depot_gx = game.map.downtown_offset.x + self.depot_plot.x
+            depot_gy = game.map.downtown_offset.y + self.depot_plot.y
+        end
+
+        -- Get the final pixel coordinates and draw the depot icon
+        local depot_px, depot_py = game.map:getPixelCoords(depot_gx, depot_gy)
+        love.graphics.setFont(game.fonts.emoji)
+        love.graphics.setColor(0, 0, 0)
+        love.graphics.print("🏠", depot_px - 14, depot_py - 14)
+    end
+
     for _, client in ipairs(self.clients) do
-        -- FIX: Pass the 'game' object to the draw function, just like with vehicles.
         client:draw(game)
     end
     for _, vehicle in ipairs(self.vehicles) do

@@ -37,7 +37,9 @@ function Client:update(dt, game)
                 -- Check the cap again inside the loop in case we fill it up
                 if #game.entities.trips.pending >= upgrades.max_pending_trips then break end
                 
-                local end_plot = game.map:getRandomBuildingPlot()
+                -- *** FIX: Call the new function to get a guaranteed downtown plot ***
+                local end_plot = game.map:getRandomDowntownBuildingPlot()
+                
                 if end_plot then
                     local new_trip = Trip:new(C_GAMEPLAY.BASE_TRIP_PAYOUT, C_GAMEPLAY.INITIAL_SPEED_BONUS)
                     table.insert(new_trip.legs, {
@@ -57,10 +59,20 @@ function Client:update(dt, game)
 end
 
 function Client:draw(game)
+    if game.map:getCurrentScale() ~= game.C.MAP.SCALES.DOWNTOWN then
+        return
+    end
+
     love.graphics.setFont(game.fonts.emoji)
     love.graphics.setColor(0, 0, 0) -- Black
     love.graphics.print("🏢", self.px - 14, self.py - 14) -- Adjust offset for new size
     love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
+end
+
+function Client:recalculatePixelPosition(game)
+    -- Clients, like bikes, exist only in the downtown grid.
+    -- We can use the same specialized function to get their correct pixel coordinates.
+    self.px, self.py = game.map:getDowntownPixelCoords(self.plot.x, self.plot.y)
 end
 
 return Client
