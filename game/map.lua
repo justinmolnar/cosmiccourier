@@ -575,4 +575,16 @@ function Map:getCurrentTileSize()
     end
 end
 
+function Map:isPlotInDowntown(plot)
+    if not plot or not self.downtown_offset then return false end
+
+    local x_min = self.downtown_offset.x
+    local y_min = self.downtown_offset.y
+    local x_max = self.downtown_offset.x + self.C.MAP.DOWNTOWN_GRID_WIDTH
+    local y_max = self.downtown_offset.y + self.C.MAP.DOWNTOWN_GRID_HEIGHT
+
+    return plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max
+end
+
+
 return Map

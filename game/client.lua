@@ -24,11 +24,10 @@ function Client:update(dt, game)
         local max_time = C_GAMEPLAY.TRIP_GENERATION_MAX_SEC * upgrades.trip_gen_max_mult
         self.trip_timer = love.math.random(min_time, max_time)
         
-        -- Use new upgradeable max pending trips value
         if #game.entities.trips.pending < upgrades.max_pending_trips then
-            local new_trip = Trip:new(C_GAMEPLAY.BASE_TRIP_PAYOUT, C_GAMEPLAY.INITIAL_SPEED_BONUS)
+            local base_payout = C_GAMEPLAY.BASE_TRIP_PAYOUT
+            local speed_bonus = C_GAMEPLAY.INITIAL_SPEED_BONUS
             
-            -- 30% chance to generate a multi-leg trip if trucks exist
             local trucks_exist = false
             for _, v in ipairs(game.entities.vehicles) do
                 if v.type == "truck" then
@@ -38,24 +37,24 @@ function Client:update(dt, game)
             end
 
             if trucks_exist and love.math.random() < 0.3 then
-                -- MULTI-LEG TRIP
-                local city_plot = game.map:getRandomCityBuildingPlot() -- Get a destination in the wider city
+                local city_plot = game.map:getRandomCityBuildingPlot()
                 if city_plot then
-                    -- Leg 1: Bike from client to depot
+                    base_payout = base_payout * C_GAMEPLAY.CITY_TRIP_PAYOUT_MULTIPLIER
+                    speed_bonus = speed_bonus * C_GAMEPLAY.CITY_TRIP_BONUS_MULTIPLIER
+                    local new_trip = Trip:new(base_payout, speed_bonus)
                     new_trip:addLeg(self.plot, game.entities.depot_plot, "bike")
-                    -- Leg 2: Truck from depot to city destination
                     new_trip:addLeg(game.entities.depot_plot, city_plot, "truck")
-                    
-                    new_trip.base_payout = new_trip.base_payout * 5 -- Multi-leg trips are more valuable
                     table.insert(game.entities.trips.pending, new_trip)
+                    game.EventBus:publish("trip_created") -- NEW: Publish event
                     print("New multi-leg (bike->truck) trip generated!")
                 end
             else
-                -- STANDARD TRIP (BIKE ONLY)
                 local end_plot = game.map:getRandomDowntownBuildingPlot()
                 if end_plot then
+                    local new_trip = Trip:new(base_payout, speed_bonus)
                     new_trip:addLeg(self.plot, end_plot, "bike")
                     table.insert(game.entities.trips.pending, new_trip)
+                    game.EventBus:publish("trip_created") -- NEW: Publish event
                 end
             end
         end
@@ -64,20 +63,18 @@ end
 
 function Client:draw(game)
     love.graphics.setFont(game.fonts.emoji)
-    love.graphics.setColor(0, 0, 0) -- Black
+    love.graphics.setColor(0, 0, 0)
     
-    -- FIX: Apply a counter-scale to keep the icon size consistent
     love.graphics.push()
     love.graphics.translate(self.px, self.py)
     love.graphics.scale(1 / game.camera.scale, 1 / game.camera.scale)
-    love.graphics.print("🏢", -14, -14) -- Center the emoji
+    love.graphics.print("🏢", -14, -14)
     love.graphics.pop()
     
-    love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
+    love.graphics.setFont(game.fonts.ui)
 end
 
 function Client:recalculatePixelPosition(game)
-    -- A client's position is calculated the same way as a vehicle's.
     self.px, self.py = game.map:getPixelCoords(self.plot.x, self.plot.y)
 end
 
