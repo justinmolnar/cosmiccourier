@@ -97,7 +97,7 @@ function States.ReturningToDepot:enter(vehicle, game)
         return
     end
 
-    vehicle.path = game.pathfinder.findPath(downtown_grid, start_node, end_node)
+    vehicle.path = game.pathfinder.findPath(downtown_grid, start_node, end_node, game.C.GAMEPLAY.PATHFINDING_COSTS)
     if vehicle.path then table.remove(vehicle.path, 1) end
 end
 
@@ -119,24 +119,33 @@ end
 States.GoToPickup = State:new()
 States.GoToPickup.name = "To Pickup"
 function States.GoToPickup:enter(vehicle, game)
-    print(string.format("Bike %d going to pickup.", vehicle.id))
+    print(string.format("%s %d going to pickup.", vehicle.type, vehicle.id))
     
-    local current_pos = vehicle.grid_anchor -- Use the reliable anchor
-    local downtown_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
-    local start_node = game.map:findNearestDowntownRoadTile(current_pos)
+    local current_pos = vehicle.grid_anchor
+    local trip_to_get = vehicle.trip_queue[1]
+    if not trip_to_get then return end
     
-    local current_trip = vehicle.trip_queue[1]
-    if not current_trip then return end
+    local leg = trip_to_get.legs[trip_to_get.current_leg]
     
-    local end_node = game.map:findNearestDowntownRoadTile(current_trip.legs[current_trip.current_leg].start_plot)
+    local path_grid, start_node, end_node
 
-    if not start_node or not end_node then
-        print(string.format("ERROR: Bike %d cannot find path to pickup. Missing start or end road.", vehicle.id))
+    if vehicle.type == "bike" then
+        path_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
+        start_node = game.map:findNearestDowntownRoadTile(current_pos)
+        end_node = game.map:findNearestDowntownRoadTile(leg.start_plot)
+    else -- Trucks and other city-scale vehicles
+        path_grid = game.map.scale_grids[game.C.MAP.SCALES.CITY]
+        start_node = game.map:findNearestRoadTile(current_pos)
+        end_node = game.map:findNearestRoadTile(leg.start_plot)
+    end
+
+    if not start_node or not end_node or not path_grid then
+        print(string.format("ERROR: %s %d cannot find path to pickup. Missing start/end/grid.", vehicle.type, vehicle.id))
         vehicle.path = {}
         return
     end
 
-    vehicle.path = game.pathfinder.findPath(downtown_grid, start_node, end_node)
+    vehicle.path = game.pathfinder.findPath(path_grid, start_node, end_node, game.C.GAMEPLAY.PATHFINDING_COSTS)
     if vehicle.path then table.remove(vehicle.path, 1) end
 end
 
@@ -190,26 +199,38 @@ end
 States.GoToDropoff = State:new()
 States.GoToDropoff.name = "To Dropoff"
 function States.GoToDropoff:enter(vehicle, game)
-    print(string.format("Bike %d going to dropoff.", vehicle.id))
+    print(string.format("%s %d going to dropoff.", vehicle.type, vehicle.id))
 
-    local current_pos = vehicle.grid_anchor -- Use the reliable anchor
-    local downtown_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
-    local start_node = game.map:findNearestDowntownRoadTile(current_pos)
+    local current_pos = vehicle.grid_anchor
+    local path_grid, start_node
     
+    if vehicle.type == "bike" then
+        path_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
+        start_node = game.map:findNearestDowntownRoadTile(current_pos)
+    else -- Trucks and other city-scale vehicles
+        path_grid = game.map.scale_grids[game.C.MAP.SCALES.CITY]
+        start_node = game.map:findNearestRoadTile(current_pos)
+    end
+
     local best_path, shortest_len = nil, math.huge
     
-    if not start_node then
-        print(string.format("ERROR: Bike %d cannot find starting road for dropoff. Stuck!", vehicle.id))
+    if not start_node or not path_grid then
+        print(string.format("ERROR: %s %d cannot find starting road for dropoff. Stuck!", vehicle.type, vehicle.id))
         vehicle.path = {}
         return
     end
 
     for _, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
-        local end_node = game.map:findNearestDowntownRoadTile(leg.end_plot)
+        local end_node
+        if vehicle.type == "bike" then
+            end_node = game.map:findNearestDowntownRoadTile(leg.end_plot)
+        else
+            end_node = game.map:findNearestRoadTile(leg.end_plot)
+        end
         
         if end_node and (end_node.x ~= start_node.x or end_node.y ~= start_node.y) then
-            local path = game.pathfinder.findPath(downtown_grid, start_node, end_node)
+            local path = game.pathfinder.findPath(path_grid, start_node, end_node, game.C.GAMEPLAY.PATHFINDING_COSTS)
             if path and #path < shortest_len then
                 shortest_len = #path
                 best_path = path
@@ -241,56 +262,37 @@ function States.DoDropoff:enter(vehicle, game)
     local C = game.C
     local trip_index_to_remove = nil
     
-    -- *** FIX: Use the vehicle's reliable grid_anchor, not the zoom-dependent getCurrentGridPos() ***
     local current_pos = vehicle.grid_anchor
     
     for i, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
-        local plot = leg.end_plot
-        
-        -- *** FIX: Use the new, specialized function to find the road tile on the downtown grid ***
-        local destination_road_tile = game.map:findNearestDowntownRoadTile(plot)
+        local destination_road_tile = nil
+
+        -- Determine which grid to use for finding the destination
+        if leg.vehicleType == "bike" then
+            destination_road_tile = game.map:findNearestDowntownRoadTile(leg.end_plot)
+        else -- For trucks and future vehicles, use the city-scale finder
+            destination_road_tile = game.map:findNearestRoadTile(leg.end_plot)
+        end
 
         if destination_road_tile and current_pos.x == destination_road_tile.x and current_pos.y == destination_road_tile.y then
-            
-            -- THAW the trip and apply time-delta calculation
-            local time_in_transit = 0
-            if trip.is_in_transit then
-                time_in_transit = love.timer.getTime() - trip.transit_start_time
-                trip:thaw()
-                print(string.format("Trip thawed after %.2f seconds in transit", time_in_transit))
-            end
-
-            -- Check if this is the final destination or an intermediate stop
+            trip:thaw()
             local is_final_destination = trip.current_leg >= #trip.legs
             
             if is_final_destination then
-                -- FINAL DELIVERY: Calculate payout and complete the trip
+                -- FINAL DELIVERY
                 local final_payout = trip.base_payout + trip.speed_bonus
-                
-                local event_data = {
-                    payout = final_payout,
-                    bonus = trip.speed_bonus,
-                    base = trip.base_payout,
-                    x = vehicle.px,
-                    y = vehicle.py,
-                    vehicle_id = vehicle.id,
-                    transit_time = time_in_transit
-                }
+                local event_data = { payout = final_payout, bonus = trip.speed_bonus, base = trip.base_payout, x = vehicle.px, y = vehicle.py }
                 game.EventBus:publish("package_delivered", event_data)
-
-                print(string.format("Bike %d delivered package! $%d ($%d base + $%d bonus) - Transit: %.2fs", 
-                      vehicle.id, math.floor(final_payout), trip.base_payout, 
-                      math.floor(trip.speed_bonus), time_in_transit))
-                
+                print(string.format("%s %d delivered package! $%d", vehicle.type, vehicle.id, math.floor(final_payout)))
                 trip_index_to_remove = i
             else
-                -- INTERMEDIATE STOP: Move to next leg and add to hub/depot inventory
+                -- INTERMEDIATE STOP (HUB/DEPOT)
                 trip.current_leg = trip.current_leg + 1
-                print(string.format("Trip transferred to leg %d/%d at intermediate stop", trip.current_leg, #trip.legs))
+                print(string.format("Trip transferred to leg %d/%d. Vehicle: %s", trip.current_leg, #trip.legs, trip.legs[trip.current_leg].vehicleType))
                 
-                -- For now, since we don't have hubs yet, just put it back in pending trips
-                -- In the future, this would go to a hub inventory instead
+                -- TODO: In the future, this would go to a specific hub's inventory.
+                -- For now, we put it back in the main pending list.
                 table.insert(game.entities.trips.pending, trip)
                 trip_index_to_remove = i
             end

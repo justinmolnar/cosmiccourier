@@ -430,6 +430,14 @@ function Map:findNearestDowntownRoadTile(plot)
     return nil
 end
 
+function Map:getRandomCityBuildingPlot()
+    local city_plots = self.scale_building_plots[self.C.MAP.SCALES.CITY]
+    if city_plots and #city_plots > 0 then 
+        return city_plots[love.math.random(1, #city_plots)] 
+    end
+    return nil
+end
+
 function Map:getRandomDowntownBuildingPlot()
     local downtown_plots = self.scale_building_plots[self.C.MAP.SCALES.DOWNTOWN]
     if downtown_plots and #downtown_plots > 0 then 

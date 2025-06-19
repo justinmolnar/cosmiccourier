@@ -7,7 +7,7 @@ setmetatable(Bike, {__index = Vehicle}) -- Inherit from Vehicle
 
 function Bike:new(id, depot_plot, game)
     -- Create a basic vehicle instance using the parent's "new" function
-    local instance = Vehicle:new(id, depot_plot, game)
+    local instance = Vehicle:new(id, depot_plot, game, "bike")
     -- Set the metatable of the new instance to our Bike object to complete the inheritance
     setmetatable(instance, Bike)
     return instance
@@ -15,19 +15,18 @@ end
 
 -- Override the draw method for bikes
 function Bike:draw(game)
-    -- *** ADD THIS CHECK: If we are not in the downtown view, do not draw the bike. ***
-    if game.map:getCurrentScale() ~= game.C.MAP.SCALES.DOWNTOWN then
-        return
-    end
-
-    -- Call the parent's draw function to draw the selection circle and debug info
+    -- Call the parent's draw function first. It will handle the visibility check
+    -- and draw the selection circle and debug info.
     Vehicle.draw(self, game)
 
-    -- Draw the bike-specific emoji
-    love.graphics.setFont(game.fonts.emoji)
-    love.graphics.setColor(0, 0, 0) -- Black
-    love.graphics.print("🚲", self.px - 14, self.py - 14)
-    love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
+    -- If the vehicle is visible (checked in parent), draw the bike-specific emoji
+    local current_scale = game.map:getCurrentScale()
+    if current_scale == game.C.MAP.SCALES.DOWNTOWN then
+        love.graphics.setFont(game.fonts.emoji)
+        love.graphics.setColor(0, 0, 0) -- Black
+        love.graphics.print("🚲", self.px - 14, self.py - 14)
+        love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
+    end
 end
 
 return Bike

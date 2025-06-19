@@ -81,38 +81,52 @@ function love.draw()
 
     -- === PASS 1: DRAW THE SIDEBAR ===
     love.graphics.setScissor(0, 0, sidebar_w, screen_h)
-    
     love.graphics.setColor(Game.C.MAP.COLORS.UI_BG)
     love.graphics.rectangle("fill", 0, 0, sidebar_w, screen_h)
-    
     Game.ui:draw(Game)
-    
     love.graphics.setScissor()
 
     -- === PASS 2: DRAW THE GAME WORLD ===
     love.graphics.setScissor(sidebar_w, 0, screen_w - sidebar_w, screen_h)
-    
     love.graphics.push()
     love.graphics.translate(sidebar_w, 0)
-    
     Game.map:draw()
     Game.entities:draw(Game)
     Game.event_spawner:draw(Game)
 
+    -- THIS IS THE COMPLETELY REWRITTEN AND CORRECTED PATH PREVIEW LOGIC
     if Game.ui.hovered_trip_index then
         local trip = Game.entities.trips.pending[Game.ui.hovered_trip_index]
         if trip and trip.legs[trip.current_leg] then
             local leg = trip.legs[trip.current_leg]
-            local start_node = Game.map:findNearestRoadTile(leg.start_plot)
-            local end_node = Game.map:findNearestRoadTile(leg.end_plot)
             
-            if start_node and end_node then
-                local path = Game.pathfinder.findPath(Game.map.grid, start_node, end_node)
+            local path_grid, start_node, end_node
+            
+            -- Determine the correct grid and find nodes based on the vehicle required for the leg
+            if leg.vehicleType == "bike" then
+                path_grid = Game.map.scale_grids[Game.C.MAP.SCALES.DOWNTOWN]
+                start_node = Game.map:findNearestDowntownRoadTile(leg.start_plot)
+                end_node = Game.map:findNearestDowntownRoadTile(leg.end_plot)
+            else -- Assumes truck or other city-scale vehicles
+                path_grid = Game.map.scale_grids[Game.C.MAP.SCALES.CITY]
+                start_node = Game.map:findNearestRoadTile(leg.start_plot) -- uses current grid, which is what we want for city vehicles
+                end_node = Game.map:findNearestRoadTile(leg.end_plot)
+            end
+
+            if start_node and end_node and path_grid then
+                -- This call is now guaranteed to have the correct grid and the required costs table
+                local path = Game.pathfinder.findPath(path_grid, start_node, end_node, Game.C.GAMEPLAY.PATHFINDING_COSTS)
                 
                 if path then
                     local pixel_path = {}
                     for _, node in ipairs(path) do
-                        local px, py = Game.map:getPixelCoords(node.x, node.y)
+                        -- Get pixel coordinates relative to the *correct* grid for the leg
+                        local px, py
+                        if leg.vehicleType == "bike" then
+                            px, py = Game.map:getDowntownPixelCoords(node.x, node.y)
+                        else
+                             px, py = Game.map:getPixelCoords(node.x, node.y)
+                        end
                         table.insert(pixel_path, px)
                         table.insert(pixel_path, py)
                     end

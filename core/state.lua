@@ -11,6 +11,7 @@ function State:new(C, game)
     
     instance.costs = {
         bike = C.COSTS.BIKE,
+        truck = C.COSTS.TRUCK, -- NEW
         client = C.COSTS.CLIENT,
     }
 
@@ -66,10 +67,17 @@ function State:new(C, game)
 
     game.EventBus:subscribe("ui_buy_vehicle_clicked", function(vehicleType)
         if not vehicleType then return end
-        local cost = instance.costs.bike
+
+        local cost = instance.costs[vehicleType]
+        if not cost then return end
+
         if instance.money >= cost then
             instance.money = instance.money - cost
-            instance.costs.bike = math.floor(instance.costs.bike * C.COSTS.BIKE_MULT)
+            if vehicleType == "bike" then
+                instance.costs.bike = math.floor(instance.costs.bike * C.COSTS.BIKE_MULT)
+            elseif vehicleType == "truck" then
+                instance.costs.truck = math.floor(instance.costs.truck * C.COSTS.TRUCK_MULT)
+            end
             game.entities:addVehicle(game, vehicleType)
         end
     end)

@@ -69,6 +69,17 @@ local C = {
         BONUS_DECAY_RATE        = 1.0,
         MIN_DELTA_CALCULATION   = 0.1,
         CURRENT_MAP_SCALE       = 1,
+        
+        -- The PATHFINDING_COSTS table MUST be inside the GAMEPLAY table like this:
+        PATHFINDING_COSTS       = {
+            road = 5,
+            downtown_road = 8,
+            arterial = 3,
+            highway = 1,
+            highway_ring = 1,
+            highway_ns = 1,
+            highway_ew = 1
+        },
     },
 
     ZOOM = {
@@ -83,6 +94,7 @@ local C = {
 
     COSTS = {
         BIKE            = 150,
+        TRUCK           = 1200, -- NEW
         SPEED           = 75,
         CLIENT          = 500,
         AUTO_DISPATCH   = 1000,
@@ -90,6 +102,7 @@ local C = {
         FRENZY_DURATION = 5000,
 
         BIKE_MULT       = 1.15,
+        TRUCK_MULT      = 1.25, -- NEW
         SPEED_MULT      = 1.5,
         CLIENT_MULT     = 1.2,
         CAPACITY_MULT   = 1.5,

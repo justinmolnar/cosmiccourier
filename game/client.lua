@@ -26,33 +26,37 @@ function Client:update(dt, game)
         
         -- Use new upgradeable max pending trips value
         if #game.entities.trips.pending < upgrades.max_pending_trips then
-            local trips_to_generate = 1
-            -- Check if we should generate a bulk order
-            if love.math.random() < upgrades.multi_trip_chance then
-                trips_to_generate = upgrades.multi_trip_amount
-                print("Bulk order generated!")
-            end
-
-            for i = 1, trips_to_generate do
-                -- Check the cap again inside the loop in case we fill it up
-                if #game.entities.trips.pending >= upgrades.max_pending_trips then break end
-                
-                -- *** FIX: Call the new function to get a guaranteed downtown plot ***
-                local end_plot = game.map:getRandomDowntownBuildingPlot()
-                
-                if end_plot then
-                    local new_trip = Trip:new(C_GAMEPLAY.BASE_TRIP_PAYOUT, C_GAMEPLAY.INITIAL_SPEED_BONUS)
-                    table.insert(new_trip.legs, {
-                        start_plot = self.plot,
-                        end_plot = end_plot,
-                        vehicleType = "bike" 
-                    })
-                    table.insert(game.entities.trips.pending, new_trip)
+            local new_trip = Trip:new(C_GAMEPLAY.BASE_TRIP_PAYOUT, C_GAMEPLAY.INITIAL_SPEED_BONUS)
+            
+            -- 30% chance to generate a multi-leg trip if trucks exist
+            local trucks_exist = false
+            for _, v in ipairs(game.entities.vehicles) do
+                if v.type == "truck" then
+                    trucks_exist = true
+                    break
                 end
             end
-            
-            if not game.state.rush_hour.active and trips_to_generate == 1 then
-                print("New trip generated!")
+
+            if trucks_exist and love.math.random() < 0.3 then
+                -- MULTI-LEG TRIP
+                local city_plot = game.map:getRandomCityBuildingPlot() -- Get a destination in the wider city
+                if city_plot then
+                    -- Leg 1: Bike from client to depot
+                    new_trip:addLeg(self.plot, game.entities.depot_plot, "bike")
+                    -- Leg 2: Truck from depot to city destination
+                    new_trip:addLeg(game.entities.depot_plot, city_plot, "truck")
+                    
+                    new_trip.base_payout = new_trip.base_payout * 5 -- Multi-leg trips are more valuable
+                    table.insert(game.entities.trips.pending, new_trip)
+                    print("New multi-leg (bike->truck) trip generated!")
+                end
+            else
+                -- STANDARD TRIP (BIKE ONLY)
+                local end_plot = game.map:getRandomDowntownBuildingPlot()
+                if end_plot then
+                    new_trip:addLeg(self.plot, end_plot, "bike")
+                    table.insert(game.entities.trips.pending, new_trip)
+                end
             end
         end
     end

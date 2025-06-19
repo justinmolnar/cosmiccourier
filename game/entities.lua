@@ -64,6 +64,7 @@ function Entities:addVehicle(game, vehicleType)
     end
 
     if self.depot_plot then
+        -- The require path is now more dynamic based on vehicleType
         local VehicleClass = require("game." .. vehicleType)
         if not VehicleClass then
             print("ERROR: Could not find vehicle class for type: " .. vehicleType)
@@ -71,7 +72,8 @@ function Entities:addVehicle(game, vehicleType)
         end
 
         local new_id = #self.vehicles + 1
-        local new_vehicle = VehicleClass:new(new_id, self.depot_plot, game)
+        -- Pass the vehicleType to the constructor
+        local new_vehicle = VehicleClass:new(new_id, self.depot_plot, game, vehicleType)
         table.insert(self.vehicles, new_vehicle)
         print("New " .. vehicleType .. " #" .. new_id .. " purchased.")
     end

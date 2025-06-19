@@ -2,13 +2,14 @@
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
-function Vehicle:new(id, depot_plot, game)
+function Vehicle:new(id, depot_plot, game, vehicleType)
     local instance = setmetatable({}, Vehicle)
 
     -- Require the state machine definition file
     local States = require("game.vehicle_states")
     
     instance.id = id
+    instance.type = vehicleType or "vehicle" -- NEW: Store vehicle type
     instance.depot_plot = depot_plot
     instance.px, instance.py = game.map:getPixelCoords(depot_plot.x, depot_plot.y)
     
@@ -76,63 +77,86 @@ function Vehicle:isAvailable(game)
     return total_load < game.state.upgrades.vehicle_capacity
 end
 
+function Vehicle:drawDebug(game)
+    local C = game.C
+    local debug_x = self.px + 20
+    local debug_y = self.py - 20
+    local line_h = 15
+    local state_name = self.state and self.state.name or "N/A"
+    local path_count = self.path and #self.path or 0
+    local target_text = "None"
+    if self.path and self.path[1] then
+        target_text = string.format("(%d, %d)", self.path[1].x, self.path[1].y)
+    end
+    local debug_lines = {
+        string.format("ID: %d | Type: %s", self.id, self.type),
+        string.format("State: %s", state_name),
+        string.format("Path Nodes: %d", path_count),
+        string.format("Target: %s", target_text),
+        string.format("Cargo: %d | Queue: %d", #self.cargo, #self.trip_queue),
+        string.format("Pos: %d, %d", math.floor(self.px), math.floor(self.py))
+    }
+    love.graphics.setColor(0, 0, 0, 0.7)
+    love.graphics.rectangle("fill", debug_x - 5, debug_y - 5, 200, #debug_lines * line_h + 10)
+    love.graphics.setColor(0, 1, 0)
+    for i, line in ipairs(debug_lines) do
+        love.graphics.print(line, debug_x, debug_y + (i-1) * line_h)
+    end
+    love.graphics.setColor(1, 1, 1)
+    if self.path and #self.path > 0 then
+        local pixel_path = {}
+        table.insert(pixel_path, self.px)
+        table.insert(pixel_path, self.py)
+        for _, node in ipairs(self.path) do
+            local px, py = game.map:getPixelCoords(node.x, node.y)
+            table.insert(pixel_path, px)
+            table.insert(pixel_path, py)
+        end
+        love.graphics.setColor(1, 0, 1, 0.8)
+        love.graphics.setLineWidth(2)
+        love.graphics.line(pixel_path)
+        for i = 3, #pixel_path, 2 do
+            love.graphics.circle("fill", pixel_path[i], pixel_path[i+1], 3)
+        end
+        love.graphics.setLineWidth(1)
+        love.graphics.setColor(1,1,1)
+    end
+end
+
 
 -- The generic draw function. Specific vehicle types can override this.
 function Vehicle:draw(game)
+    local should_draw = false
+    local current_scale = game.map:getCurrentScale()
+    
+    if self.type == "bike" then
+        if current_scale == game.C.MAP.SCALES.DOWNTOWN then
+            should_draw = true
+        end
+    -- This is where the logic for other vehicles will go
+    -- For now, we'll add a placeholder for trucks
+    elseif self.type == "truck" then
+        if current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
+            should_draw = true
+        end
+    else
+        -- Default for unknown types
+        should_draw = true
+    end
+
+    if not should_draw then
+        return
+    end
+
     if self == game.entities.selected_vehicle then
         love.graphics.setColor(1, 1, 0) -- Yellow circle for selected
         love.graphics.circle("line", self.px, self.py, 16)
     end
 
-    -- Default drawing if a subclass doesn't provide its own
-    love.graphics.setColor(1,0,1) -- Magenta square as placeholder
-    love.graphics.rectangle("fill", self.px - 8, self.py - 8, 16, 16)
-    love.graphics.setColor(1,1,1)
-
-    -- Draw debug info
+    -- The specific drawing will be handled by the subclass (e.g., bike.lua, truck.lua)
+    -- But we can call the debug drawing from here.
     if game.debug_mode then
-        local C = game.C
-        local debug_x = self.px + 20
-        local debug_y = self.py - 20
-        local line_h = 15
-        local state_name = self.state and self.state.name or "N/A"
-        local path_count = self.path and #self.path or 0
-        local target_text = "None"
-        if self.path and self.path[1] then
-            target_text = string.format("(%d, %d)", self.path[1].x, self.path[1].y)
-        end
-        local debug_lines = {
-            string.format("ID: %d | State: %s", self.id, state_name),
-            string.format("Path Nodes: %d", path_count),
-            string.format("Target: %s", target_text),
-            string.format("Cargo: %d | Queue: %d", #self.cargo, #self.trip_queue),
-            string.format("Pos: %d, %d", math.floor(self.px), math.floor(self.py))
-        }
-        love.graphics.setColor(0, 0, 0, 0.7)
-        love.graphics.rectangle("fill", debug_x - 5, debug_y - 5, 200, #debug_lines * line_h + 10)
-        love.graphics.setColor(0, 1, 0)
-        for i, line in ipairs(debug_lines) do
-            love.graphics.print(line, debug_x, debug_y + (i-1) * line_h)
-        end
-        love.graphics.setColor(1, 1, 1)
-        if self.path and #self.path > 0 then
-            local pixel_path = {}
-            table.insert(pixel_path, self.px)
-            table.insert(pixel_path, self.py)
-            for _, node in ipairs(self.path) do
-                local px, py = game.map:getPixelCoords(node.x, node.y)
-                table.insert(pixel_path, px)
-                table.insert(pixel_path, py)
-            end
-            love.graphics.setColor(1, 0, 1, 0.8)
-            love.graphics.setLineWidth(2)
-            love.graphics.line(pixel_path)
-            for i = 3, #pixel_path, 2 do
-                love.graphics.circle("fill", pixel_path[i], pixel_path[i+1], 3)
-            end
-            love.graphics.setLineWidth(1)
-            love.graphics.setColor(1,1,1)
-        end
+        self:drawDebug(game)
     end
 end
 

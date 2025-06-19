@@ -34,7 +34,14 @@ local function heuristic(a, b)
     return math.abs(a.x - b.x) + math.abs(a.y - b.y) -- Manhattan distance
 end
 
-function Pathfinder.findPath(grid, startNode, endNode)
+function Pathfinder.findPath(grid, startNode, endNode, costs)
+    -- This new block will prevent the error from ever happening again.
+    -- If costs are not provided, it will stop and tell you exactly why.
+    if not costs then
+        error("FATAL: Pathfinder.findPath was called without a 'costs' table. This is a required argument. Please check the function call.", 0)
+        return nil
+    end
+
     local grid_height = #grid
     local grid_width = #grid[1]
 
@@ -64,7 +71,9 @@ function Pathfinder.findPath(grid, startNode, endNode)
         openSet[current.y .. ',' .. current.x] = nil
 
         for _, neighbor in ipairs(getNeighbors(current, grid, grid_width, grid_height)) do
-            local tentative_gScore = gScore[current.y .. ',' .. current.x] + 1
+            -- This is the line that was causing the crash.
+            local move_cost = costs[grid[neighbor.y][neighbor.x].type] or 1
+            local tentative_gScore = gScore[current.y .. ',' .. current.x] + move_cost
             local neighborKey = neighbor.y .. ',' .. neighbor.x
             
             if not gScore[neighborKey] or tentative_gScore < gScore[neighborKey] then
