@@ -19,7 +19,8 @@ function Districts.generateAll(grid, map_w, map_h, downtown_grid)
     end
     
     -- 3. Fill districts with their internal road networks
-    Districts.embedGrid(grid, downtown_grid, start_x, start_y, "downtown_road", "downtown_plot")
+    -- FIXED: Use regular "road" and "plot" for downtown instead of "downtown_road" and "downtown_plot"
+    Districts.embedGrid(grid, downtown_grid, start_x, start_y, "road", "plot")
     for _, district in ipairs(other_districts) do
         Districts.generateDistrictInternals(grid, district, "road", "plot")
     end
@@ -71,7 +72,8 @@ function Districts.generateDistrictInternals(grid, district, road_type, plot_typ
         for x = district.x, district.x + district.w - 1 do
             if Districts.inBounds(x, y, grid_w, grid_h) then
                 local current_type = grid[y][x].type
-                if current_type ~= 'downtown_plot' and current_type ~= 'downtown_road' then 
+                -- FIXED: Don't check for downtown_plot and downtown_road since we're not using them anymore
+                if current_type ~= 'plot' and current_type ~= 'road' then 
                     grid[y][x].type = plot_type 
                 end
             end
