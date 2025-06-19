@@ -7,28 +7,25 @@ Entities.__index = Entities
 
 function Entities:new()
     local instance = setmetatable({}, Entities)
-    instance.depot_plot = nil -- Store the main depot location
+    instance.depot_plot = nil 
     
-    -- Entities now owns all the game objects
     instance.vehicles = {}
     instance.clients = {}
     instance.trips = { pending = {} }
     instance.selected_vehicle = nil
 
-    -- This is a placeholder. The 'game' object isn't available right at this moment.
-    -- We will set up the real subscription in main.lua's love.load function.
     instance.event_bus_listener_setup = function(game)
         game.EventBus:subscribe("map_scale_changed", function()
             print("Map scale changed! Recalculating all entity positions...")
             
-            -- Recalculate for vehicles
+            -- FIX: This logic was correct but wasn't being triggered properly before.
+            -- This ensures ALL entities update their screen position when the camera moves.
             for _, vehicle in ipairs(instance.vehicles) do
                 if vehicle.recalculatePixelPosition then
                     vehicle:recalculatePixelPosition(game)
                 end
             end
     
-            -- Recalculate for clients
             for _, client in ipairs(instance.clients) do
                 if client.recalculatePixelPosition then
                     client:recalculatePixelPosition(game)
@@ -39,17 +36,19 @@ function Entities:new()
 
     return instance
 end
+
 function Entities:init(game)
     -- Create the first Client
     self:addClient(game)
 
-    -- Create the first Bike's depot
-    self.depot_plot = game.map:getRandomBuildingPlot()
-    self:addVehicle(game, "bike")  -- ADD "bike" parameter
+    -- FIX: The depot should start in a random DOWNTOWN building plot.
+    self.depot_plot = game.map:getRandomDowntownBuildingPlot()
+    self:addVehicle(game, "bike")
 end
 
 function Entities:addClient(game)
-    local client_plot = game.map:getRandomBuildingPlot()
+    -- FIX: Clients should only be generated in downtown building plots.
+    local client_plot = game.map:getRandomDowntownBuildingPlot()
     if client_plot then
         local new_client = Client:new(client_plot, game)
         table.insert(self.clients, new_client)
@@ -113,25 +112,17 @@ function Entities:update(dt, game)
 end
 
 function Entities:draw(game)
-    -- *** ADD THIS NEW BLOCK TO DRAW THE DEPOT ***
     if self.depot_plot then
-        local depot_gx, depot_gy -- Grid X and Grid Y
-        
-        if game.map:getCurrentScale() == game.C.MAP.SCALES.DOWNTOWN then
-            -- In downtown view, use the plot's local coordinates
-            depot_gx = self.depot_plot.x
-            depot_gy = self.depot_plot.y
-        else
-            -- In city view, calculate the position using the stored offset
-            depot_gx = game.map.downtown_offset.x + self.depot_plot.x
-            depot_gy = game.map.downtown_offset.y + self.depot_plot.y
-        end
-
-        -- Get the final pixel coordinates and draw the depot icon
-        local depot_px, depot_py = game.map:getPixelCoords(depot_gx, depot_gy)
+        local depot_px, depot_py = game.map:getPixelCoords(self.depot_plot.x, self.depot_plot.y)
         love.graphics.setFont(game.fonts.emoji)
         love.graphics.setColor(0, 0, 0)
-        love.graphics.print("🏠", depot_px - 14, depot_py - 14)
+
+        -- FIX: Apply a counter-scale to keep the icon size consistent
+        love.graphics.push()
+        love.graphics.translate(depot_px, depot_py)
+        love.graphics.scale(1 / game.camera.scale, 1 / game.camera.scale)
+        love.graphics.print("🏠", -14, -14) -- Center the emoji
+        love.graphics.pop()
     end
 
     for _, client in ipairs(self.clients) do

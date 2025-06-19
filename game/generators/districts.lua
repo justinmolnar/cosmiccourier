@@ -3,31 +3,20 @@
 
 local Districts = {}
 
-function Districts.generateAll(grid, map_w, map_h, downtown_grid, map_instance) -- <<< MODIFY THIS LINE
+function Districts.generateAll(grid, map_w, map_h, downtown_district)
     local all_districts = {}
     
-    -- 1. Place the downtown district
-    local downtown_w, downtown_h = #downtown_grid[1], #downtown_grid
-    local start_x, start_y = math.floor((map_w - downtown_w) / 2), math.floor((map_h - downtown_h) / 2)
-    
-    -- <<< ADD THIS BLOCK TO STORE THE OFFSET >>>
-    if map_instance then
-        map_instance.downtown_offset = {x = start_x, y = start_y}
-        print("Downtown offset stored at:", start_x, start_y)
-    end
-    
-    local downtown_district = {x = start_x, y = start_y, w = downtown_w, h = downtown_h}
+    -- 1. The downtown district is already generated, so we just add its definition to our list.
     table.insert(all_districts, downtown_district)
     
-    -- 2. Generate surrounding districts
+    -- 2. Generate the other surrounding districts.
     local other_districts = Districts.placeDistricts(grid, 10, map_w, map_h, downtown_district)
     for _, district in ipairs(other_districts) do
         table.insert(all_districts, district)
     end
     
-    -- 3. Fill districts with their internal road networks
-    -- FIXED: Use regular "road" and "plot" for downtown instead of "downtown_road" and "downtown_plot"
-    Districts.embedGrid(grid, downtown_grid, start_x, start_y, "road", "plot")
+    -- 3. Fill the OTHER districts with their internal road networks.
+    -- (Downtown is already filled by its own generator).
     for _, district in ipairs(other_districts) do
         Districts.generateDistrictInternals(grid, district, "road", "plot")
     end
@@ -50,11 +39,11 @@ function Districts.placeDistricts(grid, num_districts, max_w, max_h, downtown_di
             valid = false
         end
         
-        -- Check if the area is suitable (sample a few points)
         if valid then
             for i = 1, 5 do
                 local cx, cy = love.math.random(x, x + w), love.math.random(y, y + h)
-                if not Districts.inBounds(cx, cy, max_w, max_h) or grid[cy][cx].type ~= 'plot' then
+                -- FIX: Check for 'grass' (empty land) instead of 'plot'
+                if not Districts.inBounds(cx, cy, max_w, max_h) or grid[cy][cx].type ~= 'grass' then
                     valid = false
                     break
                 end

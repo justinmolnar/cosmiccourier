@@ -30,7 +30,7 @@ local function inBounds(x, y, width, height)
     return x >= 1 and x <= width and y >= 1 and y <= height
 end
 
-local function isRoad(tile_type)
+function Map:isRoad(tile_type)
     return tile_type == "road" or
            tile_type == "downtown_road" or
            tile_type == "arterial" or
@@ -93,22 +93,57 @@ end
 -- == MASTER GENERATION FUNCTION (Using modular generators)
 -- =============================================================================
 function Map:generate()
-    print("Beginning modular map generation process...")
+    print("Beginning unified map generation process...")
+    local C_MAP = self.C.MAP
     
-    local downtown_grid = Downtown.generateDowntownModule(self.C.MAP)
-    self.scale_grids[self.C.MAP.SCALES.DOWNTOWN] = downtown_grid
-    self.scale_building_plots[self.C.MAP.SCALES.DOWNTOWN] = self:getPlotsFromGrid(downtown_grid)
-    print("Generated Downtown Core...")
-
-    local city_grid = self:generateCityModuleModular(downtown_grid)
-    self.scale_grids[self.C.MAP.SCALES.CITY] = city_grid
-    self.scale_building_plots[self.C.MAP.SCALES.CITY] = self:getPlotsFromGrid(city_grid)
-    print("Generated Metropolitan Area...")
-
-    self.grid = self.scale_grids[self.current_scale]
-    self.building_plots = self.scale_building_plots[self.current_scale]
+    self.grid = createGrid(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, "grass")
     
-    print("Modular map generation complete. Found " .. #self.building_plots .. " valid building plots.")
+    local downtown_w = C_MAP.DOWNTOWN_GRID_WIDTH
+    local downtown_h = C_MAP.DOWNTOWN_GRID_HEIGHT
+    self.downtown_offset = {
+        x = math.floor((C_MAP.CITY_GRID_WIDTH - downtown_w) / 2),
+        y = math.floor((C_MAP.CITY_GRID_HEIGHT - downtown_h) / 2)
+    }
+    
+    local downtown_district = {
+        x = self.downtown_offset.x, y = self.downtown_offset.y,
+        w = downtown_w, h = downtown_h
+    }
+    
+    require("game.generators.downtown").generateDowntownModule(self.grid, downtown_district, C_MAP)
+    print("Generated Downtown Core onto main grid...")
+
+    local all_districts = Districts.generateAll(self.grid, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, downtown_district)
+    print("Generated districts and their internal roads using Districts module")
+
+    local ring_road_nodes = RingRoad.generatePath(all_districts, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT)
+    local ring_road_curve = {}
+    if #ring_road_nodes > 0 then ring_road_curve = self:generateSplinePoints(ring_road_nodes, 10) end
+    
+    local ns_highway_paths = HighwayNS.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, all_districts)
+    local ew_highway_paths = HighwayEW.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, all_districts)
+    local all_highway_paths = {}
+    for _, path in ipairs(ns_highway_paths) do table.insert(all_highway_paths, path) end
+    for _, path in ipairs(ew_highway_paths) do table.insert(all_highway_paths, path) end
+
+    local merged_highway_paths = HighwayMerger.applyMergingLogic(all_highway_paths, ring_road_curve)
+    
+    self:drawAllRoadsToGrid(self.grid, ring_road_curve, merged_highway_paths, {})
+    print("Generated and drew highways.")
+    
+    local highway_points = self:extractHighwayPoints(ring_road_curve, merged_highway_paths)
+    local connections = ConnectingRoads.generateConnections(self.grid, all_districts, highway_points, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, Game)
+    
+    -- FIX: Pass the 'Game' object to drawConnections
+    ConnectingRoads.drawConnections(self.grid, connections, Game)
+    print("Generated and drew connecting roads.")
+    
+    self.building_plots = self:getPlotsFromGrid(self.grid)
+    
+    self.scale_grids = nil
+    self.scale_building_plots = nil
+    
+    print("Unified map generation complete. Found " .. #self.building_plots .. " valid building plots.")
 end
 
 function Map:generateCityModuleModular(downtown_grid_module)
@@ -200,18 +235,17 @@ end
 
 function Map:getPlotsFromGrid(grid)
     if not grid or #grid == 0 then return {} end
-    -- *** FIX: Swapped w and h to the correct order. ***
     local h, w = #grid, #grid[1]
     local plots = {}
     
-    local MIN_NETWORK_SIZE = 50
+    local MIN_NETWORK_SIZE = 10
     local visited_roads = {}
     local valid_road_tiles = {}
 
     for y = 1, h do
         for x = 1, w do
             local key = y .. "," .. x
-            if isRoad(grid[y][x].type) and not visited_roads[key] then
+            if self:isRoad(grid[y][x].type) and not visited_roads[key] then
                 local network_tiles = {}
                 local q = {{x=x, y=y}}
                 visited_roads[key] = true
@@ -224,7 +258,7 @@ function Map:getPlotsFromGrid(grid)
                     for _, pos in ipairs(neighbors) do
                         local nx, ny = pos[1], pos[2]
                         local nkey = ny .. "," .. nx
-                        if inBounds(nx, ny, w, h) and isRoad(grid[ny][nx].type) and not visited_roads[nkey] then
+                        if inBounds(nx, ny, w, h) and self:isRoad(grid[ny][nx].type) and not visited_roads[nkey] then
                             visited_roads[nkey] = true
                             table.insert(q, {x=nx, y=ny})
                         end
@@ -314,20 +348,35 @@ end
 -- =============================================================================
 
 function Map:setScale(new_scale)
-    local C_MAP = self.C.MAP
-    if not C_MAP.SCALE_NAMES[new_scale] then 
-        print("ERROR: Invalid map scale:", new_scale) 
-        return false 
+    if not self.C.MAP.SCALE_NAMES[new_scale] then return false end
+    
+    self.current_scale = new_scale
+    
+    local screen_w, screen_h = love.graphics.getDimensions()
+    local game_world_w = screen_w - Game.C.UI.SIDEBAR_WIDTH
+    
+    if new_scale == self.C.MAP.SCALES.DOWNTOWN then
+        -- FIX: Center the camera on the DOWNTOWN area, not the whole map.
+        local downtown_center_x_grid = self.downtown_offset.x + (self.C.MAP.DOWNTOWN_GRID_WIDTH / 2)
+        local downtown_center_y_grid = self.downtown_offset.y + (self.C.MAP.DOWNTOWN_GRID_HEIGHT / 2)
+        
+        Game.camera.x, Game.camera.y = self:getPixelCoords(downtown_center_x_grid, downtown_center_y_grid)
+        Game.camera.scale = 16 / self.C.MAP.TILE_SIZE
+        
+    else -- City view
+        local city_center_x_grid = self.C.MAP.CITY_GRID_WIDTH / 2
+        local city_center_y_grid = self.C.MAP.CITY_GRID_HEIGHT / 2
+        Game.camera.x, Game.camera.y = self:getPixelCoords(city_center_x_grid, city_center_y_grid)
+        
+        local total_map_width_pixels = self.C.MAP.CITY_GRID_WIDTH * self.C.MAP.TILE_SIZE
+        Game.camera.scale = game_world_w / total_map_width_pixels
     end
-    if new_scale == self.current_scale then return true end
     
-    self.transition_state.active = true
-    self.transition_state.timer = 0
-    self.transition_state.from_scale = self.current_scale
-    self.transition_state.to_scale = new_scale
-    self.transition_state.progress = 0
+    if Game and Game.EventBus then
+        Game.EventBus:publish("map_scale_changed")
+    end
     
-    print("Starting transition from", C_MAP.SCALE_NAMES[self.current_scale], "to", C_MAP.SCALE_NAMES[new_scale])
+    print("Set camera view to", self.C.MAP.SCALE_NAMES[self.current_scale])
     return true
 end
 
@@ -353,14 +402,9 @@ function Map:update(dt, game)
 end
 
 function Map:draw()
-    if self.transition_state.active then
-        local progress = self.transition_state.progress
-        local eased_progress = 1 - (1 - progress) * (1 - progress)
-        self:drawGrid(self.scale_grids[self.transition_state.from_scale], 1 - eased_progress)
-        self:drawGrid(self.scale_grids[self.transition_state.to_scale], eased_progress)
-    else
-        self:drawGrid(self.grid, 1)
-    end
+    -- With a single grid, drawing is simple. We just draw the one grid.
+    -- The visual "zoom" effect will be handled by the camera transforms in main.lua
+    self:drawGrid(self.grid, 1)
     love.graphics.setColor(1, 1, 1, 1)
 end
 
@@ -369,27 +413,36 @@ function Map:drawGrid(grid, alpha)
     if not grid or #grid == 0 then return end
     
     local grid_h, grid_w = #grid, #grid[1]
-    local tile_size = (#grid[1] == C_MAP.DOWNTOWN_GRID_WIDTH) and 16 or C_MAP.TILE_SIZE
     
+    -- FIX: The tile size should ALWAYS be the base size from constants.
+    -- The camera's scale will handle making it look bigger or smaller.
+    local tile_size = C_MAP.TILE_SIZE
+    
+    local dt_x_min = self.downtown_offset.x
+    local dt_y_min = self.downtown_offset.y
+    local dt_x_max = self.downtown_offset.x + self.C.MAP.DOWNTOWN_GRID_WIDTH
+    local dt_y_max = self.downtown_offset.y + self.C.MAP.DOWNTOWN_GRID_HEIGHT
+
     for y = 1, grid_h do 
         for x = 1, grid_w do
             local tile = grid[y][x]
-            local color = C_MAP.COLORS.PLOT
+            local is_in_downtown = (x >= dt_x_min and x < dt_x_max and y >= dt_y_min and y < dt_y_max)
             
-            if isRoad(tile.type) then
-                color = C_MAP.COLORS.ROAD
-            elseif tile.type == "highway" then 
-                color = {0.1, 0.1, 0.1}
-            elseif tile.type == "highway_ring" then 
-                color = {0.2, 0.4, 0.8}
-            elseif tile.type == "highway_ns" then 
-                color = {0.8, 0.2, 0.2}
-            elseif tile.type == "highway_ew" then 
-                color = {0.2, 0.8, 0.2}
-            elseif tile.type == "downtown_plot" then 
-                color = C_MAP.COLORS.DOWNTOWN_PLOT
-            elseif tile.type == "grass" then 
-                color = C_MAP.COLORS.GRASS 
+            local color
+            if is_in_downtown then
+                if self:isRoad(tile.type) then
+                    color = C_MAP.COLORS.DOWNTOWN_ROAD
+                else
+                    color = C_MAP.COLORS.DOWNTOWN_PLOT
+                end
+            else
+                if self:isRoad(tile.type) then
+                    color = C_MAP.COLORS.ROAD
+                elseif tile.type == "grass" then 
+                    color = C_MAP.COLORS.GRASS 
+                else
+                    color = C_MAP.COLORS.PLOT
+                end
             end
             
             love.graphics.setColor(color[1], color[2], color[3], alpha or 1)
@@ -403,47 +456,59 @@ end
 -- =============================================================================
 
 function Map:findNearestDowntownRoadTile(plot)
-    if not plot then return nil end
-    
-    -- Explicitly use the downtown grid for this operation
-    local grid = self.scale_grids[self.C.MAP.SCALES.DOWNTOWN]
-    if not grid or #grid == 0 then return nil end
-    
-    local grid_h, grid_w = #grid, #grid[1]
-    local x, y = plot.x, plot.y
-    
-    for r = 0, 2 do 
-        for dy = -r, r do 
-            for dx = -r, r do 
-                if math.abs(dx) == r or math.abs(dy) == r then
-                    local nx, ny = x + dx, y + dy
-                    if inBounds(nx, ny, grid_w, grid_h) then 
-                        if isRoad(grid[ny][nx].type) then 
-                            return {x = nx, y = ny} 
-                        end 
-                    end
-                end 
-            end 
-        end 
-    end
-    
-    return nil
+    -- DEPRECATED: With a single grid, this is identical to the main function.
+    -- For backward compatibility, we just call the main function.
+    return self:findNearestRoadTile(plot)
 end
 
 function Map:getRandomCityBuildingPlot()
-    local city_plots = self.scale_building_plots[self.C.MAP.SCALES.CITY]
-    if city_plots and #city_plots > 0 then 
-        return city_plots[love.math.random(1, #city_plots)] 
+    local city_plots = {}
+    local x_min = self.downtown_offset.x
+    local y_min = self.downtown_offset.y
+    local x_max = self.downtown_offset.x + self.C.MAP.DOWNTOWN_GRID_WIDTH
+    local y_max = self.downtown_offset.y + self.C.MAP.DOWNTOWN_GRID_HEIGHT
+
+    for _, plot in ipairs(self.building_plots) do
+        if not (plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max) then
+            table.insert(city_plots, plot)
+        end
     end
-    return nil
+
+    if #city_plots > 0 then
+        return city_plots[love.math.random(1, #city_plots)]
+    end
+
+    return self:getRandomBuildingPlot() -- Fallback
+end
+
+function Map:getCityCoordsFromDowntownPlot(downtown_plot)
+    if not downtown_plot or not self.downtown_offset then
+        return nil
+    end
+    return {
+        x = self.downtown_offset.x + downtown_plot.x,
+        y = self.downtown_offset.y + downtown_plot.y
+    }
 end
 
 function Map:getRandomDowntownBuildingPlot()
-    local downtown_plots = self.scale_building_plots[self.C.MAP.SCALES.DOWNTOWN]
-    if downtown_plots and #downtown_plots > 0 then 
-        return downtown_plots[love.math.random(1, #downtown_plots)] 
+    local downtown_plots = {}
+    local x_min = self.downtown_offset.x
+    local y_min = self.downtown_offset.y
+    local x_max = self.downtown_offset.x + self.C.MAP.DOWNTOWN_GRID_WIDTH
+    local y_max = self.downtown_offset.y + self.C.MAP.DOWNTOWN_GRID_HEIGHT
+
+    for _, plot in ipairs(self.building_plots) do
+        if plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max then
+            table.insert(downtown_plots, plot)
+        end
     end
-    return nil
+
+    if #downtown_plots > 0 then
+        return downtown_plots[love.math.random(1, #downtown_plots)]
+    end
+    
+    return self:getRandomBuildingPlot() -- Fallback to any plot if none are found
 end
 
 function Map:getCurrentScale() 
@@ -457,19 +522,20 @@ end
 function Map:findNearestRoadTile(plot)
     if not plot then return nil end
     
-    local grid = self.scale_grids[self.current_scale] or self.grid
+    local grid = self.grid 
     if not grid or #grid == 0 then return nil end
     
     local grid_h, grid_w = #grid, #grid[1]
     local x, y = plot.x, plot.y
     
-    for r = 0, 2 do 
+    for r = 0, 5 do -- Increased search radius slightly to be more robust
         for dy = -r, r do 
             for dx = -r, r do 
                 if math.abs(dx) == r or math.abs(dy) == r then
                     local nx, ny = x + dx, y + dy
                     if inBounds(nx, ny, grid_w, grid_h) then 
-                        if isRoad(grid[ny][nx].type) then 
+                        -- FIX: This must call self:isRoad, not the old global function.
+                        if self:isRoad(grid[ny][nx].type) then 
                             return {x = nx, y = ny} 
                         end 
                     end
@@ -489,42 +555,24 @@ function Map:getRandomBuildingPlot()
 end
 
 function Map:getPixelCoords(grid_x, grid_y)
-    local grid = self.scale_grids[self.current_scale] or self.grid
-    if not grid or #grid == 0 then return 0, 0 end
-    
-    local C_MAP = self.C.MAP
-    local tile_size = (#grid[1] == C_MAP.DOWNTOWN_GRID_WIDTH) and 16 or C_MAP.TILE_SIZE
-    return (grid_x - 0.5) * tile_size, (grid_y - 0.5) * tile_size
+    -- This function now always returns the world coordinate based on the single, fundamental tile size.
+    local TILE_SIZE = self.C.MAP.TILE_SIZE
+    return (grid_x - 0.5) * TILE_SIZE, (grid_y - 0.5) * TILE_SIZE
 end
 
 function Map:getDowntownPixelCoords(grid_x, grid_y)
-    local C_MAP = self.C.MAP
-    local DOWNTOWN_TILE_SIZE = 16
-    
-    local local_px = (grid_x - 0.5) * DOWNTOWN_TILE_SIZE
-    local local_py = (grid_y - 0.5) * DOWNTOWN_TILE_SIZE
-
-    if self.current_scale == self.C.MAP.SCALES.DOWNTOWN then
-        return local_px, local_py
-    else
-        local city_tile_size = C_MAP.TILE_SIZE
-        
-        local downtown_offset_px = (self.downtown_offset.x - 0.5) * city_tile_size
-        local downtown_offset_py = (self.downtown_offset.y - 0.5) * city_tile_size
-
-        local scale_ratio = city_tile_size / DOWNTOWN_TILE_SIZE
-        local scaled_local_px = local_px * scale_ratio
-        local scaled_local_py = local_py * scale_ratio
-        
-        return downtown_offset_px + scaled_local_px, downtown_offset_py + scaled_local_py
-    end
+    -- This function's complex logic is no longer needed with a single camera/viewport system.
+    -- We now just use the main getPixelCoords function, as all coordinates are global.
+    return self:getPixelCoords(grid_x, grid_y)
 end
 
 function Map:getCurrentTileSize()
-    local grid = self.scale_grids[self.current_scale] or self.grid
-    if not grid or #grid == 0 then return 16 end
-    local C_MAP = self.C.MAP
-    return (#grid[1] == C_MAP.DOWNTOWN_GRID_WIDTH) and 16 or C_MAP.TILE_SIZE
+    -- FIX: Determine tile size based on the current visual scale, not grid dimensions.
+    if self.current_scale == self.C.MAP.SCALES.DOWNTOWN then
+        return 16
+    else
+        return self.C.MAP.TILE_SIZE
+    end
 end
 
 return Map

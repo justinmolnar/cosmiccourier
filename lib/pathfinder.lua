@@ -4,7 +4,7 @@
 
 local Pathfinder = {}
 
-local function getNeighbors(node, grid, grid_width, grid_height)
+local function getNeighbors(node, grid, grid_width, grid_height, map)
     local neighbors = {}
     local x, y = node.x, node.y
 
@@ -13,7 +13,8 @@ local function getNeighbors(node, grid, grid_width, grid_height)
     for _, dir in ipairs(directions) do
         local nx, ny = dir[1], dir[2]
         if nx > 0 and nx <= grid_width and ny > 0 and ny <= grid_height then
-            if grid[ny][nx].type == "road" then
+            -- FIX: Use the map's isRoad function to check all valid road types
+            if map:isRoad(grid[ny][nx].type) then
                 table.insert(neighbors, {x = nx, y = ny})
             end
         end
@@ -34,11 +35,15 @@ local function heuristic(a, b)
     return math.abs(a.x - b.x) + math.abs(a.y - b.y) -- Manhattan distance
 end
 
-function Pathfinder.findPath(grid, startNode, endNode, costs)
+function Pathfinder.findPath(grid, startNode, endNode, costs, map)
     -- This new block will prevent the error from ever happening again.
     -- If costs are not provided, it will stop and tell you exactly why.
     if not costs then
         error("FATAL: Pathfinder.findPath was called without a 'costs' table. This is a required argument. Please check the function call.", 0)
+        return nil
+    end
+    if not map then
+        error("FATAL: Pathfinder.findPath was called without a 'map' object. This is a required argument.", 0)
         return nil
     end
 
@@ -70,7 +75,8 @@ function Pathfinder.findPath(grid, startNode, endNode, costs)
 
         openSet[current.y .. ',' .. current.x] = nil
 
-        for _, neighbor in ipairs(getNeighbors(current, grid, grid_width, grid_height)) do
+        -- FIX: Pass the map object to the neighbor finding function
+        for _, neighbor in ipairs(getNeighbors(current, grid, grid_width, grid_height, map)) do
             -- This is the line that was causing the crash.
             local move_cost = costs[grid[neighbor.y][neighbor.x].type] or 1
             local tentative_gScore = gScore[current.y .. ',' .. current.x] + move_cost

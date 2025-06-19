@@ -15,18 +15,19 @@ end
 
 -- Override the draw method for bikes
 function Bike:draw(game)
-    -- Call the parent's draw function first. It will handle the visibility check
-    -- and draw the selection circle and debug info.
     Vehicle.draw(self, game)
 
-    -- If the vehicle is visible (checked in parent), draw the bike-specific emoji
-    local current_scale = game.map:getCurrentScale()
-    if current_scale == game.C.MAP.SCALES.DOWNTOWN then
-        love.graphics.setFont(game.fonts.emoji)
-        love.graphics.setColor(0, 0, 0) -- Black
-        love.graphics.print("🚲", self.px - 14, self.py - 14)
-        love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
-    end
+    love.graphics.setFont(game.fonts.emoji)
+    love.graphics.setColor(0, 0, 0) -- Black
+
+    -- FIX: Apply a counter-scale to keep the icon size consistent
+    love.graphics.push()
+    love.graphics.translate(self.px, self.py)
+    love.graphics.scale(1 / game.camera.scale, 1 / game.camera.scale)
+    love.graphics.print("🚲", -14, -14) -- Center the emoji
+    love.graphics.pop()
+
+    love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
 end
 
 return Bike

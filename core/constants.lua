@@ -31,14 +31,15 @@ local C = {
     TILE_SIZE            = 2,
     NUM_SECONDARY_ROADS  = 100, -- Increased from 40 to make downtown denser
     
-    COLORS = {
+        COLORS = {
         GRASS           = {0.2, 0.6, 0.25},
         ROAD            = {0.2, 0.2, 0.2},
         PLOT            = {0.7, 0.7, 0.7},
         UI_BG           = {0.1, 0.1, 0.15},
         HOVER           = {1, 1, 0},
         DOWNTOWN_PLOT   = {0.85, 0.85, 0.8},
-        DOWNTOWN_ROAD   = {0.3, 0.3, 0.1},
+        -- ADD THIS LINE:
+        DOWNTOWN_ROAD   = {0.3, 0.3, 0.35}, -- A dark color for contrast
         DEBUG_NODE      = {0, 1, 0},
     },
 
@@ -60,6 +61,7 @@ local C = {
     GAMEPLAY = {
         INITIAL_MONEY           = 150,
         INITIAL_BIKE_SPEED      = 80,
+        INITIAL_TRUCK_SPEED     = 60,
         BASE_TRIP_PAYOUT        = 50,
         INITIAL_SPEED_BONUS     = 100,
         TRIP_GENERATION_MIN_SEC = 10,
@@ -72,13 +74,25 @@ local C = {
         
         -- The PATHFINDING_COSTS table MUST be inside the GAMEPLAY table like this:
         PATHFINDING_COSTS       = {
-            road = 5,
-            downtown_road = 8,
-            arterial = 3,
-            highway = 1,
-            highway_ring = 1,
-            highway_ns = 1,
-            highway_ew = 1
+            bike = {
+                road = 5,
+                downtown_road = 8,
+                arterial = 3,
+                -- FIX: Use a very high number instead of infinite to allow crossings.
+                highway = 500,
+                highway_ring = 500,
+                highway_ns = 500,
+                highway_ew = 500,
+            },
+            truck = {
+                road = 10, 
+                downtown_road = 20,
+                arterial = 5,
+                highway = 1,
+                highway_ring = 1,
+                highway_ns = 1,
+                highway_ew = 1,
+            }
         },
     },
 

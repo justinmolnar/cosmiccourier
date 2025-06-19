@@ -3,12 +3,9 @@
 
 local Downtown = {}
 
-function Downtown.generateDowntownModule(C_MAP)
-    local w, h = C_MAP.DOWNTOWN_GRID_WIDTH, C_MAP.DOWNTOWN_GRID_HEIGHT
-    local grid = Downtown.createGrid(w, h, "plot")
-    -- Call the new, improved generation function
-    Downtown.generateConnectedRoads(grid, {x=1, y=1, w=w, h=h}, "road", "plot", C_MAP.NUM_SECONDARY_ROADS)
-    return grid
+function Downtown.generateDowntownModule(grid, district, C_MAP)
+    -- This function now receives the main grid and carves the downtown area into it.
+    Downtown.generateConnectedRoads(grid, district, "road", "plot", C_MAP.NUM_SECONDARY_ROADS)
 end
 
 -- Helper function to create a grid of a given size and type

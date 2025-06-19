@@ -15,10 +15,9 @@ function love.load()
         debug_mode = false,
         ui = nil,
         zoom_controls = nil,
+        camera = require("core.camera"):new(0, 0, 1), -- Add the camera
     }
     
-    Game.map.scale_grids = {}
-
     Game.state = require("core.state"):new(C, Game)
     Game.ui = require("ui.ui"):new(C, Game)
     Game.zoom_controls = require("ui.zoom_controls"):new(C)
@@ -45,6 +44,9 @@ function love.load()
     Game.fonts.emoji_ui = emojiFontUI
 
     love.graphics.setFont(Game.fonts.ui)
+
+    -- Start zoomed in on the downtown area
+    Game.map:setScale(C.MAP.SCALES.DOWNTOWN)
 end
 
 function love.keypressed(key)
@@ -89,57 +91,52 @@ function love.draw()
     -- === PASS 2: DRAW THE GAME WORLD ===
     love.graphics.setScissor(sidebar_w, 0, screen_w - sidebar_w, screen_h)
     love.graphics.push()
-    love.graphics.translate(sidebar_w, 0)
+
+    local game_world_w = screen_w - sidebar_w
+    love.graphics.translate(sidebar_w + game_world_w / 2, screen_h / 2)
+    love.graphics.scale(Game.camera.scale, Game.camera.scale)
+    love.graphics.translate(-Game.camera.x, -Game.camera.y)
+    
     Game.map:draw()
     Game.entities:draw(Game)
     Game.event_spawner:draw(Game)
 
-    -- THIS IS THE COMPLETELY REWRITTEN AND CORRECTED PATH PREVIEW LOGIC
     if Game.ui.hovered_trip_index then
         local trip = Game.entities.trips.pending[Game.ui.hovered_trip_index]
         if trip and trip.legs[trip.current_leg] then
             local leg = trip.legs[trip.current_leg]
+            local path_grid = Game.map.grid
             
-            local path_grid, start_node, end_node
-            
-            -- Determine the correct grid and find nodes based on the vehicle required for the leg
-            if leg.vehicleType == "bike" then
-                path_grid = Game.map.scale_grids[Game.C.MAP.SCALES.DOWNTOWN]
-                start_node = Game.map:findNearestDowntownRoadTile(leg.start_plot)
-                end_node = Game.map:findNearestDowntownRoadTile(leg.end_plot)
-            else -- Assumes truck or other city-scale vehicles
-                path_grid = Game.map.scale_grids[Game.C.MAP.SCALES.CITY]
-                start_node = Game.map:findNearestRoadTile(leg.start_plot) -- uses current grid, which is what we want for city vehicles
-                end_node = Game.map:findNearestRoadTile(leg.end_plot)
+            local start_node
+            if leg.vehicleType == "truck" and trip.current_leg > 1 then
+                start_node = Game.map:findNearestRoadTile(Game.entities.depot_plot)
+            else
+                start_node = Game.map:findNearestRoadTile(leg.start_plot)
             end
 
+            local end_node = Game.map:findNearestRoadTile(leg.end_plot)
+
             if start_node and end_node and path_grid then
-                -- This call is now guaranteed to have the correct grid and the required costs table
-                local path = Game.pathfinder.findPath(path_grid, start_node, end_node, Game.C.GAMEPLAY.PATHFINDING_COSTS)
-                
+                local costs = Game.C.GAMEPLAY.PATHFINDING_COSTS[leg.vehicleType]
+                local path = Game.pathfinder.findPath(path_grid, start_node, end_node, costs, Game.map)
                 if path then
                     local pixel_path = {}
                     for _, node in ipairs(path) do
-                        -- Get pixel coordinates relative to the *correct* grid for the leg
-                        local px, py
-                        if leg.vehicleType == "bike" then
-                            px, py = Game.map:getDowntownPixelCoords(node.x, node.y)
-                        else
-                             px, py = Game.map:getPixelCoords(node.x, node.y)
-                        end
+                        local px, py = Game.map:getPixelCoords(node.x, node.y)
                         table.insert(pixel_path, px)
                         table.insert(pixel_path, py)
                     end
                     
                     local hover_color = Game.C.MAP.COLORS.HOVER
                     love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.7)
-                    love.graphics.setLineWidth(3)
+                    love.graphics.setLineWidth(3 / Game.camera.scale)
                     love.graphics.line(pixel_path)
                     love.graphics.setLineWidth(1)
                     
+                    local circle_radius = 5 / Game.camera.scale
                     love.graphics.setColor(hover_color)
-                    love.graphics.circle("fill", pixel_path[1], pixel_path[2], 5)
-                    love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], 5)
+                    love.graphics.circle("fill", pixel_path[1], pixel_path[2], circle_radius)
+                    love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], circle_radius)
                 end
             end
         end
@@ -164,7 +161,6 @@ function love.mousepressed(x, y, button)
     end
 
     if button == 1 then
-        -- Check zoom controls first (they're outside the scissor area)
         if Game.zoom_controls:handle_click(x, y, Game) then
             return
         end
@@ -172,11 +168,27 @@ function love.mousepressed(x, y, button)
         if x < Game.C.UI.SIDEBAR_WIDTH then
             Game.ui:handle_click(x, y, Game)
         else
-            local world_x = x - Game.C.UI.SIDEBAR_WIDTH
-            local event_handled = Game.event_spawner:handle_click(world_x, y, Game)
+            -- Convert mouse screen coordinates to world coordinates
+            local game_world_w = love.graphics.getWidth() - Game.C.UI.SIDEBAR_WIDTH
+            local game_world_h = love.graphics.getHeight()
+            
+            -- Step 1: Adjust for the sidebar and center-screen translation
+            local screen_x = x - (Game.C.UI.SIDEBAR_WIDTH + game_world_w / 2)
+            local screen_y = y - (game_world_h / 2)
+            
+            -- Step 2: Adjust for camera zoom
+            local scaled_x = screen_x / Game.camera.scale
+            local scaled_y = screen_y / Game.camera.scale
+            
+            -- Step 3: Adjust for camera pan to get final world coordinates
+            local world_x = scaled_x + Game.camera.x
+            local world_y = scaled_y + Game.camera.y
+
+            -- Now, pass the correct world coordinates to the entity click handlers
+            local event_handled = Game.event_spawner:handle_click(world_x, world_y, Game)
             
             if not event_handled then
-                Game.entities:handle_click(world_x, y, Game)
+                Game.entities:handle_click(world_x, world_y, Game)
             end
         end
     end

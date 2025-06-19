@@ -13,6 +13,7 @@ function State:new(C, game)
         bike = C.COSTS.BIKE,
         truck = C.COSTS.TRUCK, -- NEW
         client = C.COSTS.CLIENT,
+        truck_speed = C.GAMEPLAY.INITIAL_TRUCK_SPEED,
     }
 
     instance.upgrades_purchased = {}

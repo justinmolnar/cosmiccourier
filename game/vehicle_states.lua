@@ -11,33 +11,33 @@ function moveAlongPath(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then return end
 
     local target_node = vehicle.path[1]
-    local target_px, target_py = game.map:getDowntownPixelCoords(target_node.x, target_node.y)
+    local target_px, target_py = game.map:getPixelCoords(target_node.x, target_node.y)
 
     local angle = math.atan2(target_py - vehicle.py, target_px - vehicle.px)
     
-    -- *** FIX: Adjust the bike's speed based on the current map scale ***
-    local base_speed = game.state.upgrades.bike_speed
-    local current_speed = base_speed
-
-    if game.map:getCurrentScale() ~= game.C.MAP.SCALES.DOWNTOWN then
-        -- If we are zoomed out, we need to scale the speed down.
-        -- The ratio is the size of a city tile divided by the size of a downtown tile.
-        local scale_ratio = game.C.MAP.TILE_SIZE / 16 -- e.g., 2 / 16 = 0.125
-        current_speed = base_speed * scale_ratio
+    -- Step 1: Get the correct base speed for the vehicle type
+    local base_speed
+    if vehicle.type == "truck" then
+        base_speed = game.state.upgrades.truck_speed
+    else -- Default to bike
+        base_speed = game.state.upgrades.bike_speed
     end
     
-    -- Calculate distance to target
+    -- Step 2: Normalize the speed. The original speed was balanced for a visual
+    -- tile size of 16. Our new world tile size is 2. So we must scale it down.
+    local speed_normalization_factor = 16 / game.C.MAP.TILE_SIZE -- e.g. 16 / 2 = 8
+    local normalized_speed = base_speed / speed_normalization_factor
+    
+    -- Step 3: Calculate the distance to travel in world units using the normalized speed
+    local travel_dist = normalized_speed * dt
+
     local dist_x = target_px - vehicle.px
     local dist_y = target_py - vehicle.py
     local dist_sq = dist_x * dist_x + dist_y * dist_y
 
-    -- The distance we will travel this frame, using the correctly scaled speed
-    local travel_dist = current_speed * dt
-
     if dist_sq < travel_dist * travel_dist then
         vehicle.grid_anchor = {x = target_node.x, y = target_node.y}
-        vehicle.px = target_px
-        vehicle.py = target_py
+        vehicle:recalculatePixelPosition(game)
         table.remove(vehicle.path, 1)
     else
         vehicle.px = vehicle.px + math.cos(angle) * travel_dist
@@ -81,24 +81,32 @@ States.ReturningToDepot.name = "Returning"
 function States.ReturningToDepot:enter(vehicle, game)
     print(string.format("Bike %d returning to depot.", vehicle.id))
     
-    local current_pos = vehicle.grid_anchor -- Use the reliable anchor
+    local current_pos = vehicle.grid_anchor
     if current_pos.x == vehicle.depot_plot.x and current_pos.y == vehicle.depot_plot.y then
         vehicle.path = {} 
         return
     end
 
-    local downtown_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
-    local start_node = game.map:findNearestDowntownRoadTile(current_pos)
-    local end_node = game.map:findNearestDowntownRoadTile(vehicle.depot_plot)
+    local path_grid = game.map.grid
+    local start_node = game.map:findNearestRoadTile(current_pos)
+    local end_node = game.map:findNearestRoadTile(vehicle.depot_plot)
 
     if not start_node or not end_node then
         print(string.format("ERROR: Bike %d cannot find a path to depot. Stuck!", vehicle.id))
-        vehicle.path = {}
+        vehicle:changeState(States.Stuck, game)
         return
     end
 
-    vehicle.path = game.pathfinder.findPath(downtown_grid, start_node, end_node, game.C.GAMEPLAY.PATHFINDING_COSTS)
-    if vehicle.path then table.remove(vehicle.path, 1) end
+    local costs = game.C.GAMEPLAY.PATHFINDING_COSTS[vehicle.type]
+    vehicle.path = game.pathfinder.findPath(path_grid, start_node, end_node, costs, game.map)
+
+    if not vehicle.path then
+        print(string.format("ERROR: Bike %d could not find path to depot.", vehicle.id))
+        vehicle:changeState(States.Stuck, game)
+        return
+    end
+
+    if #vehicle.path > 0 then table.remove(vehicle.path, 1) end
 end
 
 function States.ReturningToDepot:update(dt, vehicle, game)
@@ -127,26 +135,26 @@ function States.GoToPickup:enter(vehicle, game)
     
     local leg = trip_to_get.legs[trip_to_get.current_leg]
     
-    local path_grid, start_node, end_node
-
-    if vehicle.type == "bike" then
-        path_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
-        start_node = game.map:findNearestDowntownRoadTile(current_pos)
-        end_node = game.map:findNearestDowntownRoadTile(leg.start_plot)
-    else -- Trucks and other city-scale vehicles
-        path_grid = game.map.scale_grids[game.C.MAP.SCALES.CITY]
-        start_node = game.map:findNearestRoadTile(current_pos)
-        end_node = game.map:findNearestRoadTile(leg.start_plot)
-    end
+    local path_grid = game.map.grid
+    local start_node = game.map:findNearestRoadTile(current_pos)
+    local end_node = game.map:findNearestRoadTile(leg.start_plot)
 
     if not start_node or not end_node or not path_grid then
         print(string.format("ERROR: %s %d cannot find path to pickup. Missing start/end/grid.", vehicle.type, vehicle.id))
-        vehicle.path = {}
+        vehicle:changeState(States.Stuck, game)
         return
     end
 
-    vehicle.path = game.pathfinder.findPath(path_grid, start_node, end_node, game.C.GAMEPLAY.PATHFINDING_COSTS)
-    if vehicle.path then table.remove(vehicle.path, 1) end
+    local costs = game.C.GAMEPLAY.PATHFINDING_COSTS[vehicle.type]
+    vehicle.path = game.pathfinder.findPath(path_grid, start_node, end_node, costs, game.map)
+    
+    if not vehicle.path then
+        print(string.format("ERROR: %s %d could not find path to pickup location.", vehicle.type, vehicle.id))
+        vehicle:changeState(States.Stuck, game)
+        return
+    end
+
+    if #vehicle.path > 0 then table.remove(vehicle.path, 1) end
 end
 
 
@@ -202,35 +210,24 @@ function States.GoToDropoff:enter(vehicle, game)
     print(string.format("%s %d going to dropoff.", vehicle.type, vehicle.id))
 
     local current_pos = vehicle.grid_anchor
-    local path_grid, start_node
-    
-    if vehicle.type == "bike" then
-        path_grid = game.map.scale_grids[game.C.MAP.SCALES.DOWNTOWN]
-        start_node = game.map:findNearestDowntownRoadTile(current_pos)
-    else -- Trucks and other city-scale vehicles
-        path_grid = game.map.scale_grids[game.C.MAP.SCALES.CITY]
-        start_node = game.map:findNearestRoadTile(current_pos)
-    end
+    local path_grid = game.map.grid
+    local start_node = game.map:findNearestRoadTile(current_pos)
 
     local best_path, shortest_len = nil, math.huge
     
     if not start_node or not path_grid then
         print(string.format("ERROR: %s %d cannot find starting road for dropoff. Stuck!", vehicle.type, vehicle.id))
-        vehicle.path = {}
+        vehicle:changeState(States.Stuck, game)
         return
     end
 
     for _, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
-        local end_node
-        if vehicle.type == "bike" then
-            end_node = game.map:findNearestDowntownRoadTile(leg.end_plot)
-        else
-            end_node = game.map:findNearestRoadTile(leg.end_plot)
-        end
+        local end_node = game.map:findNearestRoadTile(leg.end_plot)
         
         if end_node and (end_node.x ~= start_node.x or end_node.y ~= start_node.y) then
-            local path = game.pathfinder.findPath(path_grid, start_node, end_node, game.C.GAMEPLAY.PATHFINDING_COSTS)
+            local costs = game.C.GAMEPLAY.PATHFINDING_COSTS[vehicle.type]
+            local path = game.pathfinder.findPath(path_grid, start_node, end_node, costs, game.map)
             if path and #path < shortest_len then
                 shortest_len = #path
                 best_path = path
@@ -238,7 +235,13 @@ function States.GoToDropoff:enter(vehicle, game)
         end
     end
 
-    vehicle.path = best_path or {}
+    if not best_path then
+        print(string.format("ERROR: %s %d could not find a path to any dropoff.", vehicle.type, vehicle.id))
+        vehicle:changeState(States.Stuck, game)
+        return
+    end
+
+    vehicle.path = best_path
     if #vehicle.path > 0 then 
         table.remove(vehicle.path, 1) 
     end
@@ -324,5 +327,27 @@ function States.DecideNextAction:enter(vehicle, game)
         vehicle:changeState(States.ReturningToDepot, game)
     end
 end
+
+--------------------------------------------------------------------------------
+-- State: Stuck (Failsafe)
+--------------------------------------------------------------------------------
+States.Stuck = State:new()
+States.Stuck.name = "Stuck"
+function States.Stuck:enter(vehicle, game)
+    -- When a vehicle gets stuck, remember what it was trying to do.
+    vehicle.last_state_before_stuck = vehicle.state
+    vehicle.stuck_timer = 15 -- Wait 15 seconds before retrying
+    print(string.format("WARNING: %s %d is stuck, will retry pathfinding in %ds.", vehicle.type, vehicle.id, vehicle.stuck_timer))
+end
+
+function States.Stuck:update(dt, vehicle, game)
+    vehicle.stuck_timer = vehicle.stuck_timer - dt
+    if vehicle.stuck_timer <= 0 then
+        -- Timer is up, try to do the last action again.
+        local previous_state = vehicle.last_state_before_stuck or States.DecideNextAction
+        vehicle:changeState(previous_state, game)
+    end
+end
+
 
 return States
