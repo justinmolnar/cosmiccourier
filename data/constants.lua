@@ -73,8 +73,8 @@ local C = {
         BONUS_DECAY_RATE        = 1.0,
         MIN_DELTA_CALCULATION   = 0.1,
         CURRENT_MAP_SCALE       = 1,
-        
-        -- REMOVED: The PATHFINDING_COSTS table has been moved.
+        VEHICLE_CLICK_RADIUS    = 10,
+        BASE_TILE_SIZE          = 16,
     },
 
     ZOOM = {

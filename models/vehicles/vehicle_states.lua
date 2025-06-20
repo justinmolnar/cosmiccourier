@@ -14,7 +14,7 @@ function moveAlongPath(dt, vehicle, game)
     local target_px, target_py = game.map:getPixelCoords(target_node.x, target_node.y)
 
     local angle = math.atan2(target_py - vehicle.py, target_px - vehicle.px)
-    
+
     -- Step 1: Get the correct base speed for the vehicle type
     local base_speed
     if vehicle.type == "truck" then
@@ -22,12 +22,12 @@ function moveAlongPath(dt, vehicle, game)
     else -- Default to bike
         base_speed = game.state.upgrades.bike_speed
     end
-    
+
     -- Step 2: Normalize the speed. The original speed was balanced for a visual
     -- tile size of 16. Our new world tile size is 2. So we must scale it down.
-    local speed_normalization_factor = 16 / game.C.MAP.TILE_SIZE -- e.g. 16 / 2 = 8
+    local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / game.C.MAP.TILE_SIZE
     local normalized_speed = base_speed / speed_normalization_factor
-    
+
     -- Step 3: Calculate the distance to travel in world units using the normalized speed
     local travel_dist = normalized_speed * dt
 

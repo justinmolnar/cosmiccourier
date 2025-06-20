@@ -93,7 +93,7 @@ end
 function Entities:handle_click(x, y, game)
     for _, vehicle in ipairs(self.vehicles) do
         local dist_sq = (x - vehicle.px)^2 + (y - vehicle.py)^2
-        if dist_sq < 100 then
+        if dist_sq < game.C.GAMEPLAY.VEHICLE_CLICK_RADIUS * game.C.GAMEPLAY.VEHICLE_CLICK_RADIUS then
             self.selected_vehicle = vehicle
             print("Selected " .. vehicle.type .. " " .. vehicle.id)
             return true
