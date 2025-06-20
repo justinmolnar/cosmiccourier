@@ -10,6 +10,12 @@ function Camera:new(x, y, scale)
     return instance
 end
 
+function Camera:screenToWorld(x, y, game)
+    local CoordinateSystem = require("utils.CoordinateSystem")
+    local coord_system = CoordinateSystem.new(game.C)
+    return coord_system:screenToWorld(x, y, self)
+end
+
 function Camera:apply()
     love.graphics.push()
     love.graphics.scale(self.scale, self.scale)

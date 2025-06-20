@@ -2,6 +2,19 @@
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
+function Vehicle:drawIcon(game, icon)
+    love.graphics.setFont(game.fonts.emoji)
+    love.graphics.setColor(0, 0, 0) -- Black
+
+    love.graphics.push()
+    love.graphics.translate(self.px, self.py)
+    love.graphics.scale(1 / game.camera.scale, 1 / game.camera.scale)
+    love.graphics.print(icon, -14, -14) -- Center the emoji
+    love.graphics.pop()
+
+    love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
+end
+
 function Vehicle:new(id, depot_plot, game, vehicleType, properties)
     -- THIS IS THE FIX: By requiring the states file here, we avoid the
     -- circular dependency that happens during the initial game load.

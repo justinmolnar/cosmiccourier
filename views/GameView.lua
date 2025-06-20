@@ -1,4 +1,7 @@
 -- views/GameView.lua
+local Bike = require("models.vehicles.Bike")
+local Truck = require("models.vehicles.Truck")
+
 local GameView = {}
 GameView.__index = GameView
 
@@ -79,6 +82,7 @@ function GameView:draw()
             local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1) and Game.map:findNearestRoadTile(Game.entities.depot_plot) or Game.map:findNearestRoadTile(leg.start_plot)
             local end_node = Game.map:findNearestRoadTile(leg.end_plot)
             if start_node and end_node and path_grid then
+                -- FIX: Get pathfinding costs from the vehicle classes that are now properly required
                 local costs = leg.vehicleType == "bike" and Bike.PROPERTIES.pathfinding_costs or Truck.PROPERTIES.pathfinding_costs
                 local path = Game.pathfinder.findPath(path_grid, start_node, end_node, costs, Game.map)
                 if path then

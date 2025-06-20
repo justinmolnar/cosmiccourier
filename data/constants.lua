@@ -17,6 +17,7 @@ local C = {
         BUTTONS_Y_START     = 300,
         BUTTONS_Y_STEP      = 40,
         BUTTON_HEIGHT       = 30,
+        VEHICLE_CLICK_RADIUS = 10, -- Moved from GAMEPLAY
     },
 
     MAP = {
@@ -60,8 +61,7 @@ local C = {
 
     GAMEPLAY = {
         INITIAL_MONEY           = 150,
-        -- REMOVED: INITIAL_BIKE_SPEED
-        -- REMOVED: INITIAL_TRUCK_SPEED
+        -- REMOVED: INITIAL_BIKE_SPEED and INITIAL_TRUCK_SPEED (now in vehicle properties)
         BASE_TRIP_PAYOUT        = 50,
         CITY_TRIP_PAYOUT_MULTIPLIER = 20,
         INITIAL_SPEED_BONUS     = 100,
@@ -73,7 +73,7 @@ local C = {
         BONUS_DECAY_RATE        = 1.0,
         MIN_DELTA_CALCULATION   = 0.1,
         CURRENT_MAP_SCALE       = 1,
-        VEHICLE_CLICK_RADIUS    = 10,
+        -- REMOVED: VEHICLE_CLICK_RADIUS (moved to UI)
         BASE_TILE_SIZE          = 16,
     },
 
@@ -88,16 +88,14 @@ local C = {
     },
 
     COSTS = {
-        -- REMOVED: BIKE
-        -- REMOVED: TRUCK
+        -- REMOVED: BIKE and TRUCK (now handled in GameState with proper values)
         SPEED           = 75,
         CLIENT          = 500,
         AUTO_DISPATCH   = 1000,
         CAPACITY        = 2500,
         FRENZY_DURATION = 5000,
 
-        -- REMOVED: BIKE_MULT
-        -- REMOVED: TRUCK_MULT
+        -- REMOVED: BIKE_MULT and TRUCK_MULT (moved to GameState)
         SPEED_MULT      = 1.5,
         CLIENT_MULT     = 1.2,
         CAPACITY_MULT   = 1.5,

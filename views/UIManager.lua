@@ -195,7 +195,9 @@ function UIManager:_doLayout(game)
                     x = icon_x_cursor,
                     y = upgrade_y_cursor,
                     w = icon_size,
-                    h = icon_size + 15
+                    h = icon_size + 15,
+                    event = "ui_upgrade_button_clicked",
+                    data = sub_type
                 })
                 icon_x_cursor = icon_x_cursor + icon_size + icon_padding
             end

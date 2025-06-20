@@ -50,23 +50,21 @@ function Entities:addClient(game)
 end
 
 function Entities:addVehicle(game, vehicleType)
-    if not vehicleType then
-        print("ERROR: addVehicle called without a vehicleType.")
+    local VehicleFactory = require("models.VehicleFactory")
+    
+    if not VehicleFactory.isValidVehicleType(vehicleType) then
+        print("ERROR: Invalid vehicle type: " .. tostring(vehicleType))
         return
     end
 
-    if self.depot_plot then
-        local VehicleClass = require("models.vehicles." .. vehicleType)
-        if not VehicleClass then
-            print("ERROR: Could not find vehicle class for type: " .. vehicleType)
-            return
-        end
-
-        local new_id = #self.vehicles + 1
-        local new_vehicle = VehicleClass:new(new_id, self.depot_plot, game)
-        table.insert(self.vehicles, new_vehicle)
-        print("New " .. vehicleType .. " #" .. new_id .. " purchased.")
+    if not self.depot_plot then
+        print("ERROR: No depot plot available for vehicle creation")
+        return
     end
+
+    local new_id = #self.vehicles + 1
+    local new_vehicle = VehicleFactory.createVehicle(vehicleType, new_id, self.depot_plot, game)
+    table.insert(self.vehicles, new_vehicle)
 end
 
 function Entities:update(dt, game)
@@ -93,7 +91,8 @@ end
 function Entities:handle_click(x, y, game)
     for _, vehicle in ipairs(self.vehicles) do
         local dist_sq = (x - vehicle.px)^2 + (y - vehicle.py)^2
-        if dist_sq < game.C.GAMEPLAY.VEHICLE_CLICK_RADIUS * game.C.GAMEPLAY.VEHICLE_CLICK_RADIUS then
+        -- FIX: Use the click radius from the correct location in constants
+        if dist_sq < game.C.UI.VEHICLE_CLICK_RADIUS * game.C.UI.VEHICLE_CLICK_RADIUS then
             self.selected_vehicle = vehicle
             print("Selected " .. vehicle.type .. " " .. vehicle.id)
             return true

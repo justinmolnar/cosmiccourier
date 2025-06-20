@@ -57,15 +57,7 @@ function InputController:mousepressed(x, y, button)
         end
         
         if x >= Game.C.UI.SIDEBAR_WIDTH then
-            local game_world_w = love.graphics.getWidth() - Game.C.UI.SIDEBAR_WIDTH
-            local game_world_h = love.graphics.getHeight()
-            
-            local screen_x = x - (Game.C.UI.SIDEBAR_WIDTH + game_world_w / 2)
-            local screen_y = y - (game_world_h / 2)
-            local scaled_x = screen_x / Game.camera.scale
-            local scaled_y = screen_y / Game.camera.scale
-            local world_x = scaled_x + Game.camera.x
-            local world_y = scaled_y + Game.camera.y
+            local world_x, world_y = Game.camera:screenToWorld(x, y, Game)
             
             local event_handled = Game.event_spawner:handle_click(world_x, world_y, Game)
             if not event_handled then

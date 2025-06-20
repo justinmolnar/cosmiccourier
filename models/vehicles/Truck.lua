@@ -66,18 +66,7 @@ end
 -- Override the draw method for trucks
 function Truck:draw(game)
     Vehicle.draw(self, game)
-
-    love.graphics.setFont(game.fonts.emoji)
-    love.graphics.setColor(0, 0, 0) -- Black
-
-    -- FIX: Apply a counter-scale to keep the icon size consistent
-    love.graphics.push()
-    love.graphics.translate(self.px, self.py)
-    love.graphics.scale(1 / game.camera.scale, 1 / game.camera.scale)
-    love.graphics.print("🚚", -14, -14) -- Center the emoji
-    love.graphics.pop()
-
-    love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
+    self:drawIcon(game, "🚚")
 end
 
 return Truck

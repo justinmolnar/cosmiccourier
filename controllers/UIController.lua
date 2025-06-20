@@ -8,9 +8,29 @@ function UIController:new(game_instance)
     return instance
 end
 
+function UIController:handleGenericButtonClick(x, y, buttons_list, game)
+    for _, button_data in ipairs(buttons_list) do
+        if self:isMouseInButton(x, y, button_data) then
+            if button_data.event then
+                if button_data.data then
+                    game.EventBus:publish(button_data.event, button_data.data)
+                else
+                    game.EventBus:publish(button_data.event, button_data.id)
+                end
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function UIController:isMouseInButton(x, y, btn)
+    if not btn then return false end
+    return x > btn.x and x < btn.x + btn.w and y > btn.y and y < btn.y + btn.h
+end
+
 function UIController:handleMouseDown(x, y, button)
     local Game = self.Game
-    -- CORRECTED: Use ui_manager
     local ui_manager = Game.ui_manager
 
     if ui_manager.modal_manager:handle_mouse_down(x, y, Game) then return true end
@@ -26,45 +46,34 @@ function UIController:handleMouseDown(x, y, button)
     end
     
     if ui_manager.upgrades_accordion.is_open then
-        local Modal = require("views.components.Modal")
-        for _, btn in ipairs(ui_manager.layout_cache.upgrades.buttons) do
-            if x > btn.x and x < btn.x + btn.w and y > btn.y and y < btn.y + btn.h then
-                local tech_tree_data = nil
-                for _, category in ipairs(Game.state.Upgrades.categories) do
-                    for _, sub_type in ipairs(category.sub_types) do
-                        if sub_type.id == btn.id then
-                            tech_tree_data = sub_type
-                            break
-                        end
-                    end
-                    if tech_tree_data then break end
-                end
-
-                if tech_tree_data then
+        -- Use generic button handler for upgrade buttons
+        if self:handleGenericButtonClick(x, y, ui_manager.layout_cache.upgrades.buttons, Game) then
+            local Modal = require("views.components.Modal")
+            -- Find the clicked button to get its data
+            for _, btn in ipairs(ui_manager.layout_cache.upgrades.buttons) do
+                if self:isMouseInButton(x, y, btn) then
                     local modal_title = btn.name .. " Upgrades"
                     local on_close = function() ui_manager.modal_manager:hide() end
-                    local new_modal = Modal:new(modal_title, 800, 600, on_close, tech_tree_data)
+                    local new_modal = Modal:new(modal_title, 800, 600, on_close, btn.data)
                     ui_manager.modal_manager:show(new_modal)
+                    break
                 end
-                return true
             end
+            return true
         end
     end
 
-    local hire_bike_btn = ui_manager.layout_cache.buttons.hire_bike
-    if hire_bike_btn and x > hire_bike_btn.x and x < hire_bike_btn.x + hire_bike_btn.w and y > hire_bike_btn.y and y < hire_bike_btn.y + hire_bike_btn.h then
+    if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.hire_bike) then
         Game.EventBus:publish("ui_buy_vehicle_clicked", "bike")
         return true
     end
 
-    local hire_truck_btn = ui_manager.layout_cache.buttons.hire_truck
-    if hire_truck_btn and x > hire_truck_btn.x and x < hire_truck_btn.x + hire_truck_btn.w and y > hire_truck_btn.y and y < hire_truck_btn.y + hire_truck_btn.h then
+    if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.hire_truck) then
         Game.EventBus:publish("ui_buy_vehicle_clicked", "truck")
         return true
     end
 
-    local client_btn = ui_manager.layout_cache.buttons.buy_client
-    if client_btn and x > client_btn.x and x < client_btn.x + client_btn.w and y > client_btn.y and y < client_btn.y + client_btn.h then
+    if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.buy_client) then
         Game.EventBus:publish("ui_buy_client_clicked")
         return true
     end

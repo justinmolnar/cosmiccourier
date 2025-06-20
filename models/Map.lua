@@ -40,6 +40,30 @@ function Map:isRoad(tile_type)
            tile_type == "highway_ew"
 end
 
+local function getTileColor(tile_type, is_in_downtown, C_MAP)
+    if is_in_downtown then
+        if tile_type == "road" or tile_type == "downtown_road" or 
+           tile_type == "arterial" or tile_type == "highway" or 
+           tile_type == "highway_ring" or tile_type == "highway_ns" or 
+           tile_type == "highway_ew" then
+            return C_MAP.COLORS.DOWNTOWN_ROAD
+        else
+            return C_MAP.COLORS.DOWNTOWN_PLOT
+        end
+    else
+        if tile_type == "road" or tile_type == "downtown_road" or 
+           tile_type == "arterial" or tile_type == "highway" or 
+           tile_type == "highway_ring" or tile_type == "highway_ns" or 
+           tile_type == "highway_ew" then
+            return C_MAP.COLORS.ROAD
+        elseif tile_type == "grass" then 
+            return C_MAP.COLORS.GRASS 
+        else
+            return C_MAP.COLORS.PLOT
+        end
+    end
+end
+
 local function floodFill(grid, start_x, start_y, road_check_func)
     local w, h = #grid[1], #grid
     if not inBounds(start_x, start_y, w, h) or not road_check_func(grid[start_y][start_x].type) then
@@ -93,57 +117,8 @@ end
 -- == MASTER GENERATION FUNCTION (Using modular generators)
 -- =============================================================================
 function Map:generate()
-    print("Beginning unified map generation process...")
-    local C_MAP = self.C.MAP
-    
-    self.grid = createGrid(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, "grass")
-    
-    local downtown_w = C_MAP.DOWNTOWN_GRID_WIDTH
-    local downtown_h = C_MAP.DOWNTOWN_GRID_HEIGHT
-    self.downtown_offset = {
-        x = math.floor((C_MAP.CITY_GRID_WIDTH - downtown_w) / 2),
-        y = math.floor((C_MAP.CITY_GRID_HEIGHT - downtown_h) / 2)
-    }
-    
-    local downtown_district = {
-        x = self.downtown_offset.x, y = self.downtown_offset.y,
-        w = downtown_w, h = downtown_h
-    }
-    
-    require("models.generators.downtown").generateDowntownModule(self.grid, downtown_district, C_MAP)
-    print("Generated Downtown Core onto main grid...")
-
-    local all_districts = Districts.generateAll(self.grid, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, downtown_district)
-    print("Generated districts and their internal roads using Districts module")
-
-    local ring_road_nodes = RingRoad.generatePath(all_districts, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT)
-    local ring_road_curve = {}
-    if #ring_road_nodes > 0 then ring_road_curve = self:generateSplinePoints(ring_road_nodes, 10) end
-    
-    local ns_highway_paths = HighwayNS.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, all_districts)
-    local ew_highway_paths = HighwayEW.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, all_districts)
-    local all_highway_paths = {}
-    for _, path in ipairs(ns_highway_paths) do table.insert(all_highway_paths, path) end
-    for _, path in ipairs(ew_highway_paths) do table.insert(all_highway_paths, path) end
-
-    local merged_highway_paths = HighwayMerger.applyMergingLogic(all_highway_paths, ring_road_curve)
-    
-    self:drawAllRoadsToGrid(self.grid, ring_road_curve, merged_highway_paths, {})
-    print("Generated and drew highways.")
-    
-    local highway_points = self:extractHighwayPoints(ring_road_curve, merged_highway_paths)
-    local connections = ConnectingRoads.generateConnections(self.grid, all_districts, highway_points, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, Game)
-    
-    -- FIX: Pass the 'Game' object to drawConnections
-    ConnectingRoads.drawConnections(self.grid, connections, Game)
-    print("Generated and drew connecting roads.")
-    
-    self.building_plots = self:getPlotsFromGrid(self.grid)
-    
-    self.scale_grids = nil
-    self.scale_building_plots = nil
-    
-    print("Unified map generation complete. Found " .. #self.building_plots .. " valid building plots.")
+    local MapGenerationService = require("services.MapGenerationService")
+    MapGenerationService.generateMap(self)
 end
 
 function Map:generateCityModuleModular(downtown_grid_module)
@@ -413,9 +388,6 @@ function Map:drawGrid(grid, alpha)
     if not grid or #grid == 0 then return end
     
     local grid_h, grid_w = #grid, #grid[1]
-    
-    -- FIX: The tile size should ALWAYS be the base size from constants.
-    -- The camera's scale will handle making it look bigger or smaller.
     local tile_size = C_MAP.TILE_SIZE
     
     local dt_x_min = self.downtown_offset.x
@@ -428,22 +400,7 @@ function Map:drawGrid(grid, alpha)
             local tile = grid[y][x]
             local is_in_downtown = (x >= dt_x_min and x < dt_x_max and y >= dt_y_min and y < dt_y_max)
             
-            local color
-            if is_in_downtown then
-                if self:isRoad(tile.type) then
-                    color = C_MAP.COLORS.DOWNTOWN_ROAD
-                else
-                    color = C_MAP.COLORS.DOWNTOWN_PLOT
-                end
-            else
-                if self:isRoad(tile.type) then
-                    color = C_MAP.COLORS.ROAD
-                elseif tile.type == "grass" then 
-                    color = C_MAP.COLORS.GRASS 
-                else
-                    color = C_MAP.COLORS.PLOT
-                end
-            end
+            local color = getTileColor(tile.type, is_in_downtown, C_MAP)
             
             love.graphics.setColor(color[1], color[2], color[3], alpha or 1)
             love.graphics.rectangle("fill", (x-1) * tile_size, (y-1) * tile_size, tile_size, tile_size)
