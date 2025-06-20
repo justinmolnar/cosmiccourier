@@ -14,6 +14,14 @@ function MapGenerationService.generateMap(map)
     print("MapGenerationService: Beginning unified map generation process...")
     local C_MAP = map.C.MAP
     
+    -- Use debug parameters from the map if available
+    local params = map.debug_params or {}
+    
+    print("MapGenerationService: Using debug parameters:")
+    for key, value in pairs(params) do
+        print(string.format("  %s: %s", key, tostring(value)))
+    end
+    
     -- Validate constants are numbers
     local downtown_w = tonumber(C_MAP.DOWNTOWN_GRID_WIDTH)
     local downtown_h = tonumber(C_MAP.DOWNTOWN_GRID_HEIGHT)
@@ -41,16 +49,16 @@ function MapGenerationService.generateMap(map)
     }
     
     -- Generate downtown core
-    MapGenerationService._generateDowntown(map.grid, downtown_district, C_MAP)
+    MapGenerationService._generateDowntown(map.grid, downtown_district, C_MAP, params)
     
     -- Generate districts
-    local all_districts = MapGenerationService._generateDistricts(map.grid, downtown_district, C_MAP)
+    local all_districts = MapGenerationService._generateDistricts(map.grid, downtown_district, C_MAP, params)
     
     -- Generate highway network
-    local highway_paths = MapGenerationService._generateHighways(all_districts, C_MAP)
+    local highway_paths = MapGenerationService._generateHighways(all_districts, C_MAP, params)
     
     -- Generate connecting roads
-    MapGenerationService._generateConnectingRoads(map.grid, all_districts, highway_paths, C_MAP)
+    MapGenerationService._generateConnectingRoads(map.grid, all_districts, highway_paths, C_MAP, params)
     
     -- Extract building plots
     map.building_plots = map:getPlotsFromGrid(map.grid)
@@ -73,45 +81,51 @@ function MapGenerationService._createGrid(width, height, default_type)
     return grid
 end
 
-function MapGenerationService._generateDowntown(grid, downtown_district, C_MAP)
-    Downtown.generateDowntownModule(grid, downtown_district, "road", "plot", C_MAP.NUM_SECONDARY_ROADS)
-    print("MapGenerationService: Generated Downtown Core")
+function MapGenerationService._generateDowntown(grid, downtown_district, C_MAP, params)
+    Downtown.generateDowntownModule(grid, downtown_district, "road", "plot", C_MAP.NUM_SECONDARY_ROADS, params)
+    print("MapGenerationService: Generated Downtown Core with debug parameters")
 end
 
-function MapGenerationService._generateDistricts(grid, downtown_district, C_MAP)
-    local all_districts = Districts.generateAll(grid, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, downtown_district)
-    print("MapGenerationService: Generated districts and internal roads")
+function MapGenerationService._generateDistricts(grid, downtown_district, C_MAP, params)
+    local all_districts = Districts.generateAll(grid, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, downtown_district, nil, params)
+    print("MapGenerationService: Generated districts and internal roads with debug parameters")
     return all_districts
 end
 
-function MapGenerationService._generateHighways(all_districts, C_MAP)
-    local ring_road_nodes = RingRoad.generatePath(all_districts, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT)
-    local ring_road_curve = {}
-    if #ring_road_nodes > 0 then 
-        -- Note: generateSplinePoints would need to be moved to a utility
-        ring_road_curve = MapGenerationService._generateSplinePoints(ring_road_nodes, 10) 
+function MapGenerationService._generateHighways(all_districts, C_MAP, params)
+    local highway_paths = { ring_road = {}, highways = {} }
+    
+    -- Generate ring road if enabled
+    if params.generate_ringroad ~= false then
+        local ring_road_nodes = RingRoad.generatePath(all_districts, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, params)
+        if #ring_road_nodes > 0 then 
+            highway_paths.ring_road = MapGenerationService._generateSplinePoints(ring_road_nodes, 10) 
+        end
     end
     
-    local ns_highway_paths = HighwayNS.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, all_districts)
-    local ew_highway_paths = HighwayEW.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, all_districts)
-    
-    local all_highway_paths = {}
-    for _, path in ipairs(ns_highway_paths) do table.insert(all_highway_paths, path) end
-    for _, path in ipairs(ew_highway_paths) do table.insert(all_highway_paths, path) end
+    -- Generate highways if enabled
+    if params.generate_highways ~= false then
+        local ns_highway_paths = HighwayNS.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, all_districts, params)
+        local ew_highway_paths = HighwayEW.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, all_districts, params)
+        
+        local all_highway_paths = {}
+        for _, path in ipairs(ns_highway_paths) do table.insert(all_highway_paths, path) end
+        for _, path in ipairs(ew_highway_paths) do table.insert(all_highway_paths, path) end
 
-    local merged_highway_paths = HighwayMerger.applyMergingLogic(all_highway_paths, ring_road_curve)
+        highway_paths.highways = HighwayMerger.applyMergingLogic(all_highway_paths, highway_paths.ring_road, params)
+    end
     
-    print("MapGenerationService: Generated highways")
-    return { ring_road = ring_road_curve, highways = merged_highway_paths }
+    print("MapGenerationService: Generated highways with debug parameters")
+    return highway_paths
 end
 
-function MapGenerationService._generateConnectingRoads(grid, all_districts, highway_paths, C_MAP)
+function MapGenerationService._generateConnectingRoads(grid, all_districts, highway_paths, C_MAP, params)
     local highway_points = MapGenerationService._extractHighwayPoints(highway_paths.ring_road, highway_paths.highways)
-    local connections = ConnectingRoads.generateConnections(grid, all_districts, highway_points, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, Game)
+    local connections = ConnectingRoads.generateConnections(grid, all_districts, highway_points, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, params)
     
-    MapGenerationService._drawAllRoadsToGrid(grid, highway_paths.ring_road, highway_paths.highways, connections)
-    ConnectingRoads.drawConnections(grid, connections, Game)
-    print("MapGenerationService: Generated connecting roads")
+    MapGenerationService._drawAllRoadsToGrid(grid, highway_paths.ring_road, highway_paths.highways, connections, params)
+    ConnectingRoads.drawConnections(grid, connections, params)
+    print("MapGenerationService: Generated connecting roads with debug parameters")
 end
 
 function MapGenerationService._extractHighwayPoints(ring_road_curve, highway_paths)
@@ -131,23 +145,26 @@ function MapGenerationService._extractHighwayPoints(ring_road_curve, highway_pat
     return points
 end
 
-function MapGenerationService._drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, connections)
+function MapGenerationService._drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, connections, params)
+    local thickness = 3
+    
     -- Draw ring road
     if #ring_road_curve > 1 then
         for i = 1, #ring_road_curve - 1 do
             MapGenerationService._drawThickLineColored(grid, ring_road_curve[i].x, ring_road_curve[i].y, 
-                                     ring_road_curve[i+1].x, ring_road_curve[i+1].y, "highway_ring", 3)
+                                     ring_road_curve[i+1].x, ring_road_curve[i+1].y, "highway_ring", thickness)
         end
     end
     
     -- Draw highways
+    local num_ns_highways = (params and params.num_ns_highways) or 2
     for highway_idx, path_nodes in ipairs(merged_highway_paths) do
         local highway_curve = MapGenerationService._generateSplinePoints(path_nodes, 10)
-        local highway_type = highway_idx <= 2 and "highway_ns" or "highway_ew"
+        local highway_type = highway_idx <= num_ns_highways and "highway_ns" or "highway_ew"
         
         for i = 1, #highway_curve - 1 do
             MapGenerationService._drawThickLineColored(grid, highway_curve[i].x, highway_curve[i].y, 
-                                     highway_curve[i+1].x, highway_curve[i+1].y, highway_type, 3)
+                                     highway_curve[i+1].x, highway_curve[i+1].y, highway_type, thickness)
         end
     end
 end

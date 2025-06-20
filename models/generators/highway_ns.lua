@@ -3,18 +3,26 @@
 
 local HighwayNS = {}
 
-function HighwayNS.generatePaths(map_w, map_h, districts)
+function HighwayNS.generatePaths(map_w, map_h, districts, params)
     local paths = {}
     local EXTENSION = 100
     
-    -- 2 North-South highways at 33% and 67% of map width
-    local ns_positions = {map_w * 0.33, map_w * 0.67}
+    -- Use debug parameters or defaults
+    local num_highways = (params and params.num_ns_highways) or 2
+    local highway_step_size = (params and params.highway_step_size) or 30
+    local highway_curve_distance = (params and params.highway_curve_distance) or 50
+    local highway_buffer = (params and params.highway_buffer) or 35
     
-    for _, x_pos in ipairs(ns_positions) do
+    -- Generate specified number of North-South highways
+    for i = 1, num_highways do
+        local x_pos = map_w * (i / (num_highways + 1)) -- Distribute evenly
         local path = HighwayNS.createFlowingPath(
             {x = x_pos, y = -EXTENSION}, 
             {x = x_pos, y = map_h + EXTENSION}, 
-            districts
+            districts,
+            highway_step_size,
+            highway_curve_distance,
+            highway_buffer
         )
         table.insert(paths, path)
     end
@@ -22,10 +30,9 @@ function HighwayNS.generatePaths(map_w, map_h, districts)
     return paths
 end
 
-function HighwayNS.createFlowingPath(start_point, end_point, districts)
+function HighwayNS.createFlowingPath(start_point, end_point, districts, step_size, curve_distance, buffer)
     local path = {start_point}
     local current = {x = start_point.x, y = start_point.y}
-    local STEP_SIZE = 30
     
     while true do
         -- Calculate where we want to go (straight toward goal)
@@ -33,7 +40,7 @@ function HighwayNS.createFlowingPath(start_point, end_point, districts)
         local goal_dy = end_point.y - current.y
         local goal_distance = math.sqrt(goal_dx * goal_dx + goal_dy * goal_dy)
         
-        if goal_distance < STEP_SIZE * 1.5 then
+        if goal_distance < step_size * 1.5 then
             table.insert(path, end_point)
             break
         end
@@ -44,19 +51,20 @@ function HighwayNS.createFlowingPath(start_point, end_point, districts)
         
         -- Calculate next ideal position
         local ideal_next = {
-            x = current.x + goal_dir_x * STEP_SIZE,
-            y = current.y + goal_dir_y * STEP_SIZE
+            x = current.x + goal_dir_x * step_size,
+            y = current.y + goal_dir_y * step_size
         }
         
         -- Check if this ideal position conflicts with any district
-        local conflicting_district = HighwayNS.findConflictingDistrict(ideal_next, districts)
+        local conflicting_district = HighwayNS.findConflictingDistrict(ideal_next, districts, buffer)
         
         if conflicting_district then
             -- We need to curve around this district
             local curve_point = HighwayNS.calculateCurveAroundDistrict(
                 current, 
                 ideal_next, 
-                conflicting_district
+                conflicting_district,
+                curve_distance
             )
             table.insert(path, curve_point)
             current = curve_point
@@ -79,9 +87,7 @@ function HighwayNS.createFlowingPath(start_point, end_point, districts)
     return smoothed_path
 end
 
-function HighwayNS.findConflictingDistrict(point, districts)
-    local BUFFER = 35  -- How close is too close
-    
+function HighwayNS.findConflictingDistrict(point, districts, buffer)
     for _, district in ipairs(districts) do
         -- Check if point is too close to this district
         local dist_center_x = district.x + district.w / 2
@@ -91,7 +97,7 @@ function HighwayNS.findConflictingDistrict(point, districts)
             (point.x - dist_center_x)^2 + (point.y - dist_center_y)^2
         )
         
-        if distance < BUFFER then
+        if distance < buffer then
             return district
         end
     end
@@ -99,11 +105,10 @@ function HighwayNS.findConflictingDistrict(point, districts)
     return nil
 end
 
-function HighwayNS.calculateCurveAroundDistrict(current, ideal_next, district)
+function HighwayNS.calculateCurveAroundDistrict(current, ideal_next, district, curve_distance)
     -- Calculate district center and boundaries
     local dist_center_x = district.x + district.w / 2
     local dist_center_y = district.y + district.h / 2
-    local CURVE_DISTANCE = 50  -- How far to curve around
     
     -- Vector from district center to our ideal next position
     local away_x = ideal_next.x - dist_center_x
@@ -116,8 +121,8 @@ function HighwayNS.calculateCurveAroundDistrict(current, ideal_next, district)
         away_y = away_y / away_length
         
         -- Create a curve point that goes around the district
-        local curve_x = dist_center_x + away_x * CURVE_DISTANCE
-        local curve_y = dist_center_y + away_y * CURVE_DISTANCE
+        local curve_x = dist_center_x + away_x * curve_distance
+        local curve_y = dist_center_y + away_y * curve_distance
         
         -- For vertical highways, prefer curving left/right more than up/down
         curve_y = ideal_next.y * 0.7 + curve_y * 0.3

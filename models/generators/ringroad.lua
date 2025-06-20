@@ -3,8 +3,15 @@
 
 local RingRoad = {}
 
-function RingRoad.generatePath(districts, map_w, map_h)
-    local ring_road_nodes = RingRoad.getRingNodesFromDistricts(districts, map_w, map_h)
+function RingRoad.generatePath(districts, map_w, map_h, params)
+    -- Use debug parameters or defaults
+    local ring_min_angle = (params and params.ring_min_angle) or 45 -- degrees
+    local ring_min_arc_distance = (params and params.ring_min_arc_distance) or 30
+    local ring_edge_threshold = (params and params.ring_edge_threshold) or 0.1 -- percentage of map
+    local ring_center_distance_threshold = (params and params.ring_center_distance_threshold) or 0.15 -- percentage of map
+    
+    local ring_road_nodes = RingRoad.getRingNodesFromDistricts(districts, map_w, map_h, 
+                                                               ring_edge_threshold, ring_center_distance_threshold)
     
     if #ring_road_nodes <= 3 then
         return {}
@@ -18,7 +25,8 @@ function RingRoad.generatePath(districts, map_w, map_h)
     end)
     
     -- IMPROVED: More aggressive filtering of sharp angles
-    local smoothed_nodes = RingRoad.filterSharpAnglesAggressive(ring_road_nodes, center_x, center_y)
+    local smoothed_nodes = RingRoad.filterSharpAnglesAggressive(ring_road_nodes, center_x, center_y, 
+                                                               ring_min_angle, ring_min_arc_distance)
     
     -- Add padding nodes for spline generation
     if #smoothed_nodes >= 3 then
@@ -31,12 +39,12 @@ function RingRoad.generatePath(districts, map_w, map_h)
     return {}
 end
 
-function RingRoad.filterSharpAnglesAggressive(ring_nodes, center_x, center_y)
+function RingRoad.filterSharpAnglesAggressive(ring_nodes, center_x, center_y, min_angle_deg, min_arc_distance)
     if #ring_nodes < 4 then return ring_nodes end
     
     local filtered_nodes = {}
-    local VERY_SHARP_ANGLE = math.pi * 0.4  -- 72 degrees - catch more sharp angles
-    local EXTREMELY_CLOSE = 25              -- Only filter if extremely close
+    local VERY_SHARP_ANGLE = math.pi * (min_angle_deg / 180) -- Convert to radians
+    local EXTREMELY_CLOSE = min_arc_distance
     
     -- Always keep the first node
     table.insert(filtered_nodes, ring_nodes[1])
@@ -83,14 +91,14 @@ function RingRoad.filterSharpAnglesAggressive(ring_nodes, center_x, center_y)
     else
         print(string.format("Ring road filtering kept %d nodes, using fallback", #filtered_nodes))
         -- Fallback to more lenient filtering
-        return RingRoad.filterSharpAnglesLenient(ring_nodes, center_x, center_y)
+        return RingRoad.filterSharpAnglesLenient(ring_nodes, center_x, center_y, min_angle_deg / 3, min_arc_distance)
     end
 end
 
-function RingRoad.filterSharpAnglesLenient(ring_nodes, center_x, center_y)
+function RingRoad.filterSharpAnglesLenient(ring_nodes, center_x, center_y, min_angle_deg, min_arc_distance)
     local filtered_nodes = {}
-    local VERY_SHARP_ANGLE = math.pi * 0.15  -- 27 degrees - extremely sharp
-    local VERY_CLOSE = 20                    -- Very close
+    local VERY_SHARP_ANGLE = math.pi * (min_angle_deg / 180) -- Even more lenient
+    local VERY_CLOSE = min_arc_distance
     
     table.insert(filtered_nodes, ring_nodes[1])
     local last_kept_node = ring_nodes[1]
@@ -157,10 +165,10 @@ function RingRoad.wouldCreateBacktrack(prev_node, current_node, next_node, cente
     return false
 end
 
-function RingRoad.getRingNodesFromDistricts(districts, max_w, max_h)
+function RingRoad.getRingNodesFromDistricts(districts, max_w, max_h, edge_threshold, center_distance_threshold)
     local nodes = {}
     local center_x, center_y = max_w / 2, max_h / 2
-    local edge_threshold = max_w * 0.1
+    local edge_threshold_pixels = max_w * edge_threshold
     local map_corners = {{x=1,y=1}, {x=max_w,y=1}, {x=1,y=max_h}, {x=max_w,y=max_h}}
     
     print(string.format("Ring road generation: %d districts to consider", #districts))
@@ -169,7 +177,7 @@ function RingRoad.getRingNodesFromDistricts(districts, max_w, max_h)
         local district_distance = math.sqrt((dist.x+dist.w/2 - center_x)^2 + (dist.y+dist.h/2 - center_y)^2)
         
         -- Only consider districts that are far enough from downtown center
-        if district_distance >= max_w * 0.15 then
+        if district_distance >= max_w * center_distance_threshold then
             print(string.format("District %d: distance %.1f (considering for ring)", district_idx, district_distance))
             
             local district_corners = {
@@ -195,7 +203,7 @@ function RingRoad.getRingNodesFromDistricts(districts, max_w, max_h)
             
             -- STEP 2: If primary corner is too close to edge, use inner corner instead
             local edge_distance = math.min(primary_node.x, primary_node.y, max_w - primary_node.x, max_h - primary_node.y)
-            if edge_distance < edge_threshold then
+            if edge_distance < edge_threshold_pixels then
                 print(string.format("District %d: primary corner (%d,%d) too close to edge (dist: %.1f), finding inner corner", 
                       district_idx, primary_node.x, primary_node.y, edge_distance))
                 
@@ -233,7 +241,7 @@ function RingRoad.getRingNodesFromDistricts(districts, max_w, max_h)
                     for _, corner in ipairs(district_corners) do
                         -- Be more lenient about edge distance for alternatives
                         local corner_edge_dist = math.min(corner.x, corner.y, max_w - corner.x, max_h - corner.y)
-                        if corner_edge_dist >= edge_threshold * 0.5 then -- Half the normal threshold
+                        if corner_edge_dist >= edge_threshold_pixels * 0.5 then -- Half the normal threshold
                             local angle = RingRoad.calculateAngleAtPoint(second_last_node, last_node, corner)
                             if angle > best_angle then
                                 best_angle = angle

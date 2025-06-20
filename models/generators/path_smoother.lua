@@ -3,11 +3,19 @@
 
 local PathSmoother = {}
 
-function PathSmoother.smoothSharpAngles(path)
+function PathSmoother.smoothSharpAngles(path, params)
     if #path < 3 then return path end
     
+    -- Use debug parameters or defaults
+    local smoothing_enabled = (params and params.smoothing_enabled) ~= false -- Default true
+    local smoothing_max_angle_deg = (params and params.smoothing_max_angle) or 126 -- degrees
+    
+    if not smoothing_enabled then
+        return path -- Return original path if smoothing is disabled
+    end
+    
     local smoothed_path = {path[1]}  -- Keep first point
-    local MAX_ANGLE = math.pi * 0.7  -- About 126 degrees - anything sharper gets smoothed
+    local MAX_ANGLE = math.pi * (smoothing_max_angle_deg / 180) -- Convert to radians
     
     for i = 2, #path - 1 do
         local prev_point = path[i - 1]

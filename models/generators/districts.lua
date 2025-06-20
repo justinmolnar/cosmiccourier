@@ -3,34 +3,41 @@
 
 local Districts = {}
 
-function Districts.generateAll(grid, map_w, map_h, downtown_district)
+function Districts.generateAll(grid, map_w, map_h, downtown_district, map, params)
     local all_districts = {}
     
     -- 1. The downtown district is already generated, so we just add its definition to our list.
     table.insert(all_districts, downtown_district)
     
+    -- Use debug parameters or defaults
+    local num_districts = (params and params.num_districts) or 8
+    local district_min_size = (params and params.district_min_size) or 40
+    local district_max_size = (params and params.district_max_size) or 80
+    local district_placement_attempts = (params and params.district_placement_attempts) or 1000
+    
     -- 2. Generate non-overlapping districts using proper placement
-    local other_districts = Districts.placeNonOverlappingDistricts(grid, 8, map_w, map_h, downtown_district)
+    local other_districts = Districts.placeNonOverlappingDistricts(grid, num_districts, map_w, map_h, downtown_district, 
+                                                                   district_min_size, district_max_size, district_placement_attempts)
     for _, district in ipairs(other_districts) do
         table.insert(all_districts, district)
     end
     
     -- 3. Fill districts with connected road networks (like downtown)
     for _, district in ipairs(other_districts) do
-        Districts.generateConnectedRoadNetwork(grid, district)
+        Districts.generateConnectedRoadNetwork(grid, district, params)
     end
     
     return all_districts
 end
 
-function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_h, downtown_dist)
+function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_h, downtown_dist, 
+                                               district_min_size, district_max_size, max_attempts)
     local districts = {}
     local attempts = 0
-    local max_attempts = 1000
     
     while #districts < num_districts and attempts < max_attempts do
-        local w = love.math.random(40, 80)
-        local h = love.math.random(40, 80)
+        local w = love.math.random(district_min_size, district_max_size)
+        local h = love.math.random(district_min_size, district_max_size)
         local x = love.math.random(1, max_w - w)
         local y = love.math.random(1, max_h - h)
         
@@ -60,18 +67,6 @@ function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_
            x + w > max_w - min_border_distance or y + h > max_h - min_border_distance then
             overlaps = true
         end
-        
-        -- REMOVED THE TERRAIN SAMPLING THAT WAS CAUSING UNIFORM PLACEMENT
-        -- Original code was:
-        -- if valid then
-        --     for i = 1, 5 do
-        --         local cx, cy = love.math.random(x, x + w), love.math.random(y, y + h)
-        --         if not Districts.inBounds(cx, cy, max_w, max_h) or grid[cy][cx].type ~= 'plot' then
-        --             valid = false
-        --             break
-        --         end
-        --     end
-        -- end
         
         -- If no overlaps, add the district
         if not overlaps then
@@ -104,8 +99,12 @@ function Districts.doDistrictsOverlap(district1, district2)
     return not (d1_right < d2_left or d1_left > d2_right or d1_bottom < d2_top or d1_top > d2_bottom)
 end
 
-function Districts.generateConnectedRoadNetwork(grid, district)
+function Districts.generateConnectedRoadNetwork(grid, district, params)
     local grid_w, grid_h = #grid[1], #grid
+    
+    -- Use debug parameters or defaults
+    local district_roads_min = (params and params.district_roads_min) or 15
+    local district_roads_max = (params and params.district_roads_max) or 30
     
     -- First, fill the district area with plots
     for y = district.y, district.y + district.h - 1 do
@@ -117,10 +116,10 @@ function Districts.generateConnectedRoadNetwork(grid, district)
     end
     
     -- Create a connected road network similar to downtown
-    Districts.createConnectedRoads(grid, district)
+    Districts.createConnectedRoads(grid, district, district_roads_min, district_roads_max)
 end
 
-function Districts.createConnectedRoads(grid, district)
+function Districts.createConnectedRoads(grid, district, roads_min, roads_max)
     local grid_w, grid_h = #grid[1], #grid
     local road_tiles = {} -- Keep track of all road tiles for connectivity
     
@@ -148,7 +147,7 @@ function Districts.createConnectedRoads(grid, district)
     Districts.ensureMinimumBoundaryRoads(grid, district, road_tiles)
     
     -- Add secondary roads that connect to the main cross
-    local num_secondary_roads = 15 + love.math.random(0, 15)
+    local num_secondary_roads = roads_min + love.math.random(0, roads_max - roads_min)
     
     for i = 1, num_secondary_roads do
         if #road_tiles == 0 then break end

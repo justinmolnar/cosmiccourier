@@ -3,8 +3,15 @@
 
 local ConnectingRoads = {}
 
-function ConnectingRoads.generateConnections(grid, districts, highway_points, map_w, map_h)
+function ConnectingRoads.generateConnections(grid, districts, highway_points, map_w, map_h, params)
     print("Starting organic walker-based road generation...")
+    
+    -- Use debug parameters or defaults
+    local walker_connection_distance = (params and params.walker_connection_distance) or 25
+    local walker_split_chance = (params and params.walker_split_chance) or 0.05
+    local walker_turn_chance = (params and params.walker_turn_chance) or 0.15
+    local walker_max_active = (params and params.walker_max_active) or 3
+    local walker_death_rules_enabled = (params and params.walker_death_rules_enabled) ~= false -- Default true
     
     -- Find all district boundary road endpoints to start walkers from
     local starting_points = ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_points, map_w, map_h)
@@ -13,7 +20,9 @@ function ConnectingRoads.generateConnections(grid, districts, highway_points, ma
     -- Create walkers from starting points
     local all_walker_paths = {}
     for _, start_point in ipairs(starting_points) do
-        local walker_paths = ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, highway_points, map_w, map_h)
+        local walker_paths = ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, highway_points, map_w, map_h,
+                                                                   walker_connection_distance, walker_split_chance, 
+                                                                   walker_turn_chance, walker_max_active, walker_death_rules_enabled)
         for _, path in ipairs(walker_paths) do
             table.insert(all_walker_paths, path)
         end
@@ -23,7 +32,8 @@ function ConnectingRoads.generateConnections(grid, districts, highway_points, ma
     return all_walker_paths
 end
 
-function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, highway_points, map_w, map_h)
+function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, highway_points, map_w, map_h,
+                                               connection_distance, split_chance, turn_chance, max_active, death_rules_enabled)
     local walker_paths = {}
     
     -- Create ONE walker per boundary point
@@ -45,7 +55,8 @@ function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, hi
     
     while #active_walkers > 0 do
         local current_walker = table.remove(active_walkers, 1)
-        local walker_result = ConnectingRoads.stepWalker(current_walker, grid, districts, highway_points, map_w, map_h)
+        local walker_result = ConnectingRoads.stepWalker(current_walker, grid, districts, highway_points, map_w, map_h,
+                                                        connection_distance, turn_chance, death_rules_enabled)
         
         if walker_result.completed_path then
             table.insert(walker_paths, walker_result.completed_path)
@@ -56,7 +67,7 @@ function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, hi
         end
         
         -- Allow occasional splitting for more variety
-        if walker_result.split_walker and love.math.random() < 0.03 and #active_walkers < 2 then
+        if walker_result.split_walker and love.math.random() < split_chance and #active_walkers < max_active then
             table.insert(active_walkers, walker_result.split_walker)
         end
     end
@@ -64,7 +75,8 @@ function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, hi
     return walker_paths
 end
 
-function ConnectingRoads.stepWalker(walker, grid, districts, highway_points, map_w, map_h)
+function ConnectingRoads.stepWalker(walker, grid, districts, highway_points, map_w, map_h, 
+                                   connection_distance, turn_chance, death_rules_enabled)
     local result = {}
     
     -- Increment step counter
@@ -90,18 +102,20 @@ function ConnectingRoads.stepWalker(walker, grid, districts, highway_points, map
         return result
     end
     
-    -- DEATH CONDITION 4: Check if we're in a DIFFERENT district
-    local current_district = ConnectingRoads.findDistrictAtPosition(walker.x, walker.y, districts)
-    if current_district and current_district ~= walker.from_district then
-        result.completed_path = walker.path
-        return result
+    -- DEATH CONDITION 4: Check if we're in a DIFFERENT district (only if death rules enabled)
+    if death_rules_enabled then
+        local current_district = ConnectingRoads.findDistrictAtPosition(walker.x, walker.y, districts)
+        if current_district and current_district ~= walker.from_district then
+            result.completed_path = walker.path
+            return result
+        end
     end
     
     -- Walker survives, add current position to path
     table.insert(walker.path, {x = walker.x, y = walker.y})
     
     -- NEW ORGANIC DIRECTION LOGIC
-    ConnectingRoads.updateWalkerDirection(walker)
+    ConnectingRoads.updateWalkerDirection(walker, turn_chance)
     
     -- Move walker forward
     walker.x = walker.x + walker.direction.x
@@ -111,7 +125,7 @@ function ConnectingRoads.stepWalker(walker, grid, districts, highway_points, map
     return result
 end
 
-function ConnectingRoads.updateWalkerDirection(walker)
+function ConnectingRoads.updateWalkerDirection(walker, turn_chance)
     -- Start with current direction (momentum)
     local new_direction = {x = walker.direction.x, y = walker.direction.y}
     
@@ -149,7 +163,6 @@ function ConnectingRoads.updateWalkerDirection(walker)
     end
     
     -- Occasional random turns for more interesting paths
-    local turn_chance = 0.1 -- 10% chance per step
     if love.math.random() < turn_chance then
         ConnectingRoads.turnWalker(walker)
     end
@@ -326,7 +339,7 @@ function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_poin
     return boundary_points
 end
 
-function ConnectingRoads.drawConnections(grid, walker_paths)
+function ConnectingRoads.drawConnections(grid, walker_paths, params)
     -- Draw all the walker paths as thin roads
     for _, path in ipairs(walker_paths) do
         for i = 1, #path - 1 do

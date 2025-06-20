@@ -1,172 +1,164 @@
--- game/road_generator.lua
--- Hierarchical road network generation system with more variation
+-- game/generators/highway_merger.lua
+-- Highway Merging Logic Module - Simplified Fix
 
-local Districts = require("data.districts")
+local HighwayMerger = {}
 
-local RoadGenerator = {}
-
-function RoadGenerator.generateRoadNetwork(grid, grid_width, grid_height)
-    RoadGenerator.clearRoads(grid, grid_width, grid_height)
-    RoadGenerator.generatePrimaryHighways(grid, grid_width, grid_height)
-    RoadGenerator.generateSecondaryArterials(grid, grid_width, grid_height)
-    RoadGenerator.generateLocalNetworks(grid, grid_width, grid_height)
-end
-
-function RoadGenerator.clearRoads(grid, w, h)
-    for y = 1, h do
-        for x = 1, w do
-            if grid[y][x].type == "road" or grid[y][x].type == "highway" or grid[y][x].type == "arterial" then
-                grid[y][x].type = "grass"
-            end
-        end
-    end
-end
-
-function RoadGenerator.generatePrimaryHighways(grid, w, h)
-    local highways = Districts.ROAD_HIERARCHY.primary_highways
+function HighwayMerger.applyMergingLogic(highway_paths, ring_road_curve, params)
+    -- Use debug parameters or defaults
+    local merge_distance = (params and params.highway_merge_distance) or 50
+    local merge_strength = (params and params.highway_merge_strength) or 0.8
+    local parallel_merge_distance = (params and params.highway_parallel_merge_distance) or 80
+    local min_angle_difference = 0.7  -- Only merge if roads are going roughly same direction
     
-    for _, highway in ipairs(highways) do
-        local start_x = math.floor(w * highway.start_x_percent)
-        local start_y = math.floor(h * highway.start_y_percent)
-        local end_x = math.floor(w * highway.end_x_percent)
-        local end_y = math.floor(h * highway.end_y_percent)
-        RoadGenerator.drawLine(grid, start_x, start_y, end_x, end_y, "highway", w, h)
-    end
-end
-
-function RoadGenerator.generateSecondaryArterials(grid, w, h)
-    local districts = RoadGenerator.calculateDistrictBounds(w, h)
+    local merged_paths = {}
     
-    for _, district in ipairs(districts) do
-        if district.type ~= "park" then
-            local center_x = math.floor(w * district.center_x_percent)
-            local center_y = math.floor(h * district.center_y_percent)
-            local nearest_highway = RoadGenerator.findNearestHighway(grid, center_x, center_y, w, h)
-            if nearest_highway then
-                RoadGenerator.drawLine(grid, center_x, center_y, nearest_highway.x, nearest_highway.y, "arterial", w, h)
-            end
-        end
-    end
-end
-
-function RoadGenerator.generateLocalNetworks(grid, w, h)
-    local districts = RoadGenerator.calculateDistrictBounds(w, h)
-    
-    for _, district in ipairs(districts) do
-        if district.type == "industrial" then
-            RoadGenerator.generateIndustrialGrid(grid, district, w, h)
-        elseif district.type == "commercial" then
-            RoadGenerator.generateCommercialGrid(grid, district, w, h)
-        elseif district.type == "residential" then
-            RoadGenerator.generateResidentialNetwork(grid, district, w, h)
-        elseif district.type == "park" then
-            RoadGenerator.generateParkPaths(grid, district, w, h)
-        end
-    end
-end
-
-function RoadGenerator.calculateDistrictBounds(w, h)
-    local districts = {}
-    for _, template in ipairs(Districts.CITY_LAYOUT) do
-        table.insert(districts, {
-            name = template.name, type = template.type,
-            x1 = math.max(1, math.floor(w * template.x1_percent)),
-            y1 = math.max(1, math.floor(h * template.y1_percent)),
-            x2 = math.min(w, math.floor(w * template.x2_percent)),
-            y2 = math.min(h, math.floor(h * template.y2_percent)),
-            center_x_percent = template.center_x_percent,
-            center_y_percent = template.center_y_percent,
-            density = template.density, road_density = template.road_density
-        })
-    end
-    return districts
-end
-
-function RoadGenerator.findNearestHighway(grid, center_x, center_y, w, h)
-    local min_distance = math.huge
-    local nearest_point = nil
-    for radius = 1, math.max(w, h) do
-        for angle = 0, 359, 10 do
-            local radian = math.rad(angle)
-            local x = center_x + math.floor(radius * math.cos(radian))
-            local y = center_y + math.floor(radius * math.sin(radian))
-            if x >= 1 and x <= w and y >= 1 and y <= h and grid[y][x].type == "highway" then
-                local distance = math.abs(x - center_x) + math.abs(y - center_y)
-                if distance < min_distance then
-                    min_distance = distance
-                    nearest_point = {x = x, y = y}
+    -- Process each highway path
+    for highway_idx, highway_path in ipairs(highway_paths) do
+        local modified_path = {}
+        
+        for i, highway_point in ipairs(highway_path) do
+            local merged_point = {x = highway_point.x, y = highway_point.y}
+            local merge_influences = {}
+            
+            -- Get current highway direction
+            local current_direction = HighwayMerger.getPathDirection(highway_path, i)
+            
+            -- Check for merging with ring road
+            if #ring_road_curve > 0 then
+                local closest_ring_point, closest_ring_distance = HighwayMerger.findClosestPointOnPath(highway_point, ring_road_curve)
+                
+                if closest_ring_distance < merge_distance then
+                    -- Check if directions are compatible
+                    local ring_direction = HighwayMerger.getPointDirection(closest_ring_point, ring_road_curve)
+                    local direction_similarity = HighwayMerger.calculateDirectionSimilarity(current_direction, ring_direction)
+                    
+                    if direction_similarity > min_angle_difference then
+                        local strength = merge_strength * direction_similarity * (1 - (closest_ring_distance / merge_distance))
+                        
+                        table.insert(merge_influences, {
+                            point = closest_ring_point,
+                            strength = strength
+                        })
+                    end
                 end
             end
-        end
-        if nearest_point then return nearest_point end
-    end
-    return nil
-end
-
-function RoadGenerator.drawLine(grid, x1, y1, x2, y2, road_type, w, h)
-    local dx = math.abs(x2 - x1)
-    local dy = math.abs(y2 - y1)
-    local sx = x1 < x2 and 1 or -1
-    local sy = y1 < y2 and 1 or -1
-    local err = dx - dy
-    local x, y = x1, y1
-    while true do
-        if x >= 1 and x <= w and y >= 1 and y <= h then
-            if grid[y][x].type ~= "highway" or road_type == "highway" then
-                grid[y][x].type = road_type
+            
+            -- Check for merging with other highways
+            for other_idx, other_highway in ipairs(highway_paths) do
+                if other_idx ~= highway_idx then
+                    local closest_other_point, closest_other_distance = HighwayMerger.findClosestPointOnPath(highway_point, other_highway)
+                    
+                    if closest_other_distance < merge_distance then
+                        -- Check if directions are compatible
+                        local other_direction = HighwayMerger.getPointDirection(closest_other_point, other_highway)
+                        local direction_similarity = HighwayMerger.calculateDirectionSimilarity(current_direction, other_direction)
+                        
+                        if direction_similarity > min_angle_difference then
+                            local strength = merge_strength * 0.8 * direction_similarity * (1 - (closest_other_distance / merge_distance))
+                            
+                            table.insert(merge_influences, {
+                                point = closest_other_point,
+                                strength = strength
+                            })
+                        end
+                    end
+                end
             end
+            
+            -- Apply merge influences
+            if #merge_influences > 0 then
+                local total_pull_x, total_pull_y = 0, 0
+                local total_weight = 0
+                
+                for _, influence in ipairs(merge_influences) do
+                    local pull_x = (influence.point.x - highway_point.x) * influence.strength
+                    local pull_y = (influence.point.y - highway_point.y) * influence.strength
+                    
+                    total_pull_x = total_pull_x + pull_x
+                    total_pull_y = total_pull_y + pull_y
+                    total_weight = total_weight + influence.strength
+                end
+                
+                if total_weight > 0 then
+                    -- Limit the maximum pull to prevent wild snaking
+                    local max_pull = 15
+                    total_pull_x = math.max(-max_pull, math.min(max_pull, total_pull_x))
+                    total_pull_y = math.max(-max_pull, math.min(max_pull, total_pull_y))
+                    
+                    merged_point.x = highway_point.x + total_pull_x
+                    merged_point.y = highway_point.y + total_pull_y
+                end
+            end
+            
+            table.insert(modified_path, merged_point)
         end
-        if x == x2 and y == y2 then break end
-        local e2 = 2 * err
-        if e2 > -dy then err = err - dy; x = x + sx end
-        if e2 < dx then err = err + dx; y = y + sy end
-    end
-end
-
--- UPDATED GENERATORS with more variety --
-
-function RoadGenerator.generateGridPattern(grid, district, w, h, base_spacing, randomness_factor)
-    -- Horizontal roads
-    local y = district.y1
-    while y < district.y2 do
-        local segment_end_x = district.x1 + math.floor((district.x2 - district.x1) * (0.6 + love.math.random() * 0.4))
-        RoadGenerator.drawLine(grid, district.x1, y, segment_end_x, y, "road", w, h)
-        y = y + base_spacing + math.random(-randomness_factor, randomness_factor)
+        
+        table.insert(merged_paths, modified_path)
     end
     
-    -- Vertical roads
-    local x = district.x1
-    while x < district.x2 do
-        local segment_end_y = district.y1 + math.floor((district.y2 - district.y1) * (0.6 + love.math.random() * 0.4))
-        RoadGenerator.drawLine(grid, x, district.y1, x, segment_end_y, "road", w, h)
-        x = x + base_spacing + math.random(-randomness_factor, randomness_factor)
+    return merged_paths
+end
+
+function HighwayMerger.getPathDirection(path, index)
+    if #path < 2 then return {x = 0, y = 0} end
+    
+    local start_idx = math.max(1, index - 1)
+    local end_idx = math.min(#path, index + 1)
+    
+    if start_idx == end_idx then
+        if index > 1 then
+            start_idx = index - 1
+        else
+            end_idx = index + 1
+        end
     end
+    
+    local dx = path[end_idx].x - path[start_idx].x
+    local dy = path[end_idx].y - path[start_idx].y
+    local length = math.sqrt(dx * dx + dy * dy)
+    
+    if length == 0 then return {x = 0, y = 0} end
+    
+    return {x = dx / length, y = dy / length}
 end
 
-function RoadGenerator.generateIndustrialGrid(grid, district, w, h)
-    RoadGenerator.generateGridPattern(grid, district, w, h, Districts.ROAD_SPACING.industrial, 5)
+function HighwayMerger.getPointDirection(point, path)
+    -- Find the point in the path and get its direction
+    local point_index = HighwayMerger.findPointIndex(point, path)
+    return HighwayMerger.getPathDirection(path, point_index)
 end
 
-function RoadGenerator.generateCommercialGrid(grid, district, w, h)
-    -- Commercial is a very dense, more complete grid
-    local spacing = Districts.ROAD_SPACING.commercial
-    for y = district.y1, district.y2, spacing do
-        RoadGenerator.drawLine(grid, district.x1, y, district.x2, y, "road", w, h)
+function HighwayMerger.calculateDirectionSimilarity(dir1, dir2)
+    -- Calculate dot product to measure direction similarity
+    local dot_product = dir1.x * dir2.x + dir1.y * dir2.y
+    return math.abs(dot_product) -- Return absolute value (parallel roads going opposite directions can also merge)
+end
+
+function HighwayMerger.findClosestPointOnPath(point, path)
+    local closest_point = nil
+    local min_distance = math.huge
+    
+    for _, path_point in ipairs(path) do
+        local dx = point.x - path_point.x
+        local dy = point.y - path_point.y
+        local distance = math.sqrt(dx * dx + dy * dy)
+        
+        if distance < min_distance then
+            min_distance = distance
+            closest_point = path_point
+        end
     end
-    for x = district.x1, district.x2, spacing do
-        RoadGenerator.drawLine(grid, x, district.y1, x, district.y2, "road", w, h)
+    
+    return closest_point, min_distance
+end
+
+function HighwayMerger.findPointIndex(target_point, path)
+    for i, point in ipairs(path) do
+        if point.x == target_point.x and point.y == target_point.y then
+            return i
+        end
     end
+    return 1  -- Fallback
 end
 
-function RoadGenerator.generateResidentialNetwork(grid, district, w, h)
-    RoadGenerator.generateGridPattern(grid, district, w, h, Districts.ROAD_SPACING.residential, 3)
-end
-
-function RoadGenerator.generateParkPaths(grid, district, w, h)
-    local center_x = math.floor((district.x1 + district.x2) / 2)
-    local center_y = math.floor((district.y1 + district.y2) / 2)
-    RoadGenerator.drawLine(grid, district.x1, center_y, district.x2, center_y, "road", w, h)
-    RoadGenerator.drawLine(grid, center_x, district.y1, center_x, district.y2, "road", w, h)
-end
-
-return RoadGenerator
+return HighwayMerger

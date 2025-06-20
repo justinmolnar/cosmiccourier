@@ -3,11 +3,12 @@
 
 local HighwayMerger = {}
 
-function HighwayMerger.applyMergingLogic(highway_paths, ring_road_curve)
-    local MERGE_DISTANCE = 30  -- Reduced from 50 - less aggressive merging
-    local MERGE_STRENGTH = 0.4 -- Reduced from 0.8 - gentler merging
-    local PARALLEL_MERGE_DISTANCE = 50  -- Reduced from 80
-    local MIN_ANGLE_DIFFERENCE = 0.7  -- NEW: Only merge if roads are going roughly same direction
+function HighwayMerger.applyMergingLogic(highway_paths, ring_road_curve, params)
+    -- Use debug parameters or defaults
+    local merge_distance = (params and params.highway_merge_distance) or 50
+    local merge_strength = (params and params.highway_merge_strength) or 0.8
+    local parallel_merge_distance = (params and params.highway_parallel_merge_distance) or 80
+    local min_angle_difference = 0.7  -- Only merge if roads are going roughly same direction
     
     local merged_paths = {}
     
@@ -26,13 +27,13 @@ function HighwayMerger.applyMergingLogic(highway_paths, ring_road_curve)
             if #ring_road_curve > 0 then
                 local closest_ring_point, closest_ring_distance = HighwayMerger.findClosestPointOnPath(highway_point, ring_road_curve)
                 
-                if closest_ring_distance < MERGE_DISTANCE then
+                if closest_ring_distance < merge_distance then
                     -- Check if directions are compatible
                     local ring_direction = HighwayMerger.getPointDirection(closest_ring_point, ring_road_curve)
                     local direction_similarity = HighwayMerger.calculateDirectionSimilarity(current_direction, ring_direction)
                     
-                    if direction_similarity > MIN_ANGLE_DIFFERENCE then
-                        local strength = MERGE_STRENGTH * direction_similarity * (1 - (closest_ring_distance / MERGE_DISTANCE))
+                    if direction_similarity > min_angle_difference then
+                        local strength = merge_strength * direction_similarity * (1 - (closest_ring_distance / merge_distance))
                         
                         table.insert(merge_influences, {
                             point = closest_ring_point,
@@ -47,13 +48,13 @@ function HighwayMerger.applyMergingLogic(highway_paths, ring_road_curve)
                 if other_idx ~= highway_idx then
                     local closest_other_point, closest_other_distance = HighwayMerger.findClosestPointOnPath(highway_point, other_highway)
                     
-                    if closest_other_distance < MERGE_DISTANCE then
+                    if closest_other_distance < merge_distance then
                         -- Check if directions are compatible
                         local other_direction = HighwayMerger.getPointDirection(closest_other_point, other_highway)
                         local direction_similarity = HighwayMerger.calculateDirectionSimilarity(current_direction, other_direction)
                         
-                        if direction_similarity > MIN_ANGLE_DIFFERENCE then
-                            local strength = MERGE_STRENGTH * 0.8 * direction_similarity * (1 - (closest_other_distance / MERGE_DISTANCE))
+                        if direction_similarity > min_angle_difference then
+                            local strength = merge_strength * 0.8 * direction_similarity * (1 - (closest_other_distance / merge_distance))
                             
                             table.insert(merge_influences, {
                                 point = closest_other_point,

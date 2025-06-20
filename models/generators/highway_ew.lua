@@ -3,18 +3,26 @@
 
 local HighwayEW = {}
 
-function HighwayEW.generatePaths(map_w, map_h, districts)
+function HighwayEW.generatePaths(map_w, map_h, districts, params)
     local paths = {}
     local EXTENSION = 100
     
-    -- 2 East-West highways at 33% and 67% of map height
-    local ew_positions = {map_h * 0.33, map_h * 0.67}
+    -- Use debug parameters or defaults
+    local num_highways = (params and params.num_ew_highways) or 2
+    local highway_step_size = (params and params.highway_step_size) or 30
+    local highway_curve_distance = (params and params.highway_curve_distance) or 50
+    local highway_buffer = (params and params.highway_buffer) or 35
     
-    for _, y_pos in ipairs(ew_positions) do
+    -- Generate specified number of East-West highways
+    for i = 1, num_highways do
+        local y_pos = map_h * (i / (num_highways + 1)) -- Distribute evenly
         local path = HighwayEW.createFlowingPath(
             {x = -EXTENSION, y = y_pos}, 
             {x = map_w + EXTENSION, y = y_pos}, 
-            districts
+            districts,
+            highway_step_size,
+            highway_curve_distance,
+            highway_buffer
         )
         table.insert(paths, path)
     end
@@ -22,10 +30,9 @@ function HighwayEW.generatePaths(map_w, map_h, districts)
     return paths
 end
 
-function HighwayEW.createFlowingPath(start_point, end_point, districts)
+function HighwayEW.createFlowingPath(start_point, end_point, districts, step_size, curve_distance, buffer)
     local path = {start_point}
     local current = {x = start_point.x, y = start_point.y}
-    local STEP_SIZE = 30
     
     while true do
         -- Calculate where we want to go (straight toward goal)
@@ -33,7 +40,7 @@ function HighwayEW.createFlowingPath(start_point, end_point, districts)
         local goal_dy = end_point.y - current.y
         local goal_distance = math.sqrt(goal_dx * goal_dx + goal_dy * goal_dy)
         
-        if goal_distance < STEP_SIZE * 1.5 then
+        if goal_distance < step_size * 1.5 then
             table.insert(path, end_point)
             break
         end
@@ -44,19 +51,20 @@ function HighwayEW.createFlowingPath(start_point, end_point, districts)
         
         -- Calculate next ideal position
         local ideal_next = {
-            x = current.x + goal_dir_x * STEP_SIZE,
-            y = current.y + goal_dir_y * STEP_SIZE
+            x = current.x + goal_dir_x * step_size,
+            y = current.y + goal_dir_y * step_size
         }
         
         -- Check if this ideal position conflicts with any district
-        local conflicting_district = HighwayEW.findConflictingDistrict(ideal_next, districts)
+        local conflicting_district = HighwayEW.findConflictingDistrict(ideal_next, districts, buffer)
         
         if conflicting_district then
             -- We need to curve around this district
             local curve_point = HighwayEW.calculateCurveAroundDistrict(
                 current, 
                 ideal_next, 
-                conflicting_district
+                conflicting_district,
+                curve_distance
             )
             table.insert(path, curve_point)
             current = curve_point
@@ -79,9 +87,7 @@ function HighwayEW.createFlowingPath(start_point, end_point, districts)
     return smoothed_path
 end
 
-function HighwayEW.findConflictingDistrict(point, districts)
-    local BUFFER = 35  -- How close is too close
-    
+function HighwayEW.findConflictingDistrict(point, districts, buffer)
     for _, district in ipairs(districts) do
         -- Check if point is too close to this district
         local dist_center_x = district.x + district.w / 2
@@ -91,7 +97,7 @@ function HighwayEW.findConflictingDistrict(point, districts)
             (point.x - dist_center_x)^2 + (point.y - dist_center_y)^2
         )
         
-        if distance < BUFFER then
+        if distance < buffer then
             return district
         end
     end
@@ -99,11 +105,10 @@ function HighwayEW.findConflictingDistrict(point, districts)
     return nil
 end
 
-function HighwayEW.calculateCurveAroundDistrict(current, ideal_next, district)
+function HighwayEW.calculateCurveAroundDistrict(current, ideal_next, district, curve_distance)
     -- Calculate district center and boundaries
     local dist_center_x = district.x + district.w / 2
     local dist_center_y = district.y + district.h / 2
-    local CURVE_DISTANCE = 50  -- How far to curve around
     
     -- Vector from district center to our ideal next position
     local away_x = ideal_next.x - dist_center_x
@@ -116,8 +121,8 @@ function HighwayEW.calculateCurveAroundDistrict(current, ideal_next, district)
         away_y = away_y / away_length
         
         -- Create a curve point that goes around the district
-        local curve_x = dist_center_x + away_x * CURVE_DISTANCE
-        local curve_y = dist_center_y + away_y * CURVE_DISTANCE
+        local curve_x = dist_center_x + away_x * curve_distance
+        local curve_y = dist_center_y + away_y * curve_distance
         
         -- For horizontal highways, prefer curving up/down more than left/right
         curve_x = ideal_next.x * 0.7 + curve_x * 0.3

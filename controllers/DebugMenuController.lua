@@ -10,8 +10,8 @@ function DebugMenuController:new(game)
     instance.visible = false
     instance.x = 100
     instance.y = 50
-    instance.w = 400
-    instance.h = 600
+    instance.w = 450  -- Made wider for toggles
+    instance.h = 700  -- Made taller
     instance.dragging = false
     instance.drag_offset_x = 0
     instance.drag_offset_y = 0
@@ -23,6 +23,13 @@ function DebugMenuController:new(game)
     
     -- Debug parameters that can be tweaked
     instance.params = {
+        -- Component Toggles (NEW)
+        generate_downtown = true,
+        generate_districts = true,
+        generate_highways = true,
+        generate_ringroad = true,
+        generate_connections = true,
+        
         -- Highway Generation
         highway_merge_distance = 50,
         highway_merge_strength = 0.8,
@@ -62,14 +69,15 @@ function DebugMenuController:new(game)
     
     -- Button definitions
     instance.buttons = {
-        {id = "regen_all", text = "Regenerate All", color = {0.8, 0.2, 0.2}},
-        {id = "clear_all", text = "Clear All", color = {0.6, 0.6, 0.6}},
-        {id = "regen_districts", text = "Regen Districts", color = {0.2, 0.6, 0.8}},
-        {id = "regen_ring", text = "Regen Ring Road", color = {0.2, 0.4, 0.8}},
-        {id = "regen_highways", text = "Regen Highways", color = {0.6, 0.8, 0.2}},
-        {id = "regen_connections", text = "Regen Connections", color = {0.8, 0.6, 0.2}},
-        {id = "test_pathfinding", text = "Test Pathfinding", color = {0.8, 0.2, 0.8}},
-        {id = "reset_params", text = "Reset Parameters", color = {0.4, 0.4, 0.4}},
+        {id = "regen_all", text = "Regenerate Everything", color = {0.8, 0.2, 0.2}},
+        {id = "clear_all", text = "Clear All Roads", color = {0.6, 0.6, 0.6}},
+        {id = "regen_downtown", text = "Regen Downtown Only", color = {0.2, 0.8, 0.2}},
+        {id = "regen_districts", text = "Regen Districts Only", color = {0.2, 0.6, 0.8}},
+        {id = "regen_ring", text = "Regen Ring Road Only", color = {0.2, 0.4, 0.8}},
+        {id = "regen_highways", text = "Regen Highways Only", color = {0.6, 0.8, 0.2}},
+        {id = "regen_connections", text = "Regen Connections Only", color = {0.8, 0.6, 0.2}},
+        {id = "test_pathfinding", text = "Test Pathfinding (Random)", color = {0.8, 0.2, 0.8}},
+        {id = "reset_params", text = "Reset All Parameters", color = {0.4, 0.4, 0.4}},
     }
     
     return instance
@@ -155,7 +163,7 @@ function DebugMenuController:handle_mouse_down(x, y, button)
             if type(value) == "number" then
                 -- Check if clicking on the value text (to start editing)
                 local value_x = self.x + 35
-                local value_w = self.w - 120
+                local value_w = self.w - 140
                 if x >= value_x and x <= value_x + value_w and y >= param_y and y <= param_y + 20 then
                     self.text_input_active = param_name
                     self.text_input_value = tostring(value)
@@ -358,15 +366,6 @@ function DebugMenuController:adjustParameter(param_name, direction)
     
     self.params[param_name] = new_value
     self.game.error_service.logInfo("DebugMenu", string.format("Adjusted %s: %.3f", param_name, new_value))
-    
-    -- Auto-apply certain parameter changes
-    if param_name:find("highway") then
-        self:executeAction("regen_highways")
-    elseif param_name:find("ring") then
-        self:executeAction("regen_ring")
-    elseif param_name:find("walker") or param_name:find("connection") then
-        self:executeAction("regen_connections")
-    end
 end
 
 function DebugMenuController:executeAction(action_id)
@@ -379,8 +378,6 @@ function DebugMenuController:executeAction(action_id)
     if action_id == "regen_all" then
         safeExecute(function()
             self:applyParametersToModules()
-            -- Force map to regenerate with new parameters
-            self.game.map.debug_params = self.params
             self.game.map:generate()
             self.game.error_service.logInfo("DebugMenu", "Regenerated entire map with current parameters")
         end, "Regenerate All")
@@ -391,32 +388,29 @@ function DebugMenuController:executeAction(action_id)
             self.game.error_service.logInfo("DebugMenu", "Cleared all roads and structures")
         end, "Clear All")
         
+    elseif action_id == "regen_downtown" then
+        safeExecute(function()
+            self:regenerateDowntownOnly()
+        end, "Regenerate Downtown")
+        
     elseif action_id == "regen_districts" then
         safeExecute(function()
-            self:applyParametersToModules()
-            self:regenerateDistricts()
-            self.game.error_service.logInfo("DebugMenu", "Regenerated districts")
+            self:regenerateDistrictsOnly()
         end, "Regenerate Districts")
         
     elseif action_id == "regen_ring" then
         safeExecute(function()
-            self:applyParametersToModules()
-            self:regenerateRingRoad()
-            self.game.error_service.logInfo("DebugMenu", "Regenerated ring road")
+            self:regenerateRingRoadOnly()
         end, "Regenerate Ring Road")
         
     elseif action_id == "regen_highways" then
         safeExecute(function()
-            self:applyParametersToModules()
-            self:regenerateHighways()
-            self.game.error_service.logInfo("DebugMenu", "Regenerated highways")
+            self:regenerateHighwaysOnly()
         end, "Regenerate Highways")
         
     elseif action_id == "regen_connections" then
         safeExecute(function()
-            self:applyParametersToModules()
-            self:regenerateConnections()
-            self.game.error_service.logInfo("DebugMenu", "Regenerated connecting roads")
+            self:regenerateConnectionsOnly()
         end, "Regenerate Connections")
         
     elseif action_id == "test_pathfinding" then
@@ -442,96 +436,282 @@ function DebugMenuController:applyParametersToModules()
 end
 
 function DebugMenuController:clearAllRoads()
-    -- Clear roads from both city and downtown scales
-    local scales_to_clear = {self.game.C.MAP.SCALES.DOWNTOWN, self.game.C.MAP.SCALES.CITY}
+    local grid = self.game.map.grid
+    if not grid or #grid == 0 then return end
     
-    for _, scale in ipairs(scales_to_clear) do
-        local grid = self.game.map.scale_grids[scale]
-        if grid then
-            for y = 1, #grid do
-                for x = 1, #grid[1] do
-                    local current_type = grid[y][x].type
-                    if current_type ~= "plot" and current_type ~= "grass" then
-                        grid[y][x].type = "grass"
-                    end
+    local grid_h, grid_w = #grid, #grid[1]
+    
+    for y = 1, grid_h do
+        for x = 1, grid_w do
+            local current_type = grid[y][x].type
+            if current_type ~= "plot" and current_type ~= "grass" then
+                grid[y][x].type = "grass"
+            end
+        end
+    end
+    
+    -- Regenerate building plots after clearing
+    self.game.map.building_plots = self.game.map:getPlotsFromGrid(grid)
+    self.game.error_service.logInfo("DebugMenu", "Cleared all roads, regenerated building plots")
+end
+
+function DebugMenuController:regenerateDowntownOnly()
+    self:applyParametersToModules()
+    
+    if not self.params.generate_downtown then
+        self.game.error_service.logInfo("DebugMenu", "Downtown generation disabled, skipping")
+        return
+    end
+    
+    -- Clear only downtown area and regenerate it
+    local downtown_offset = self.game.map.downtown_offset
+    local C_MAP = self.game.C.MAP
+    
+    local grid = self.game.map.grid
+    if not grid or not downtown_offset then return end
+    
+    -- Clear downtown area
+    for y = downtown_offset.y, downtown_offset.y + C_MAP.DOWNTOWN_GRID_HEIGHT - 1 do
+        for x = downtown_offset.x, downtown_offset.x + C_MAP.DOWNTOWN_GRID_WIDTH - 1 do
+            if y >= 1 and y <= #grid and x >= 1 and x <= #grid[1] then
+                grid[y][x].type = "plot"
+            end
+        end
+    end
+    
+    -- Regenerate downtown
+    local Downtown = require("models.generators.downtown")
+    local downtown_district = {
+        x = downtown_offset.x, 
+        y = downtown_offset.y,
+        w = C_MAP.DOWNTOWN_GRID_WIDTH, 
+        h = C_MAP.DOWNTOWN_GRID_HEIGHT
+    }
+    
+    Downtown.generateDowntownModule(grid, downtown_district, "road", "plot", C_MAP.NUM_SECONDARY_ROADS, self.params)
+    
+    -- Regenerate building plots
+    self.game.map.building_plots = self.game.map:getPlotsFromGrid(grid)
+    self.game.error_service.logInfo("DebugMenu", "Regenerated downtown only")
+end
+
+function DebugMenuController:regenerateDistrictsOnly()
+    self:applyParametersToModules()
+    
+    if not self.params.generate_districts then
+        self.game.error_service.logInfo("DebugMenu", "District generation disabled, skipping")
+        return
+    end
+    
+    -- This requires more complex logic to regenerate districts without affecting other elements
+    -- For now, regenerate everything
+    self.game.map:generate()
+    self.game.error_service.logInfo("DebugMenu", "Regenerated districts (full regen)")
+end
+
+function DebugMenuController:regenerateRingRoadOnly()
+    self:applyParametersToModules()
+    
+    if not self.params.generate_ringroad then
+        self.game.error_service.logInfo("DebugMenu", "Ring road generation disabled, skipping")
+        return
+    end
+    
+    local grid = self.game.map.grid
+    if not grid or #grid == 0 then return end
+    
+    -- Clear existing ring roads
+    for y = 1, #grid do
+        for x = 1, #grid[1] do
+            if grid[y][x].type == "highway_ring" then
+                grid[y][x].type = "grass"
+            end
+        end
+    end
+    
+    -- Get current districts (we need them for ring road generation)
+    local Districts = require("models.generators.districts")
+    local RingRoad = require("models.generators.ringroad")
+    
+    -- Find existing districts by analyzing the map
+    local existing_districts = self:findExistingDistricts()
+    
+    if #existing_districts > 0 then
+        local C_MAP = self.game.C.MAP
+        local ring_road_nodes = RingRoad.generatePath(existing_districts, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, self.params)
+        
+        if #ring_road_nodes > 0 then
+            local ring_road_curve = self.game.map:generateSplinePoints(ring_road_nodes, 10)
+            
+            -- Draw the ring road
+            if #ring_road_curve > 1 then
+                for i = 1, #ring_road_curve - 1 do
+                    self.game.map:drawThickLineColored(grid, ring_road_curve[i].x, ring_road_curve[i].y, 
+                                                     ring_road_curve[i+1].x, ring_road_curve[i+1].y, "highway_ring", 3)
                 end
             end
         end
     end
-    self:refreshMapDisplay()
+    
+    self.game.error_service.logInfo("DebugMenu", "Regenerated ring road only")
 end
 
-function DebugMenuController:regenerateDistricts()
-    self.game.error_service.logInfo("DebugMenu", "Regenerating districts with parameters:")
-    for k, v in pairs(self.params) do
-        if k:find("district") or k:find("downtown") then
-            self.game.error_service.logInfo("DebugMenu", string.format("  %s: %s", k, tostring(v)))
+function DebugMenuController:regenerateHighwaysOnly()
+    self:applyParametersToModules()
+    
+    if not self.params.generate_highways then
+        self.game.error_service.logInfo("DebugMenu", "Highway generation disabled, skipping")
+        return
+    end
+    
+    local grid = self.game.map.grid
+    if not grid or #grid == 0 then return end
+    
+    -- Clear existing highways
+    for y = 1, #grid do
+        for x = 1, #grid[1] do
+            if grid[y][x].type == "highway_ns" or grid[y][x].type == "highway_ew" then
+                grid[y][x].type = "grass"
+            end
         end
     end
     
-    -- Force full regeneration since districts are fundamental
-    self.game.map.debug_params = self.params
-    self.game.map:generate()
-end
-
-function DebugMenuController:regenerateRingRoad()
-    self.game.error_service.logInfo("DebugMenu", "Regenerating ring road with parameters:")
-    for k, v in pairs(self.params) do
-        if k:find("ring") then
-            self.game.error_service.logInfo("DebugMenu", string.format("  %s: %s", k, tostring(v)))
+    -- Regenerate highways
+    local existing_districts = self:findExistingDistricts()
+    
+    if #existing_districts > 0 then
+        local HighwayNS = require("models.generators.highway_ns")
+        local HighwayEW = require("models.generators.highway_ew")
+        local HighwayMerger = require("models.generators.highway_merger")
+        local C_MAP = self.game.C.MAP
+        
+        local ns_highway_paths = HighwayNS.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, existing_districts, self.params)
+        local ew_highway_paths = HighwayEW.generatePaths(C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, existing_districts, self.params)
+        
+        local all_highway_paths = {}
+        for _, path in ipairs(ns_highway_paths) do table.insert(all_highway_paths, path) end
+        for _, path in ipairs(ew_highway_paths) do table.insert(all_highway_paths, path) end
+        
+        local merged_highway_paths = HighwayMerger.applyMergingLogic(all_highway_paths, {}, self.params)
+        
+        -- Draw highways
+        local num_ns_highways = self.params.num_ns_highways or 2
+        for highway_idx, path_nodes in ipairs(merged_highway_paths) do
+            local highway_curve = self.game.map:generateSplinePoints(path_nodes, 10)
+            local highway_type = highway_idx <= num_ns_highways and "highway_ns" or "highway_ew"
+            
+            for i = 1, #highway_curve - 1 do
+                self.game.map:drawThickLineColored(grid, highway_curve[i].x, highway_curve[i].y, 
+                                                 highway_curve[i+1].x, highway_curve[i+1].y, highway_type, 3)
+            end
         end
     end
     
-    -- This would need specific ring road regeneration logic
-    -- For now, regenerate the whole city scale
-    self.game.map.debug_params = self.params
-    local downtown_grid = self.game.map.scale_grids[self.game.C.MAP.SCALES.DOWNTOWN]
-    if downtown_grid then
-        local city_grid = self.game.map:generateCityModuleModular(downtown_grid)
-        self.game.map.scale_grids[self.game.C.MAP.SCALES.CITY] = city_grid
-        self.game.map.scale_building_plots[self.game.C.MAP.SCALES.CITY] = self.game.map:getPlotsFromGrid(city_grid)
-        self:refreshMapDisplay()
-    end
+    self.game.error_service.logInfo("DebugMenu", "Regenerated highways only")
 end
 
-function DebugMenuController:regenerateHighways()
-    self.game.error_service.logInfo("DebugMenu", "Regenerating highways with parameters:")
-    for k, v in pairs(self.params) do
-        if k:find("highway") then
-            self.game.error_service.logInfo("DebugMenu", string.format("  %s: %s", k, tostring(v)))
+function DebugMenuController:regenerateConnectionsOnly()
+    self:applyParametersToModules()
+    
+    if not self.params.generate_connections then
+        self.game.error_service.logInfo("DebugMenu", "Connection generation disabled, skipping")
+        return
+    end
+    
+    local grid = self.game.map.grid
+    if not grid or #grid == 0 then return end
+    
+    -- Clear existing connection roads (keep highways and district roads)
+    for y = 1, #grid do
+        for x = 1, #grid[1] do
+            local tile_type = grid[y][x].type
+            if tile_type == "road" and not self:isInDistrictOrDowntown(x, y) then
+                grid[y][x].type = "grass"
+            end
         end
     end
     
-    -- This would need specific highway regeneration logic
-    -- For now, regenerate the whole city scale
-    self.game.map.debug_params = self.params
-    local downtown_grid = self.game.map.scale_grids[self.game.C.MAP.SCALES.DOWNTOWN]
-    if downtown_grid then
-        local city_grid = self.game.map:generateCityModuleModular(downtown_grid)
-        self.game.map.scale_grids[self.game.C.MAP.SCALES.CITY] = city_grid
-        self.game.map.scale_building_plots[self.game.C.MAP.SCALES.CITY] = self.game.map:getPlotsFromGrid(city_grid)
-        self:refreshMapDisplay()
+    -- Regenerate connections
+    local existing_districts = self:findExistingDistricts()
+    local highway_points = self:findExistingHighwayPoints()
+    
+    if #existing_districts > 0 then
+        local ConnectingRoads = require("models.generators.connecting_roads")
+        local C_MAP = self.game.C.MAP
+        
+        local connections = ConnectingRoads.generateConnections(grid, existing_districts, highway_points, 
+                                                               C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, self.params)
+        ConnectingRoads.drawConnections(grid, connections, self.params)
     end
+    
+    self.game.error_service.logInfo("DebugMenu", "Regenerated connecting roads only")
 end
 
-function DebugMenuController:regenerateConnections()
-    self.game.error_service.logInfo("DebugMenu", "Regenerating connections with parameters:")
-    for k, v in pairs(self.params) do
-        if k:find("walker") or k:find("connection") or k:find("smoothing") then
-            self.game.error_service.logInfo("DebugMenu", string.format("  %s: %s", k, tostring(v)))
+function DebugMenuController:findExistingDistricts()
+    -- Analyze the current map to find district boundaries
+    -- This is a simplified approach - in a full implementation you'd want to store district data
+    local districts = {}
+    local grid = self.game.map.grid
+    if not grid or #grid == 0 then return districts end
+    
+    -- Add downtown district
+    local downtown_offset = self.game.map.downtown_offset
+    local C_MAP = self.game.C.MAP
+    if downtown_offset then
+        table.insert(districts, {
+            x = downtown_offset.x, 
+            y = downtown_offset.y,
+            w = C_MAP.DOWNTOWN_GRID_WIDTH, 
+            h = C_MAP.DOWNTOWN_GRID_HEIGHT
+        })
+    end
+    
+    -- For other districts, we'd need more sophisticated analysis
+    -- For now, create some placeholder districts
+    for i = 1, (self.params.num_districts or 8) do
+        local w = love.math.random(40, 80)
+        local h = love.math.random(40, 80)
+        local x = love.math.random(50, C_MAP.CITY_GRID_WIDTH - w - 50)
+        local y = love.math.random(50, C_MAP.CITY_GRID_HEIGHT - h - 50)
+        table.insert(districts, {x = x, y = y, w = w, h = h})
+    end
+    
+    return districts
+end
+
+function DebugMenuController:findExistingHighwayPoints()
+    local points = {}
+    local grid = self.game.map.grid
+    if not grid or #grid == 0 then return points end
+    
+    -- Find all highway and ring road tiles
+    for y = 1, #grid do
+        for x = 1, #grid[1] do
+            local tile_type = grid[y][x].type
+            if tile_type == "highway_ring" or tile_type == "highway_ns" or tile_type == "highway_ew" then
+                table.insert(points, {x = x, y = y})
+            end
         end
     end
     
-    -- This would need specific connecting roads regeneration logic
-    -- For now, regenerate the whole city scale
-    self.game.map.debug_params = self.params
-    local downtown_grid = self.game.map.scale_grids[self.game.C.MAP.SCALES.DOWNTOWN]
-    if downtown_grid then
-        local city_grid = self.game.map:generateCityModuleModular(downtown_grid)
-        self.game.map.scale_grids[self.game.C.MAP.SCALES.CITY] = city_grid
-        self.game.map.scale_building_plots[self.game.C.MAP.SCALES.CITY] = self.game.map:getPlotsFromGrid(city_grid)
-        self:refreshMapDisplay()
+    return points
+end
+
+function DebugMenuController:isInDistrictOrDowntown(x, y)
+    -- Check if a point is within downtown area
+    local downtown_offset = self.game.map.downtown_offset
+    local C_MAP = self.game.C.MAP
+    
+    if downtown_offset then
+        if x >= downtown_offset.x and x < downtown_offset.x + C_MAP.DOWNTOWN_GRID_WIDTH and
+           y >= downtown_offset.y and y < downtown_offset.y + C_MAP.DOWNTOWN_GRID_HEIGHT then
+            return true
+        end
     end
+    
+    -- For other districts, we'd need to check against stored district boundaries
+    -- For now, return false
+    return false
 end
 
 function DebugMenuController:testPathfinding()
@@ -545,23 +725,88 @@ function DebugMenuController:testPathfinding()
             local end_node = self.game.map:findNearestRoadTile(end_plot)
             
             if start_node and end_node then
-                local path = self.game.pathfinder.findPath(grid, start_node, end_node)
+                -- Use bike pathfinding costs for testing
+                local costs = {
+                    road = 5,
+                    downtown_road = 8,
+                    arterial = 3,
+                    highway = 500,
+                    highway_ring = 500,
+                    highway_ns = 500,
+                    highway_ew = 500,
+                    grass = 1000,
+                    plot = 1000
+                }
+                
+                local path = self.game.pathfinder.findPath(grid, start_node, end_node, costs, self.game.map)
                 if path then
                     self.game.error_service.logInfo("DebugMenu", 
-                        string.format("Test path found: %d nodes from (%d,%d) to (%d,%d)", 
+                        string.format("✓ Test path found: %d nodes from (%d,%d) to (%d,%d)", 
                                     #path, start_node.x, start_node.y, end_node.x, end_node.y))
+                    
+                    -- Optionally highlight the path temporarily
+                    self:highlightTestPath(path)
                 else
-                    self.game.error_service.logWarning("DebugMenu", "Test pathfinding failed - no path found")
+                    self.game.error_service.logWarning("DebugMenu", "✗ Test pathfinding failed - no path found")
                 end
             else
-                self.game.error_service.logWarning("DebugMenu", "Test pathfinding failed - couldn't find road nodes")
+                self.game.error_service.logWarning("DebugMenu", "✗ Test pathfinding failed - couldn't find road nodes")
             end
+        else
+            self.game.error_service.logWarning("DebugMenu", "✗ Test pathfinding failed - need at least 2 building plots")
         end
+    else
+        self.game.error_service.logWarning("DebugMenu", "✗ Test pathfinding failed - no map grid available")
+    end
+end
+
+function DebugMenuController:highlightTestPath(path)
+    -- Store the path for temporary visualization
+    self.test_path = path
+    self.test_path_timer = 5.0 -- Show for 5 seconds
+end
+
+function DebugMenuController:updateTestPath(dt)
+    if self.test_path_timer then
+        self.test_path_timer = self.test_path_timer - dt
+        if self.test_path_timer <= 0 then
+            self.test_path = nil
+            self.test_path_timer = nil
+        end
+    end
+end
+
+function DebugMenuController:drawTestPath(game)
+    if self.test_path and #self.test_path > 1 then
+        love.graphics.setColor(1, 0, 1, 0.8) -- Magenta
+        love.graphics.setLineWidth(3)
+        
+        local pixel_path = {}
+        for _, node in ipairs(self.test_path) do
+            local px, py = game.map:getPixelCoords(node.x, node.y)
+            table.insert(pixel_path, px)
+            table.insert(pixel_path, py)
+        end
+        
+        if #pixel_path >= 4 then
+            love.graphics.line(pixel_path)
+        end
+        
+        love.graphics.setLineWidth(1)
+        love.graphics.setColor(1, 1, 1, 1)
     end
 end
 
 function DebugMenuController:resetParameters()
     self.params = {
+        -- Component Toggles
+        generate_downtown = true,
+        generate_districts = true,
+        generate_highways = true,
+        generate_ringroad = true,
+        generate_connections = true,
+        
+        -- Highway Generation
         highway_merge_distance = 50,
         highway_merge_strength = 0.8,
         highway_parallel_merge_distance = 80,
@@ -570,10 +815,14 @@ function DebugMenuController:resetParameters()
         highway_buffer = 35,
         num_ns_highways = 2,
         num_ew_highways = 2,
+        
+        -- Ring Road Generation
         ring_min_angle = 45,
         ring_min_arc_distance = 30,
         ring_edge_threshold = 0.1,
         ring_center_distance_threshold = 0.15,
+        
+        -- District Generation
         num_districts = 10,
         district_min_size = 40,
         district_max_size = 80,
@@ -581,20 +830,18 @@ function DebugMenuController:resetParameters()
         downtown_roads = 40,
         district_roads_min = 15,
         district_roads_max = 30,
+        
+        -- Connecting Roads
         walker_connection_distance = 25,
         walker_split_chance = 0.05,
         walker_turn_chance = 0.15,
         walker_max_active = 3,
         walker_death_rules_enabled = true,
+        
+        -- Path Smoothing
         smoothing_max_angle = 126,
         smoothing_enabled = true,
     }
-end
-
-function DebugMenuController:refreshMapDisplay()
-    -- Refresh the map display
-    self.game.map.grid = self.game.map.scale_grids[self.game.map.current_scale]
-    self.game.map.building_plots = self.game.map.scale_building_plots[self.game.map.current_scale]
 end
 
 return DebugMenuController

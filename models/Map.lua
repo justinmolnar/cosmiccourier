@@ -92,7 +92,6 @@ local function floodFill(grid, start_x, start_y, road_check_func)
     return count
 end
 
-
 function Map:new(C)
     local instance = setmetatable({}, Map)
     instance.C = C
@@ -110,6 +109,7 @@ function Map:new(C)
         to_scale = 1, 
         progress = 0 
     }
+    instance.debug_params = nil  -- NEW: Store debug parameters
     return instance
 end
 
@@ -126,18 +126,21 @@ function Map:generateCityModuleModular(downtown_grid_module)
     local W, H = C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT
     local grid = createGrid(W, H, "plot")
 
-    local all_districts = Districts.generateAll(grid, W, H, downtown_grid_module, self)
+    -- Use debug parameters or defaults
+    local params = self.debug_params or {}
+
+    local all_districts = Districts.generateAll(grid, W, H, downtown_grid_module, self, params)
     print("Generated districts using Districts module")
 
-    local ring_road_nodes = RingRoad.generatePath(all_districts, W, H)
+    local ring_road_nodes = RingRoad.generatePath(all_districts, W, H, params)
     local ring_road_curve = {}
     if #ring_road_nodes > 0 then
         ring_road_curve = self:generateSplinePoints(ring_road_nodes, 10)
     end
     print("Generated ring road using RingRoad module")
 
-    local ns_highway_paths = HighwayNS.generatePaths(W, H, all_districts)
-    local ew_highway_paths = HighwayEW.generatePaths(W, H, all_districts)
+    local ns_highway_paths = HighwayNS.generatePaths(W, H, all_districts, params)
+    local ew_highway_paths = HighwayEW.generatePaths(W, H, all_districts, params)
     local all_highway_paths = {}
     
     for _, path in ipairs(ns_highway_paths) do
@@ -148,14 +151,14 @@ function Map:generateCityModuleModular(downtown_grid_module)
     end
     print("Generated highways using HighwayNS and HighwayEW modules")
 
-    local merged_highway_paths = HighwayMerger.applyMergingLogic(all_highway_paths, ring_road_curve)
+    local merged_highway_paths = HighwayMerger.applyMergingLogic(all_highway_paths, ring_road_curve, params)
     print("Applied highway merging using HighwayMerger module")
 
     local highway_points = self:extractHighwayPoints(ring_road_curve, merged_highway_paths)
-    local connections = ConnectingRoads.generateConnections(grid, all_districts, highway_points, W, H)
+    local connections = ConnectingRoads.generateConnections(grid, all_districts, highway_points, W, H, params)
     print("Generated connecting roads using ConnectingRoads module")
 
-    self:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, connections)
+    self:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, connections, params)
     
     return grid
 end
@@ -177,11 +180,15 @@ function Map:extractHighwayPoints(ring_road_curve, highway_paths)
     return points
 end
 
-function Map:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, connections)
+function Map:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, connections, params)
+    -- Use debug parameters or defaults
+    local highway_buffer = (params and params.highway_buffer) or 35
+    local thickness = 3
+    
     if #ring_road_curve > 1 then
         for i = 1, #ring_road_curve - 1 do
             self:drawThickLineColored(grid, ring_road_curve[i].x, ring_road_curve[i].y, 
-                                     ring_road_curve[i+1].x, ring_road_curve[i+1].y, "highway_ring", 3)
+                                     ring_road_curve[i+1].x, ring_road_curve[i+1].y, "highway_ring", thickness)
         end
     end
     
@@ -189,7 +196,8 @@ function Map:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, con
         local highway_curve = self:generateSplinePoints(path_nodes, 10)
         local highway_type
         
-        if highway_idx <= 2 then
+        local num_ns_highways = (params and params.num_ns_highways) or 2
+        if highway_idx <= num_ns_highways then
             highway_type = "highway_ns"
         else
             highway_type = "highway_ew"
@@ -197,11 +205,11 @@ function Map:drawAllRoadsToGrid(grid, ring_road_curve, merged_highway_paths, con
         
         for i = 1, #highway_curve - 1 do
             self:drawThickLineColored(grid, highway_curve[i].x, highway_curve[i].y, 
-                                     highway_curve[i+1].x, highway_curve[i+1].y, highway_type, 3)
+                                     highway_curve[i+1].x, highway_curve[i+1].y, highway_type, thickness)
         end
     end
     
-    ConnectingRoads.drawConnections(grid, connections)
+    ConnectingRoads.drawConnections(grid, connections, params)
 end
 
 -- =============================================================================
@@ -265,7 +273,6 @@ function Map:getPlotsFromGrid(grid)
     return plots
 end
 
-
 function Map:generateSplinePoints(points, num_segments)
     local curve_points = {}
     if #points < 4 then return points end
@@ -316,7 +323,6 @@ function Map:drawThickLineColored(grid, x1, y1, x2, y2, road_type, thickness)
         end
     end
 end
-
 
 -- =============================================================================
 -- == MAP STATE MANAGEMENT & RENDERING
@@ -542,6 +548,5 @@ function Map:isPlotInDowntown(plot)
 
     return plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max
 end
-
 
 return Map

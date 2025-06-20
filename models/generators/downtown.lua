@@ -3,9 +3,11 @@
 
 local Downtown = {}
 
-function Downtown.generateDowntownModule(grid, district, road_type, plot_type, num_roads)
+function Downtown.generateDowntownModule(grid, district, road_type, plot_type, num_roads, params)
     -- This function now receives the main grid and carves the downtown area into it.
-    Downtown.generateConnectedRoads(grid, district, road_type, plot_type, num_roads)
+    -- Use debug parameters if provided
+    local actual_num_roads = (params and params.downtown_roads) or num_roads or 50
+    Downtown.generateConnectedRoads(grid, district, road_type, plot_type, actual_num_roads)
 end
 
 -- Helper function to create a grid of a given size and type
@@ -30,6 +32,7 @@ function Downtown.generateConnectedRoads(grid, district, road_type, plot_type, n
     print("  y:", district.y, type(district.y))
     print("  w:", district.w, type(district.w))
     print("  h:", district.h, type(district.h))
+    print("  num_roads:", num_roads)
     
     -- Ensure all district values are numbers
     local dist_x = tonumber(district.x) or 0
@@ -43,6 +46,7 @@ function Downtown.generateConnectedRoads(grid, district, road_type, plot_type, n
     print("  dist_y:", dist_y)
     print("  dist_w:", dist_w)
     print("  dist_h:", dist_h)
+    print("  num_roads_safe:", num_roads_safe)
 
     -- 1. Fill district area with plots first
     for y = dist_y, dist_y + dist_h - 1 do
