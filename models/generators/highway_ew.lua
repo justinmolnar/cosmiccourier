@@ -1,19 +1,19 @@
--- game/generators/highway_ns.lua
--- North-South Highway Generation Module
+-- game/generators/highway_ew.lua
+-- East-West Highway Generation Module
 
-local HighwayNS = {}
+local HighwayEW = {}
 
-function HighwayNS.generatePaths(map_w, map_h, districts)
+function HighwayEW.generatePaths(map_w, map_h, districts)
     local paths = {}
     local EXTENSION = 100
     
-    -- 2 North-South highways at 33% and 67% of map width
-    local ns_positions = {map_w * 0.33, map_w * 0.67}
+    -- 2 East-West highways at 33% and 67% of map height
+    local ew_positions = {map_h * 0.33, map_h * 0.67}
     
-    for _, x_pos in ipairs(ns_positions) do
-        local path = HighwayNS.createFlowingPath(
-            {x = x_pos, y = -EXTENSION}, 
-            {x = x_pos, y = map_h + EXTENSION}, 
+    for _, y_pos in ipairs(ew_positions) do
+        local path = HighwayEW.createFlowingPath(
+            {x = -EXTENSION, y = y_pos}, 
+            {x = map_w + EXTENSION, y = y_pos}, 
             districts
         )
         table.insert(paths, path)
@@ -22,7 +22,7 @@ function HighwayNS.generatePaths(map_w, map_h, districts)
     return paths
 end
 
-function HighwayNS.createFlowingPath(start_point, end_point, districts)
+function HighwayEW.createFlowingPath(start_point, end_point, districts)
     local path = {start_point}
     local current = {x = start_point.x, y = start_point.y}
     local STEP_SIZE = 30
@@ -49,11 +49,11 @@ function HighwayNS.createFlowingPath(start_point, end_point, districts)
         }
         
         -- Check if this ideal position conflicts with any district
-        local conflicting_district = HighwayNS.findConflictingDistrict(ideal_next, districts)
+        local conflicting_district = HighwayEW.findConflictingDistrict(ideal_next, districts)
         
         if conflicting_district then
             -- We need to curve around this district
-            local curve_point = HighwayNS.calculateCurveAroundDistrict(
+            local curve_point = HighwayEW.calculateCurveAroundDistrict(
                 current, 
                 ideal_next, 
                 conflicting_district
@@ -74,12 +74,12 @@ function HighwayNS.createFlowingPath(start_point, end_point, districts)
     end
     
     -- Smooth out sharp angles in the final path
-    local PathSmoother = require("game.generators.path_smoother")
+    local PathSmoother = require("models.generators.path_smoother")
     local smoothed_path = PathSmoother.smoothSharpAngles(path)
     return smoothed_path
 end
 
-function HighwayNS.findConflictingDistrict(point, districts)
+function HighwayEW.findConflictingDistrict(point, districts)
     local BUFFER = 35  -- How close is too close
     
     for _, district in ipairs(districts) do
@@ -99,7 +99,7 @@ function HighwayNS.findConflictingDistrict(point, districts)
     return nil
 end
 
-function HighwayNS.calculateCurveAroundDistrict(current, ideal_next, district)
+function HighwayEW.calculateCurveAroundDistrict(current, ideal_next, district)
     -- Calculate district center and boundaries
     local dist_center_x = district.x + district.w / 2
     local dist_center_y = district.y + district.h / 2
@@ -119,8 +119,8 @@ function HighwayNS.calculateCurveAroundDistrict(current, ideal_next, district)
         local curve_x = dist_center_x + away_x * CURVE_DISTANCE
         local curve_y = dist_center_y + away_y * CURVE_DISTANCE
         
-        -- For vertical highways, prefer curving left/right more than up/down
-        curve_y = ideal_next.y * 0.7 + curve_y * 0.3
+        -- For horizontal highways, prefer curving up/down more than left/right
+        curve_x = ideal_next.x * 0.7 + curve_x * 0.3
         
         return {x = curve_x, y = curve_y}
     else
@@ -129,4 +129,4 @@ function HighwayNS.calculateCurveAroundDistrict(current, ideal_next, district)
     end
 end
 
-return HighwayNS
+return HighwayEW

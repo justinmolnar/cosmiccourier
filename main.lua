@@ -1,28 +1,43 @@
 function love.load()
-    local C = require("core.constants")
+    local C = require("data.constants")
+    local GameController = require("controllers.GameController")
+    local InputController = require("controllers.InputController")
+    local GameView = require("views.GameView")
+    local UIView = require("views.UIView")
+    local UIManager = require("views.UIManager")
 
     Game = {
         C = C,
         EventBus = require("core.event_bus"),
         state = nil,
         time = require("core.time"):new(),
-        map = require("game.map"):new(C),
-        entities = require("game.entities"):new(),
-        autodispatcher = require("game.autodispatcher"):new(C),
-        event_spawner = require("game.event_spawner"):new(C),
+        map = require("models.Map"):new(C),
+        entities = require("models.EntityManager"):new(),
+        autodispatcher = require("models.AutoDispatcher"):new(C),
+        event_spawner = require("models.EventSpawner"):new(C),
         pathfinder = require("lib.pathfinder"),
         fonts = {},
         debug_mode = false,
-        ui = nil,
+        ui_manager = nil,
         zoom_controls = nil,
         camera = require("core.camera"):new(0, 0, 1),
+        game_controller = nil,
+        input_controller = nil,
+        game_view = nil,
+        ui_view = nil
     }
     
-    Game.state = require("core.state"):new(C, Game)
-    Game.ui = require("ui.ui"):new(C, Game)
-    Game.zoom_controls = require("ui.zoom_controls"):new(C)
+    Game.state = require("models.GameState"):new(C, Game)
+    Game.ui_manager = UIManager:new(C, Game)
+    -- CORRECTED: The path now correctly points to the 'ZoomControls' component's new location.
+    Game.zoom_controls = require("views.components.ZoomControls"):new(C)
 
     Game.entities.event_bus_listener_setup(Game)
+
+    Game.game_controller = GameController:new(Game)
+    Game.input_controller = InputController:new(Game)
+    Game.game_view = GameView:new(Game)
+    Game.ui_view = UIView:new(Game)
 
     Game.map:generate()
     Game.entities:init(Game)
@@ -47,151 +62,29 @@ function love.load()
     Game.map:setScale(C.MAP.SCALES.DOWNTOWN)
 end
 
-function love.keypressed(key)
-    if key == "`" then
-        Game.debug_mode = not Game.debug_mode
-        print("Debug mode set to: " .. tostring(Game.debug_mode))
-    elseif key == "-" then
-        Game.state.money = Game.state.money - 10000
-        print("DEBUG: Removed 10,000 money.")
-    elseif key == "=" then
-        Game.state.money = Game.state.money + 10000
-        print("DEBUG: Added 10,000 money.")
-    end
-end
-
-function love.mousewheelmoved(x, y)
-    Game.ui:handle_scroll(y)
-end
-
 function love.update(dt)
-    -- MODIFIED: Only update the game world if no modal is active
-    if not Game.ui.modal_manager:isActive() then
-        Game.state:update(dt, Game) 
-        Game.time:update(dt, Game)
-        Game.map:update(dt, Game)
-        Game.entities:update(dt, Game)
-        Game.autodispatcher:update(dt, Game)
-        Game.event_spawner:update(dt, Game)
-        Game.zoom_controls:update(Game)
-    end
-    -- The UI (and its modal manager) updates regardless
-    Game.ui:update(dt, Game)
+    Game.game_controller:update(dt)
 end
 
 function love.draw()
-    local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
-    local screen_w, screen_h = love.graphics.getDimensions()
-
-    -- PASS 1: DRAW THE SIDEBAR
-    love.graphics.setScissor(0, 0, sidebar_w, screen_h)
-    love.graphics.setColor(Game.C.MAP.COLORS.UI_BG)
-    love.graphics.rectangle("fill", 0, 0, sidebar_w, screen_h)
-    Game.ui:draw(Game)
-    love.graphics.setScissor()
-
-    -- PASS 2: DRAW THE GAME WORLD
-    love.graphics.setScissor(sidebar_w, 0, screen_w - sidebar_w, screen_h)
-    love.graphics.push()
-
-    local game_world_w = screen_w - sidebar_w
-    love.graphics.translate(sidebar_w + game_world_w / 2, screen_h / 2)
-    love.graphics.scale(Game.camera.scale, Game.camera.scale)
-    love.graphics.translate(-Game.camera.x, -Game.camera.y)
-    
-    Game.map:draw()
-    Game.entities:draw(Game)
-    Game.event_spawner:draw(Game)
-
-    if Game.ui.hovered_trip_index then
-        local trip = Game.entities.trips.pending[Game.ui.hovered_trip_index]
-        if trip and trip.legs[trip.current_leg] then
-            local leg = trip.legs[trip.current_leg]
-            local path_grid = Game.map.grid
-            local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1) and Game.map:findNearestRoadTile(Game.entities.depot_plot) or Game.map:findNearestRoadTile(leg.start_plot)
-            local end_node = Game.map:findNearestRoadTile(leg.end_plot)
-            if start_node and end_node and path_grid then
-                local costs = Game.C.GAMEPLAY.PATHFINDING_COSTS[leg.vehicleType]
-                local path = Game.pathfinder.findPath(path_grid, start_node, end_node, costs, Game.map)
-                if path then
-                    local pixel_path = {}
-                    for _, node in ipairs(path) do
-                        local px, py = Game.map:getPixelCoords(node.x, node.y)
-                        table.insert(pixel_path, px)
-                        table.insert(pixel_path, py)
-                    end
-                    local hover_color = Game.C.MAP.COLORS.HOVER
-                    love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.7)
-                    love.graphics.setLineWidth(3 / Game.camera.scale)
-                    love.graphics.line(pixel_path)
-                    love.graphics.setLineWidth(1)
-                    local circle_radius = 5 / Game.camera.scale
-                    love.graphics.setColor(hover_color)
-                    love.graphics.circle("fill", pixel_path[1], pixel_path[2], circle_radius)
-                    love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], circle_radius)
-                end
-            end
-        end
-    end
-
-    love.graphics.setFont(Game.fonts.ui)
-    for _, ft in ipairs(Game.state.floating_texts) do
-        love.graphics.setColor(1, 1, 0.8, ft.alpha)
-        love.graphics.printf(ft.text, ft.x, ft.y, 150, "center")
-    end
-    
-    love.graphics.pop()
-    love.graphics.setScissor()
-
-    -- PASS 3: DRAW ZOOM CONTROLS
+    Game.ui_view:draw()
+    Game.game_view:draw()
     Game.zoom_controls:draw(Game)
+    Game.ui_manager.modal_manager:draw(Game)
+end
 
-    -- NEW PASS 4: DRAW THE MODAL on top of everything else
-    Game.ui.modal_manager:draw(Game)
+function love.keypressed(key)
+    Game.input_controller:keypressed(key)
+end
+
+function love.mousewheelmoved(x, y)
+    Game.input_controller:mousewheelmoved(x, y)
 end
 
 function love.mousepressed(x, y, button)
-    -- "Click outside to close" logic
-    if button == 1 and Game.ui.modal_manager:isActive() then
-        local modal = Game.ui.modal_manager.active_modal
-        if not (x > modal.x and x < modal.x + modal.w and y > modal.y and y < modal.y + modal.h) then
-            Game.ui.modal_manager:hide()
-            return 
-        end
-    end
-
-    -- MODIFIED: This now correctly passes the `Game` object into the UI's click handler.
-    if Game.ui:handle_mouse_down(x, y, button, Game) then
-        return
-    end
-
-    if button == 1 then
-        if Game.zoom_controls:handle_click(x, y, Game) then
-            return
-        end
-        
-        if x < Game.C.UI.SIDEBAR_WIDTH then
-            Game.ui:handle_click(x, y, Game)
-        else
-            local game_world_w = love.graphics.getWidth() - Game.C.UI.SIDEBAR_WIDTH
-            local game_world_h = love.graphics.getHeight()
-            local screen_x = x - (Game.C.UI.SIDEBAR_WIDTH + game_world_w / 2)
-            local screen_y = y - (game_world_h / 2)
-            local scaled_x = screen_x / Game.camera.scale
-            local scaled_y = screen_y / Game.camera.scale
-            local world_x = scaled_x + Game.camera.x
-            local world_y = scaled_y + Game.camera.y
-            local event_handled = Game.event_spawner:handle_click(world_x, world_y, Game)
-            if not event_handled then
-                Game.entities:handle_click(world_x, world_y, Game)
-            end
-        end
-    end
+    Game.input_controller:mousepressed(x, y, button)
 end
 
 function love.mousereleased(x, y, button)
-    if Game.ui.modal_manager:handle_mouse_up(x, y, Game) then
-        return
-    end
-    Game.ui:handle_mouse_up(x, y, button)
+    Game.input_controller:mousereleased(x, y, button)
 end

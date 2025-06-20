@@ -3,13 +3,13 @@ local Map = {}
 Map.__index = Map
 
 -- Import all the generator modules
-local Downtown = require("game.generators.downtown")
-local Districts = require("game.generators.districts")
-local HighwayNS = require("game.generators.highway_ns")
-local HighwayEW = require("game.generators.highway_ew")
-local RingRoad = require("game.generators.ringroad")
-local HighwayMerger = require("game.generators.highway_merger")
-local ConnectingRoads = require("game.generators.connecting_roads")
+local Downtown = require("models.generators.downtown")
+local Districts = require("models.generators.districts")
+local HighwayNS = require("models.generators.highway_ns")
+local HighwayEW = require("models.generators.highway_ew")
+local RingRoad = require("models.generators.ringroad")
+local HighwayMerger = require("models.generators.highway_merger")
+local ConnectingRoads = require("models.generators.connecting_roads")
 
 -- =============================================================================
 -- == HELPER FUNCTIONS (Correctly Ordered)
@@ -110,7 +110,7 @@ function Map:generate()
         w = downtown_w, h = downtown_h
     }
     
-    require("game.generators.downtown").generateDowntownModule(self.grid, downtown_district, C_MAP)
+    require("models.generators.downtown").generateDowntownModule(self.grid, downtown_district, C_MAP)
     print("Generated Downtown Core onto main grid...")
 
     local all_districts = Districts.generateAll(self.grid, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, downtown_district)

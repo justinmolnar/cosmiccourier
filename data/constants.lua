@@ -60,8 +60,8 @@ local C = {
 
     GAMEPLAY = {
         INITIAL_MONEY           = 150,
-        INITIAL_BIKE_SPEED      = 80,
-        INITIAL_TRUCK_SPEED     = 60,
+        -- REMOVED: INITIAL_BIKE_SPEED
+        -- REMOVED: INITIAL_TRUCK_SPEED
         BASE_TRIP_PAYOUT        = 50,
         CITY_TRIP_PAYOUT_MULTIPLIER = 20,
         INITIAL_SPEED_BONUS     = 100,
@@ -74,28 +74,7 @@ local C = {
         MIN_DELTA_CALCULATION   = 0.1,
         CURRENT_MAP_SCALE       = 1,
         
-        -- The PATHFINDING_COSTS table MUST be inside the GAMEPLAY table like this:
-        PATHFINDING_COSTS       = {
-            bike = {
-                road = 5,
-                downtown_road = 8,
-                arterial = 3,
-                -- FIX: Use a very high number instead of infinite to allow crossings.
-                highway = 500,
-                highway_ring = 500,
-                highway_ns = 500,
-                highway_ew = 500,
-            },
-            truck = {
-                road = 10, 
-                downtown_road = 20,
-                arterial = 5,
-                highway = 1,
-                highway_ring = 1,
-                highway_ns = 1,
-                highway_ew = 1,
-            }
-        },
+        -- REMOVED: The PATHFINDING_COSTS table has been moved.
     },
 
     ZOOM = {
@@ -109,16 +88,16 @@ local C = {
     },
 
     COSTS = {
-        BIKE            = 150,
-        TRUCK           = 1200, -- NEW
+        -- REMOVED: BIKE
+        -- REMOVED: TRUCK
         SPEED           = 75,
         CLIENT          = 500,
         AUTO_DISPATCH   = 1000,
         CAPACITY        = 2500,
         FRENZY_DURATION = 5000,
 
-        BIKE_MULT       = 1.15,
-        TRUCK_MULT      = 1.25, -- NEW
+        -- REMOVED: BIKE_MULT
+        -- REMOVED: TRUCK_MULT
         SPEED_MULT      = 1.5,
         CLIENT_MULT     = 1.2,
         CAPACITY_MULT   = 1.5,

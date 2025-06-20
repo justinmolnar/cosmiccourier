@@ -1,5 +1,5 @@
--- game/client.lua
-local Trip = require("game.trip")
+-- models/Client.lua
+local Trip = require("models.Trip")
 
 local Client = {}
 Client.__index = Client
@@ -19,7 +19,6 @@ function Client:update(dt, game)
 
     self.trip_timer = self.trip_timer - dt
     if self.trip_timer <= 0 then
-        -- Reset timer using new upgradeable multipliers
         local min_time = C_GAMEPLAY.TRIP_GENERATION_MIN_SEC * upgrades.trip_gen_min_mult
         local max_time = C_GAMEPLAY.TRIP_GENERATION_MAX_SEC * upgrades.trip_gen_max_mult
         self.trip_timer = love.math.random(min_time, max_time)
@@ -45,7 +44,7 @@ function Client:update(dt, game)
                     new_trip:addLeg(self.plot, game.entities.depot_plot, "bike")
                     new_trip:addLeg(game.entities.depot_plot, city_plot, "truck")
                     table.insert(game.entities.trips.pending, new_trip)
-                    game.EventBus:publish("trip_created") -- NEW: Publish event
+                    game.EventBus:publish("trip_created")
                     print("New multi-leg (bike->truck) trip generated!")
                 end
             else
@@ -54,25 +53,14 @@ function Client:update(dt, game)
                     local new_trip = Trip:new(base_payout, speed_bonus)
                     new_trip:addLeg(self.plot, end_plot, "bike")
                     table.insert(game.entities.trips.pending, new_trip)
-                    game.EventBus:publish("trip_created") -- NEW: Publish event
+                    game.EventBus:publish("trip_created")
                 end
             end
         end
     end
 end
 
-function Client:draw(game)
-    love.graphics.setFont(game.fonts.emoji)
-    love.graphics.setColor(0, 0, 0)
-    
-    love.graphics.push()
-    love.graphics.translate(self.px, self.py)
-    love.graphics.scale(1 / game.camera.scale, 1 / game.camera.scale)
-    love.graphics.print("🏢", -14, -14)
-    love.graphics.pop()
-    
-    love.graphics.setFont(game.fonts.ui)
-end
+-- REMOVED THE DRAW FUNCTION FROM HERE
 
 function Client:recalculatePixelPosition(game)
     self.px, self.py = game.map:getPixelCoords(self.plot.x, self.plot.y)

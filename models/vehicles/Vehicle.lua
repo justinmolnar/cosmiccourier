@@ -1,15 +1,17 @@
--- game/vehicle.lua (The new base vehicle file)
+-- models/vehicles/Vehicle.lua
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
-function Vehicle:new(id, depot_plot, game, vehicleType)
+function Vehicle:new(id, depot_plot, game, vehicleType, properties)
+    -- THIS IS THE FIX: By requiring the states file here, we avoid the
+    -- circular dependency that happens during the initial game load.
+    local States = require("models.vehicles.vehicle_states")
+    
     local instance = setmetatable({}, Vehicle)
-
-    -- Require the state machine definition file
-    local States = require("game.vehicle_states")
     
     instance.id = id
-    instance.type = vehicleType or "vehicle" -- NEW: Store vehicle type
+    instance.type = vehicleType or "vehicle"
+    instance.properties = properties or {}
     instance.depot_plot = depot_plot
     instance.px, instance.py = game.map:getPixelCoords(depot_plot.x, depot_plot.y)
     
@@ -17,10 +19,8 @@ function Vehicle:new(id, depot_plot, game, vehicleType)
     instance.cargo = {}      -- Trips picked up and currently being delivered
     instance.path = {}
     
-    -- This is our new reliable grid-based position tracker
     instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
     
-    -- Initialize the state machine
     instance.state = nil
     instance:changeState(States.Idle, game)
 
@@ -28,8 +28,6 @@ function Vehicle:new(id, depot_plot, game, vehicleType)
 end
 
 function Vehicle:recalculatePixelPosition(game)
-    -- With a unified grid and a camera, an entity's pixel position
-    -- is always calculated the same way from its single global grid anchor.
     self.px, self.py = game.map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
 end
 
@@ -46,14 +44,11 @@ end
 function Vehicle:assignTrip(trip, game)
     if not self:isAvailable(game) then return end
 
-    print("Queuing trip for bike " .. self.id)
+    print("Queuing trip for " .. self.type .. " " .. self.id)
     table.insert(self.trip_queue, trip)
 end
 
 function Vehicle:update(dt, game)
-    -- The vehicle's update function is now extremely simple.
-    -- It just calls the update method of whatever state it's currently in.
-    -- The state itself is now responsible for movement and state changes.
     if self.state and self.state.update then
         self.state:update(dt, self, game)
     end
@@ -82,7 +77,6 @@ function Vehicle:drawDebug(game)
         string.format("Pos: %d, %d", math.floor(self.px), math.floor(self.py))
     }
 
-    -- FIX: Counter-scale the debug text so it's readable when zoomed in.
     love.graphics.push()
     love.graphics.translate(self.px + 20, self.py - 20)
     love.graphics.scale(1 / game.camera.scale, 1 / game.camera.scale)
@@ -102,21 +96,12 @@ function Vehicle:drawDebug(game)
     end
 end
 
-
--- The generic draw function. Specific vehicle types can override this.
 function Vehicle:draw(game)
     local should_draw = false
     local current_scale = game.map:getCurrentScale()
     
-    if self.type == "bike" then
-        if current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
-            should_draw = true
-        end
-    elseif self.type == "truck" then
-        if current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
-            should_draw = true
-        end
-    else
+    -- This generic draw logic can be simplified or specialized in subclasses
+    if current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
         should_draw = true
     end
 
@@ -126,7 +111,6 @@ function Vehicle:draw(game)
 
     if self == game.entities.selected_vehicle then
         love.graphics.setColor(1, 1, 0)
-        -- FIX: Counter-scale the selection circle's radius and line width.
         local radius = 16 / game.camera.scale
         love.graphics.setLineWidth(2 / game.camera.scale)
         love.graphics.circle("line", self.px, self.py, radius)
