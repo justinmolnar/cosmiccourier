@@ -106,13 +106,22 @@ function GameView:draw()
         end
     end
 
+    -- MOVE THIS OUTSIDE THE CAMERA TRANSFORM - END THE TRANSFORM HERE
+    love.graphics.pop()
+    
+    -- NOW DRAW FLOATING TEXT IN SCREEN SPACE (UNSCALED)
     love.graphics.setFont(Game.fonts.ui)
     for _, ft in ipairs(Game.state.floating_texts) do
+        -- Convert world coordinates to screen coordinates
+        local CoordinateSystem = require("utils.CoordinateSystem")
+        local coord_system = CoordinateSystem.new(Game.C)
+        local screen_x, screen_y = coord_system:worldToScreen(ft.x, ft.y, Game.camera)
+        
         love.graphics.setColor(1, 1, 0.8, ft.alpha)
-        love.graphics.printf(ft.text, ft.x, ft.y, 150, "center")
+        -- Center the text around the screen position
+        love.graphics.printf(ft.text, screen_x - 75, screen_y, 150, "center")
     end
     
-    love.graphics.pop()
     love.graphics.setScissor()
 end
 

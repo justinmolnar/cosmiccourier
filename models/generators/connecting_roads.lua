@@ -1,17 +1,19 @@
 -- game/generators/connecting_roads.lua
--- Walker-based Connecting Roads Generation Module with Clear Death Rules
+-- Walker-based Connecting Roads Generation Module with Organic Wandering
 
 local ConnectingRoads = {}
 
-function ConnectingRoads.generateConnections(grid, districts, highway_points, map_w, map_h, game)
-    print("Starting walker-based road generation...")
+function ConnectingRoads.generateConnections(grid, districts, highway_points, map_w, map_h)
+    print("Starting organic walker-based road generation...")
     
-    local starting_points = ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_points, map_w, map_h, game)
+    -- Find all district boundary road endpoints to start walkers from
+    local starting_points = ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_points, map_w, map_h)
     print("Found", #starting_points, "starting points for walkers")
     
+    -- Create walkers from starting points
     local all_walker_paths = {}
     for _, start_point in ipairs(starting_points) do
-        local walker_paths = ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, highway_points, map_w, map_h, game)
+        local walker_paths = ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, highway_points, map_w, map_h)
         for _, path in ipairs(walker_paths) do
             table.insert(all_walker_paths, path)
         end
@@ -21,24 +23,29 @@ function ConnectingRoads.generateConnections(grid, districts, highway_points, ma
     return all_walker_paths
 end
 
-function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, highway_points, map_w, map_h, game)
+function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, highway_points, map_w, map_h)
     local walker_paths = {}
     
+    -- Create ONE walker per boundary point
     local walker = {
         x = start_point.x + start_point.direction.x,
         y = start_point.y + start_point.direction.y,
         direction = {x = start_point.direction.x, y = start_point.direction.y},
         path = {{x = start_point.x, y = start_point.y}},
-        visited = {},
         from_district = start_point.district,
-        connection_distance = 65
+        -- NEW: Track how long we've been walking
+        steps_taken = 0,
+        -- NEW: Bias towards map center for inward-facing walkers
+        center_bias = start_point.faces_downtown and 0.3 or 0.0,
+        map_center_x = map_w / 2,
+        map_center_y = map_h / 2
     }
     
     local active_walkers = {walker}
     
     while #active_walkers > 0 do
         local current_walker = table.remove(active_walkers, 1)
-        local walker_result = ConnectingRoads.stepWalker(current_walker, grid, districts, highway_points, map_w, map_h, game)
+        local walker_result = ConnectingRoads.stepWalker(current_walker, grid, districts, highway_points, map_w, map_h)
         
         if walker_result.completed_path then
             table.insert(walker_paths, walker_result.completed_path)
@@ -48,7 +55,8 @@ function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, hi
             table.insert(active_walkers, walker_result.continue_walker)
         end
         
-        if walker_result.split_walker and love.math.random() < 0.05 and #active_walkers < 3 then
+        -- Allow occasional splitting for more variety
+        if walker_result.split_walker and love.math.random() < 0.03 and #active_walkers < 2 then
             table.insert(active_walkers, walker_result.split_walker)
         end
     end
@@ -56,56 +64,101 @@ function ConnectingRoads.createWalkersFromPoint(grid, start_point, districts, hi
     return walker_paths
 end
 
-function ConnectingRoads.stepWalker(walker, grid, districts, highway_points, map_w, map_h, game)
+function ConnectingRoads.stepWalker(walker, grid, districts, highway_points, map_w, map_h)
     local result = {}
     
+    -- Increment step counter
+    walker.steps_taken = walker.steps_taken + 1
+    
+    -- DEATH CONDITION 1: Check if we're out of bounds
     if not ConnectingRoads.inBounds(walker.x, walker.y, map_w, map_h) then
+        result.completed_path = walker.path
         return result
     end
     
+    -- DEATH CONDITION 2: Check if we hit an existing road - SUCCESS!
     local current_tile = grid[walker.y][walker.x]
-    local road_district = ConnectingRoads.findDistrictAtPosition(walker.x, walker.y, districts)
-
-    -- Use the central, correct isRoad function
-    if game.map:isRoad(current_tile.type) and (road_district ~= walker.from_district) then
+    if ConnectingRoads.isRoadTile(current_tile.type) then
         table.insert(walker.path, {x = walker.x, y = walker.y})
         result.completed_path = walker.path
         return result
     end
     
-    if walker.path and #walker.path > (map_w + map_h) then return result end
-    local visited_key = walker.y .. "," .. walker.x
-    if walker.visited[visited_key] then return {} end
-    walker.visited[visited_key] = true
-    
-    table.insert(walker.path, {x = walker.x, y = walker.y})
-    
-    local nearby_road = ConnectingRoads.findNearbyRoadNotFromOrigin(
-        walker.x, walker.y, walker.connection_distance, grid, walker.from_district, districts, map_w, map_h, game
-    )
-    
-    if nearby_road then
-        local dx = nearby_road.x - walker.x
-        local dy = nearby_road.y - walker.y
-        if math.abs(dx) > math.abs(dy) then
-            walker.direction = {x = dx > 0 and 1 or -1, y = 0}
-        else
-            walker.direction = {x = 0, y = dy > 0 and 1 or -1}
-        end
-    else
-        local random_chance = love.math.random()
-        if random_chance < 0.05 then
-            result.split_walker = ConnectingRoads.createSplitWalker(walker)
-        elseif random_chance < 0.15 then
-            ConnectingRoads.turnWalker(walker)
-        end
+    -- DEATH CONDITION 3: Check if we've walked too far (prevents infinite loops)
+    if walker.steps_taken > 200 then
+        result.completed_path = walker.path
+        return result
     end
     
+    -- DEATH CONDITION 4: Check if we're in a DIFFERENT district
+    local current_district = ConnectingRoads.findDistrictAtPosition(walker.x, walker.y, districts)
+    if current_district and current_district ~= walker.from_district then
+        result.completed_path = walker.path
+        return result
+    end
+    
+    -- Walker survives, add current position to path
+    table.insert(walker.path, {x = walker.x, y = walker.y})
+    
+    -- NEW ORGANIC DIRECTION LOGIC
+    ConnectingRoads.updateWalkerDirection(walker)
+    
+    -- Move walker forward
     walker.x = walker.x + walker.direction.x
     walker.y = walker.y + walker.direction.y
     
     result.continue_walker = walker
     return result
+end
+
+function ConnectingRoads.updateWalkerDirection(walker)
+    -- Start with current direction (momentum)
+    local new_direction = {x = walker.direction.x, y = walker.direction.y}
+    
+    -- Calculate bias towards map center (for inward-facing walkers)
+    local center_pull_x = 0
+    local center_pull_y = 0
+    
+    if walker.center_bias > 0 then
+        local dx_to_center = walker.map_center_x - walker.x
+        local dy_to_center = walker.map_center_y - walker.y
+        local distance_to_center = math.sqrt(dx_to_center * dx_to_center + dy_to_center * dy_to_center)
+        
+        if distance_to_center > 0 then
+            center_pull_x = (dx_to_center / distance_to_center) * walker.center_bias
+            center_pull_y = (dy_to_center / distance_to_center) * walker.center_bias
+        end
+    end
+    
+    -- Add randomness for organic wandering
+    local random_strength = 0.4
+    local random_x = (love.math.random() - 0.5) * 2 * random_strength
+    local random_y = (love.math.random() - 0.5) * 2 * random_strength
+    
+    -- Combine all influences
+    local combined_x = new_direction.x + center_pull_x + random_x
+    local combined_y = new_direction.y + center_pull_y + random_y
+    
+    -- Normalize to cardinal directions (keep grid-aligned movement)
+    if math.abs(combined_x) > math.abs(combined_y) then
+        walker.direction.x = combined_x > 0 and 1 or -1
+        walker.direction.y = 0
+    else
+        walker.direction.x = 0
+        walker.direction.y = combined_y > 0 and 1 or -1
+    end
+    
+    -- Occasional random turns for more interesting paths
+    local turn_chance = 0.1 -- 10% chance per step
+    if love.math.random() < turn_chance then
+        ConnectingRoads.turnWalker(walker)
+    end
+    
+    -- Very rare direction reversal for backtracking
+    if love.math.random() < 0.02 then
+        walker.direction.x = -walker.direction.x
+        walker.direction.y = -walker.direction.y
+    end
 end
 
 function ConnectingRoads.findDistrictAtPosition(x, y, districts)
@@ -118,27 +171,13 @@ function ConnectingRoads.findDistrictAtPosition(x, y, districts)
     return nil
 end
 
-
-function ConnectingRoads.findNearbyRoadNotFromOrigin(x, y, max_distance, grid, origin_district, districts, map_w, map_h, game)
-    for radius = 1, max_distance do
-        for angle = 0, 359, 15 do
-            local check_x = x + math.floor(radius * math.cos(math.rad(angle)))
-            local check_y = y + math.floor(radius * math.sin(math.rad(angle)))
-            
-            if ConnectingRoads.inBounds(check_x, check_y, map_w, map_h) then
-                local tile_type = grid[check_y][check_x].type
-                
-                if game.map:isRoad(tile_type) then
-                    local road_district = ConnectingRoads.findDistrictAtPosition(check_x, check_y, districts)
-                    if road_district ~= origin_district then
-                        return {x = check_x, y = check_y}
-                    end
-                end
-            end
-        end
-    end
-    
-    return nil
+function ConnectingRoads.isRoadTile(tile_type)
+    return tile_type == "road" or 
+           tile_type == "highway_ring" or 
+           tile_type == "highway_ns" or 
+           tile_type == "highway_ew" or
+           tile_type == "downtown_road" or
+           tile_type == "arterial"
 end
 
 function ConnectingRoads.createSplitWalker(original_walker)
@@ -161,9 +200,11 @@ function ConnectingRoads.createSplitWalker(original_walker)
         y = original_walker.y,
         direction = new_direction,
         path = {original_walker.path[#original_walker.path]}, -- Start from current position
-        visited = original_walker.visited, -- Share the visited history to prevent immediate loops
         from_district = original_walker.from_district,
-        connection_distance = original_walker.connection_distance
+        steps_taken = 0, -- Reset step counter for split walker
+        center_bias = original_walker.center_bias,
+        map_center_x = original_walker.map_center_x,
+        map_center_y = original_walker.map_center_y
     }
 end
 
@@ -183,8 +224,10 @@ function ConnectingRoads.turnWalker(walker)
     walker.direction = turn_options[love.math.random(1, #turn_options)]
 end
 
-function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_points, map_w, map_h, game)
+function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_points, map_w, map_h)
     local boundary_points = {}
+    
+    -- First, find downtown district (District 1) for reference
     local downtown = districts[1]
     local downtown_center_x = downtown.x + downtown.w / 2
     local downtown_center_y = downtown.y + downtown.h / 2
@@ -193,44 +236,79 @@ function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_poin
         local district_center_x = district.x + district.w / 2
         local district_center_y = district.y + district.h / 2
         
-        local sides = { top = {}, bottom = {}, left = {}, right = {} }
+        -- Collect all boundary roads by side
+        local sides = {
+            top = {},
+            bottom = {},
+            left = {},
+            right = {}
+        }
         
+        -- Check all edges of the district for roads that could extend outward
         local edges = {
+            -- Top edge
             {x_start = district.x, x_end = district.x + district.w - 1, y = district.y, direction = {x = 0, y = -1}, side = "top"},
+            -- Bottom edge  
             {x_start = district.x, x_end = district.x + district.w - 1, y = district.y + district.h - 1, direction = {x = 0, y = 1}, side = "bottom"},
+            -- Left edge
             {x = district.x, y_start = district.y, y_end = district.y + district.h - 1, direction = {x = -1, y = 0}, side = "left"},
+            -- Right edge
             {x = district.x + district.w - 1, y_start = district.y, y_end = district.y + district.h - 1, direction = {x = 1, y = 0}, side = "right"}
         }
         
         for _, edge in ipairs(edges) do
             if edge.x_start then
+                -- Horizontal edge
                 for x = edge.x_start, edge.x_end do
                     if ConnectingRoads.inBounds(x, edge.y, map_w, map_h) then
-                        if game.map:isRoad(grid[edge.y][x].type) then
-                            table.insert(sides[edge.side], { x = x, y = edge.y, direction = edge.direction, district = district })
+                        local tile_type = grid[edge.y][x].type
+                        if ConnectingRoads.isRoadTile(tile_type) then
+                            table.insert(sides[edge.side], {
+                                x = x, 
+                                y = edge.y, 
+                                direction = edge.direction,
+                                district = district
+                            })
                         end
                     end
                 end
             else
+                -- Vertical edge
                 for y = edge.y_start, edge.y_end do
                     if ConnectingRoads.inBounds(edge.x, y, map_w, map_h) then
-                        if game.map:isRoad(grid[y][edge.x].type) then
-                            table.insert(sides[edge.side], { x = edge.x, y = y, direction = edge.direction, district = district })
+                        local tile_type = grid[y][edge.x].type
+                        if ConnectingRoads.isRoadTile(tile_type) then
+                            table.insert(sides[edge.side], {
+                                x = edge.x, 
+                                y = y, 
+                                direction = edge.direction,
+                                district = district
+                            })
                         end
                     end
                 end
             end
         end
         
+        -- Now limit walkers per side based on facing toward downtown
         for side_name, side_roads in pairs(sides) do
+            -- Determine if this side faces toward downtown center
             local faces_downtown = false
-            if side_name == "top" and district_center_y > downtown_center_y then faces_downtown = true
-            elseif side_name == "bottom" and district_center_y < downtown_center_y then faces_downtown = true
-            elseif side_name == "left" and district_center_x > downtown_center_x then faces_downtown = true
-            elseif side_name == "right" and district_center_x < downtown_center_x then faces_downtown = true end
             
+            if side_name == "top" and district_center_y > downtown_center_y then
+                faces_downtown = true
+            elseif side_name == "bottom" and district_center_y < downtown_center_y then
+                faces_downtown = true
+            elseif side_name == "left" and district_center_x > downtown_center_x then
+                faces_downtown = true
+            elseif side_name == "right" and district_center_x < downtown_center_x then
+                faces_downtown = true
+            end
+            
+            -- Set limits: 8 for sides facing downtown, 4 for sides facing away
             local max_walkers_this_side = faces_downtown and 8 or 4
             
+            -- Shuffle the roads and take up to the limit
             for i = #side_roads, 2, -1 do
                 local j = love.math.random(i)
                 side_roads[i], side_roads[j] = side_roads[j], side_roads[i]
@@ -238,6 +316,8 @@ function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_poin
             
             local roads_to_use = math.min(#side_roads, max_walkers_this_side)
             for i = 1, roads_to_use do
+                -- Mark whether this walker faces downtown
+                side_roads[i].faces_downtown = faces_downtown
                 table.insert(boundary_points, side_roads[i])
             end
         end
@@ -246,46 +326,37 @@ function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_poin
     return boundary_points
 end
 
-function ConnectingRoads.drawConnections(grid, walker_paths, game)
+function ConnectingRoads.drawConnections(grid, walker_paths)
+    -- Draw all the walker paths as thin roads
     for _, path in ipairs(walker_paths) do
         for i = 1, #path - 1 do
-            -- FIX: Pass the 'game' object to drawThinLine
-            ConnectingRoads.drawThinLine(grid, path[i].x, path[i].y, path[i+1].x, path[i+1].y, "road", game)
+            ConnectingRoads.drawThinLine(grid, path[i].x, path[i].y, path[i+1].x, path[i+1].y, "road")
         end
     end
 end
 
-function ConnectingRoads.drawThinLine(grid, x1, y1, x2, y2, road_type, game)
+function ConnectingRoads.drawThinLine(grid, x1, y1, x2, y2, road_type)
     if not grid or #grid == 0 then return end
+    
     local w, h = #grid[1], #grid
-
-    local dx = x2 - x1
-    local dy = y2 - y1
-
-    if math.abs(dx) > math.abs(dy) then
-        local x_min, x_max = math.min(x1, x2), math.max(x1, x2)
-        for x = x_min, x_max do
-            local y = math.floor(y1 + dy * (x - x1) / dx + 0.5)
-            if ConnectingRoads.inBounds(x, y, w, h) then
-                local current_type = grid[y][x].type
-                -- FIX: Use the central game.map:isRoad function
-                if not game.map:isRoad(current_type) then
-                    grid[y][x].type = road_type
-                end
+    local dx, dy = math.abs(x2 - x1), math.abs(y2 - y1)
+    local sx, sy = (x1 < x2) and 1 or -1, (y1 < y2) and 1 or -1
+    local err, x, y = dx - dy, x1, y1
+    
+    while true do
+        if ConnectingRoads.inBounds(x, y, w, h) then
+            -- Only draw if it's not already a highway or other major road
+            local current_type = grid[y][x].type
+            if not ConnectingRoads.isRoadTile(current_type) then
+                grid[y][x].type = road_type
             end
         end
-    else
-        local y_min, y_max = math.min(y1, y2), math.max(y1, y2)
-        for y = y_min, y_max do
-            local x = dx == 0 and x1 or math.floor(x1 + dx * (y - y1) / dy + 0.5)
-            if ConnectingRoads.inBounds(x, y, w, h) then
-                local current_type = grid[y][x].type
-                -- FIX: Use the central game.map:isRoad function
-                if not game.map:isRoad(current_type) then
-                    grid[y][x].type = road_type
-                end
-            end
-        end
+        
+        if x == x2 and y == y2 then break end
+        
+        local e2 = 2 * err
+        if e2 > -dy then err = err - dy; x = x + sx end
+        if e2 < dx then err = err + dx; y = y + sy end
     end
 end
 

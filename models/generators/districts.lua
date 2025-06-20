@@ -1,5 +1,5 @@
 -- game/generators/districts.lua
--- District Generation Module
+-- District Generation Module with Connected Roads and No Overlap
 
 local Districts = {}
 
@@ -9,103 +9,345 @@ function Districts.generateAll(grid, map_w, map_h, downtown_district)
     -- 1. The downtown district is already generated, so we just add its definition to our list.
     table.insert(all_districts, downtown_district)
     
-    -- 2. Generate the other surrounding districts.
-    local other_districts = Districts.placeDistricts(grid, 10, map_w, map_h, downtown_district)
+    -- 2. Generate non-overlapping districts using proper placement
+    local other_districts = Districts.placeNonOverlappingDistricts(grid, 8, map_w, map_h, downtown_district)
     for _, district in ipairs(other_districts) do
         table.insert(all_districts, district)
     end
     
-    -- 3. Fill the OTHER districts with their internal road networks.
-    -- (Downtown is already filled by its own generator).
+    -- 3. Fill districts with connected road networks (like downtown)
     for _, district in ipairs(other_districts) do
-        Districts.generateDistrictInternals(grid, district, "road", "plot")
+        Districts.generateConnectedRoadNetwork(grid, district)
     end
     
     return all_districts
 end
 
-function Districts.placeDistricts(grid, num_districts, max_w, max_h, downtown_dist)
+function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_h, downtown_dist)
     local districts = {}
     local attempts = 0
+    local max_attempts = 1000
     
-    while #districts < num_districts and attempts < 500 do
-        local w, h = love.math.random(40, 80), love.math.random(40, 80)
-        local x, y = love.math.random(1, max_w - w), love.math.random(1, max_h - h)
-        local valid = true
+    while #districts < num_districts and attempts < max_attempts do
+        local w = love.math.random(40, 80)
+        local h = love.math.random(40, 80)
+        local x = love.math.random(1, max_w - w)
+        local y = love.math.random(1, max_h - h)
         
-        -- Check if overlaps with downtown
-        if x < downtown_dist.x + downtown_dist.w and x + w > downtown_dist.x and 
-           y < downtown_dist.y + downtown_dist.h and y + h > downtown_dist.y then
-            valid = false
+        local new_district = {x = x, y = y, w = w, h = h}
+        
+        -- Check if this district would overlap with any existing districts
+        local overlaps = false
+        
+        -- Check overlap with downtown
+        if Districts.doDistrictsOverlap(new_district, downtown_dist) then
+            overlaps = true
         end
         
-        if valid then
-            for i = 1, 5 do
-                local cx, cy = love.math.random(x, x + w), love.math.random(y, y + h)
-                -- FIX: Check for 'grass' (empty land) instead of 'plot'
-                if not Districts.inBounds(cx, cy, max_w, max_h) or grid[cy][cx].type ~= 'grass' then
-                    valid = false
+        -- Check overlap with other districts
+        if not overlaps then
+            for _, existing_district in ipairs(districts) do
+                if Districts.doDistrictsOverlap(new_district, existing_district) then
+                    overlaps = true
                     break
                 end
             end
         end
         
-        if valid then
-            table.insert(districts, {x = x, y = y, w = w, h = h})
+        -- Check if the district would be too close to map edges
+        local min_border_distance = 10
+        if x < min_border_distance or y < min_border_distance or 
+           x + w > max_w - min_border_distance or y + h > max_h - min_border_distance then
+            overlaps = true
+        end
+        
+        -- If no overlaps, add the district
+        if not overlaps then
+            table.insert(districts, new_district)
+            print(string.format("Placed district %d at (%d,%d) size %dx%d", #districts, x, y, w, h))
         end
         
         attempts = attempts + 1
     end
     
+    print(string.format("Successfully placed %d/%d districts after %d attempts", #districts, num_districts, attempts))
     return districts
 end
 
-function Districts.generateDistrictInternals(grid, district, road_type, plot_type, num_roads_override)
+function Districts.doDistrictsOverlap(district1, district2)
+    -- Add a minimum spacing buffer between districts
+    local buffer = 15
+    
+    local d1_left = district1.x - buffer
+    local d1_right = district1.x + district1.w + buffer
+    local d1_top = district1.y - buffer
+    local d1_bottom = district1.y + district1.h + buffer
+    
+    local d2_left = district2.x
+    local d2_right = district2.x + district2.w
+    local d2_top = district2.y
+    local d2_bottom = district2.y + district2.h
+    
+    -- Check if rectangles overlap
+    return not (d1_right < d2_left or d1_left > d2_right or d1_bottom < d2_top or d1_top > d2_bottom)
+end
+
+function Districts.generateConnectedRoadNetwork(grid, district)
     local grid_w, grid_h = #grid[1], #grid
     
-    -- Fill district area with plots
+    -- First, fill the district area with plots
     for y = district.y, district.y + district.h - 1 do
         for x = district.x, district.x + district.w - 1 do
             if Districts.inBounds(x, y, grid_w, grid_h) then
-                local current_type = grid[y][x].type
-                -- FIXED: Don't check for downtown_plot and downtown_road since we're not using them anymore
-                if current_type ~= 'plot' and current_type ~= 'road' then 
-                    grid[y][x].type = plot_type 
-                end
+                grid[y][x].type = "plot"
             end
         end
     end
     
-    -- Generate internal roads
-    local num_secondary_roads = num_roads_override or (15 + love.math.random(0, 15))
+    -- Create a connected road network similar to downtown
+    Districts.createConnectedRoads(grid, district)
+end
+
+function Districts.createConnectedRoads(grid, district)
+    local grid_w, grid_h = #grid[1], #grid
+    local road_tiles = {} -- Keep track of all road tiles for connectivity
+    
+    -- Create main cross roads through the center (like downtown)
+    local center_x = district.x + math.floor(district.w / 2)
+    local center_y = district.y + math.floor(district.h / 2)
+    
+    -- Vertical main road
+    for y = district.y, district.y + district.h - 1 do
+        if Districts.inBounds(center_x, y, grid_w, grid_h) then
+            grid[y][center_x].type = "road"
+            table.insert(road_tiles, {x = center_x, y = y})
+        end
+    end
+    
+    -- Horizontal main road
+    for x = district.x, district.x + district.w - 1 do
+        if Districts.inBounds(x, center_y, grid_w, grid_h) then
+            grid[center_y][x].type = "road"
+            table.insert(road_tiles, {x = x, y = center_y})
+        end
+    end
+    
+    -- ENSURE MINIMUM 3 ROADS PER SIDE FOR WALKER GENERATION
+    Districts.ensureMinimumBoundaryRoads(grid, district, road_tiles)
+    
+    -- Add secondary roads that connect to the main cross
+    local num_secondary_roads = 15 + love.math.random(0, 15)
+    
     for i = 1, num_secondary_roads do
-        local sx, sy = love.math.random(district.x, district.x + district.w - 1), 
-                       love.math.random(district.y, district.y + district.h - 1)
-        local dir, dx, dy = love.math.random(0, 3), 0, 0
+        if #road_tiles == 0 then break end
         
-        if dir == 0 then 
-            dy = -1 
-        elseif dir == 1 then 
-            dy = 1 
+        -- Pick a random existing road tile to start from
+        local start_node = road_tiles[love.math.random(1, #road_tiles)]
+        
+        -- Determine if we're on the main vertical or horizontal axis
+        local is_on_vertical_axis = (start_node.x == center_x)
+        local is_on_horizontal_axis = (start_node.y == center_y)
+        
+        if is_on_vertical_axis or is_on_horizontal_axis then
+            -- Grow a perpendicular road from the main cross
+            local dx, dy = 0, 0
+            if is_on_vertical_axis then
+                dx = love.math.random(0, 1) == 0 and -1 or 1 -- Go left or right
+            else -- is_on_horizontal_axis
+                dy = love.math.random(0, 1) == 0 and -1 or 1 -- Go up or down
+            end
+            
+            local cx, cy = start_node.x + dx, start_node.y + dy
+            local road_length = 0
+            local max_road_length = math.min(district.w, district.h) / 3
+            
+            while Districts.inBounds(cx, cy, grid_w, grid_h) and road_length < max_road_length do
+                -- Stop if we're outside the district boundaries
+                if cx < district.x or cx >= district.x + district.w or 
+                   cy < district.y or cy >= district.y + district.h then 
+                    break 
+                end
+                
+                -- Stop if we hit another road (creates intersections)
+                if grid[cy][cx].type == "road" and (cx ~= start_node.x + dx or cy ~= start_node.y + dy) then 
+                    break 
+                end
+                
+                grid[cy][cx].type = "road"
+                table.insert(road_tiles, {x = cx, y = cy})
+                
+                cx, cy = cx + dx, cy + dy
+                road_length = road_length + 1
+            end
         end
-        if dir == 2 then 
-            dx = -1 
-        elseif dir == 3 then 
-            dx = 1 
+    end
+    
+    -- Add some random connecting roads for more variety
+    local num_connecting_roads = 5 + love.math.random(0, 10)
+    
+    for i = 1, num_connecting_roads do
+        if #road_tiles < 2 then break end
+        
+        -- Pick two random road tiles and try to connect them
+        local start_tile = road_tiles[love.math.random(1, #road_tiles)]
+        local end_tile = road_tiles[love.math.random(1, #road_tiles)]
+        
+        -- Only connect if they're reasonably close
+        local distance = math.abs(start_tile.x - end_tile.x) + math.abs(start_tile.y - end_tile.y)
+        if distance > 5 and distance < 20 then
+            Districts.createSimpleConnection(grid, start_tile, end_tile, district)
+        end
+    end
+end
+
+function Districts.ensureMinimumBoundaryRoads(grid, district, road_tiles)
+    local grid_w, grid_h = #grid[1], #grid
+    local min_roads_per_side = 3
+    
+    -- Check each side and add roads if needed
+    local sides = {
+        {name = "top", x_start = district.x, x_end = district.x + district.w - 1, y = district.y, is_horizontal = true},
+        {name = "bottom", x_start = district.x, x_end = district.x + district.w - 1, y = district.y + district.h - 1, is_horizontal = true},
+        {name = "left", y_start = district.y, y_end = district.y + district.h - 1, x = district.x, is_horizontal = false},
+        {name = "right", y_start = district.y, y_end = district.y + district.h - 1, x = district.x + district.w - 1, is_horizontal = false}
+    }
+    
+    for _, side in ipairs(sides) do
+        local existing_roads = {}
+        
+        if side.is_horizontal then
+            -- Count existing roads on horizontal sides (top/bottom)
+            for x = side.x_start, side.x_end do
+                if Districts.inBounds(x, side.y, grid_w, grid_h) and grid[side.y][x].type == "road" then
+                    table.insert(existing_roads, {x = x, y = side.y})
+                end
+            end
+            
+            -- Add more roads if needed
+            local roads_needed = min_roads_per_side - #existing_roads
+            if roads_needed > 0 then
+                local side_length = side.x_end - side.x_start + 1
+                local spacing = math.floor(side_length / (min_roads_per_side + 1))
+                
+                for i = 1, roads_needed do
+                    local road_x = side.x_start + (i * spacing)
+                    road_x = math.min(road_x, side.x_end) -- Clamp to side bounds
+                    
+                    if Districts.inBounds(road_x, side.y, grid_w, grid_h) and grid[side.y][road_x].type ~= "road" then
+                        -- Create a road that connects to the interior
+                        Districts.createBoundaryRoad(grid, road_x, side.y, district, road_tiles, side.name)
+                    end
+                end
+            end
+        else
+            -- Count existing roads on vertical sides (left/right)
+            for y = side.y_start, side.y_end do
+                if Districts.inBounds(side.x, y, grid_w, grid_h) and grid[y][side.x].type == "road" then
+                    table.insert(existing_roads, {x = side.x, y = y})
+                end
+            end
+            
+            -- Add more roads if needed
+            local roads_needed = min_roads_per_side - #existing_roads
+            if roads_needed > 0 then
+                local side_length = side.y_end - side.y_start + 1
+                local spacing = math.floor(side_length / (min_roads_per_side + 1))
+                
+                for i = 1, roads_needed do
+                    local road_y = side.y_start + (i * spacing)
+                    road_y = math.min(road_y, side.y_end) -- Clamp to side bounds
+                    
+                    if Districts.inBounds(side.x, road_y, grid_w, grid_h) and grid[road_y][side.x].type ~= "road" then
+                        -- Create a road that connects to the interior
+                        Districts.createBoundaryRoad(grid, side.x, road_y, district, road_tiles, side.name)
+                    end
+                end
+            end
         end
         
-        local cx, cy = sx, sy
-        while Districts.inBounds(cx, cy, grid_w, grid_h) do
-            if cx < district.x or cx >= district.x + district.w or 
-               cy < district.y or cy >= district.y + district.h then 
-                break 
-            end
-            if grid[cy][cx].type == road_type and (cx ~= sx or cy ~= sy) then 
-                break 
-            end
-            grid[cy][cx].type = road_type
-            cx, cy = cx + dx, cy + dy
+        print(string.format("District side %s: %d existing roads, added %d roads", 
+              side.name, #existing_roads, math.max(0, min_roads_per_side - #existing_roads)))
+    end
+end
+
+function Districts.createBoundaryRoad(grid, start_x, start_y, district, road_tiles, side_name)
+    local grid_w, grid_h = #grid[1], #grid
+    
+    -- Place the boundary road tile
+    if Districts.inBounds(start_x, start_y, grid_w, grid_h) then
+        grid[start_y][start_x].type = "road"
+        table.insert(road_tiles, {x = start_x, y = start_y})
+    end
+    
+    -- Determine direction to connect inward
+    local dx, dy = 0, 0
+    local max_length = math.min(district.w, district.h) / 4 -- Shorter connecting roads
+    
+    if side_name == "top" then
+        dy = 1 -- Go down into district
+    elseif side_name == "bottom" then
+        dy = -1 -- Go up into district
+    elseif side_name == "left" then
+        dx = 1 -- Go right into district
+    elseif side_name == "right" then
+        dx = -1 -- Go left into district
+    end
+    
+    -- Create a connecting road inward
+    local cx, cy = start_x + dx, start_y + dy
+    local road_length = 0
+    
+    while Districts.inBounds(cx, cy, grid_w, grid_h) and road_length < max_length do
+        -- Stop if we're outside the district boundaries
+        if cx < district.x or cx >= district.x + district.w or 
+           cy < district.y or cy >= district.y + district.h then 
+            break 
         end
+        
+        -- Stop if we hit an existing road (successful connection!)
+        if grid[cy][cx].type == "road" then 
+            break 
+        end
+        
+        grid[cy][cx].type = "road"
+        table.insert(road_tiles, {x = cx, y = cy})
+        
+        cx, cy = cx + dx, cy + dy
+        road_length = road_length + 1
+    end
+end
+
+function Districts.createSimpleConnection(grid, start_tile, end_tile, district)
+    local grid_w, grid_h = #grid[1], #grid
+    local cx, cy = start_tile.x, start_tile.y
+    
+    -- Simple L-shaped connection (go horizontal first, then vertical)
+    -- Horizontal segment
+    local target_x = end_tile.x
+    local dx = target_x > cx and 1 or -1
+    
+    while cx ~= target_x and Districts.inBounds(cx, cy, grid_w, grid_h) do
+        if cx >= district.x and cx < district.x + district.w and 
+           cy >= district.y and cy < district.y + district.h then
+            if grid[cy][cx].type ~= "road" then
+                grid[cy][cx].type = "road"
+            end
+        end
+        cx = cx + dx
+    end
+    
+    -- Vertical segment
+    local target_y = end_tile.y
+    local dy = target_y > cy and 1 or -1
+    
+    while cy ~= target_y and Districts.inBounds(cx, cy, grid_w, grid_h) do
+        if cx >= district.x and cx < district.x + district.w and 
+           cy >= district.y and cy < district.y + district.h then
+            if grid[cy][cx].type ~= "road" then
+                grid[cy][cx].type = "road"
+            end
+        end
+        cy = cy + dy
     end
 end
 
@@ -125,6 +367,27 @@ function Districts.embedGrid(large_grid, small_grid, start_x, start_y, road_type
             end
         end 
     end
+    
+    -- ENSURE DOWNTOWN ALSO HAS MINIMUM BOUNDARY ROADS
+    local downtown_district = {
+        x = start_x + 1, 
+        y = start_y + 1, 
+        w = small_w, 
+        h = small_h
+    }
+    local road_tiles = {}
+    
+    -- Collect existing road tiles in downtown
+    for y = 1, small_h do 
+        for x = 1, small_w do
+            local tx, ty = start_x + x, start_y + y
+            if Districts.inBounds(tx, ty, large_w, large_h) and large_grid[ty][tx].type == road_type then
+                table.insert(road_tiles, {x = tx, y = ty})
+            end
+        end 
+    end
+    
+    Districts.ensureMinimumBoundaryRoads(large_grid, downtown_district, road_tiles)
 end
 
 -- Helper function to check if a grid coordinate is within the map boundaries
