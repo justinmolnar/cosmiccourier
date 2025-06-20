@@ -78,7 +78,7 @@ function love.load()
     Game.entities.event_bus_listener_setup(Game)
 
     Game.game_controller = GameController:new(Game)
-    Game.input_controller = InputController:new(Game)
+    Game.input_controller = InputController:new(Game) -- This now includes debug menu
     Game.game_view = GameView:new(Game)
     Game.ui_view = UIView:new(Game)
 
@@ -143,6 +143,11 @@ function love.draw()
     Game.game_view:draw()
     Game.zoom_controls:draw(Game)
     Game.ui_manager.modal_manager:draw(Game)
+    
+    -- Draw debug menu on top of everything
+    if Game.input_controller:isDebugMenuVisible() then
+        Game.input_controller:getDebugMenuView():draw()
+    end
 end
 
 function love.keypressed(key)
@@ -159,6 +164,10 @@ end
 
 function love.mousereleased(x, y, button)
     Game.input_controller:mousereleased(x, y, button)
+end
+
+function love.textinput(text)
+    Game.input_controller:textinput(text)
 end
 
 function love.quit()

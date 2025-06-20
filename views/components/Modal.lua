@@ -145,9 +145,12 @@ function Modal:draw(game)
     love.graphics.setFont(game.fonts.ui)
     love.graphics.print(self.title, self.x + 10, self.y + 7)
     
-    -- RESTORED: Explicitly draw the close button box and the "X" text inside it.
+    -- Draw close button with better visibility
+    love.graphics.setColor(0.8, 0.3, 0.3)
+    love.graphics.rectangle("fill", self.close_button.x, self.close_button.y, self.close_button.w, self.close_button.h)
+    love.graphics.setColor(1, 1, 1)
     love.graphics.rectangle("line", self.close_button.x, self.close_button.y, self.close_button.w, self.close_button.h)
-    love.graphics.printf("X", self.close_button.x, self.close_button.y + 2, self.close_button.w, "center")
+    love.graphics.printf("×", self.close_button.x, self.close_button.y + 2, self.close_button.w, "center")
 
     -- Draw tooltips on top of everything
     if self.hovered_node_id then
@@ -273,9 +276,15 @@ function Modal:_drawTooltip(game)
 end
 
 function Modal:handle_mouse_down(x, y, game)
-    -- This check for the close button is now guaranteed to work.
-    if x > self.close_button.x and x < self.close_button.x + self.close_button.w and
-       y > self.close_button.y and y < self.close_button.y + self.close_button.h then
+    -- FIRST: Check if click is outside the modal bounds - close if so
+    if not (x >= self.x and x <= self.x + self.w and y >= self.y and y <= self.y + self.h) then
+        if self.on_close then self.on_close() end
+        return true -- Consume the click to prevent it from going to other UI
+    end
+    
+    -- SECOND: Check for close button click
+    if x >= self.close_button.x and x <= self.close_button.x + self.close_button.w and
+       y >= self.close_button.y and y <= self.close_button.y + self.close_button.h then
         if self.on_close then self.on_close() end
         return true
     end
@@ -293,8 +302,8 @@ function Modal:handle_mouse_down(x, y, game)
         click_handled = true
     end
     
-    -- If the click was not on a node, start panning
-    if not click_handled and (x > self.x and x < self.x + self.w and y > self.y and y < self.y + self.h) then
+    -- If the click was not on a node, start panning (only if within modal content area, not title bar)
+    if not click_handled and (x > self.x and x < self.x + self.w and y > self.y + 30 and y < self.y + self.h) then
         self.is_panning = true
         self.pan_start_x = x
         self.pan_start_y = y
@@ -307,7 +316,7 @@ end
 function Modal:handle_mouse_up(x, y, game)
     -- Stop panning when the mouse is released
     self.is_panning = false
-    -- We return true if the mouse was released anywhere, to signify the event was handled by the modal
+    -- We return true if the modal is open, to signify the event was handled by the modal
     return true
 end
 
