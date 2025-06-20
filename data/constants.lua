@@ -17,12 +17,12 @@ local C = {
         BUTTONS_Y_START     = 300,
         BUTTONS_Y_STEP      = 40,
         BUTTON_HEIGHT       = 30,
-        VEHICLE_CLICK_RADIUS = 10, -- Moved from GAMEPLAY
+        VEHICLE_CLICK_RADIUS = 20, -- Increased from 10
     },
 
     MAP = {
     -- Downtown scale
-    DOWNTOWN_GRID_WIDTH  = 62,
+    DOWNTOWN_GRID_WIDTH  = 64,
     DOWNTOWN_GRID_HEIGHT = 45,
     
     -- City scale (much larger area)

@@ -33,20 +33,32 @@ function UIController:handleMouseDown(x, y, button)
     local Game = self.Game
     local ui_manager = Game.ui_manager
 
+    -- 1. Modals are always on top. Check them first.
     if ui_manager.modal_manager:handle_mouse_down(x, y, Game) then return true end
-    
+
+    -- 2. Check if an accordion HEADER was clicked. This re-enables expand/collapse.
     if ui_manager.trips_accordion:handle_click(x, y) then return true end
     if ui_manager.upgrades_accordion:handle_click(x, y) then return true end
     if ui_manager.vehicles_accordion:handle_click(x, y) then return true end
     if ui_manager.clients_accordion:handle_click(x, y) then return true end
 
-    if ui_manager.hovered_trip_index then 
+    -- 3. Check for scrollbar interaction ONLY if the accordion is open.
+    if ui_manager.trips_accordion.is_open and ui_manager.trips_accordion:handle_mouse_down(x, y, button) then return true end
+    if ui_manager.upgrades_accordion.is_open and ui_manager.upgrades_accordion:handle_mouse_down(x, y, button) then return true end
+    if ui_manager.vehicles_accordion.is_open and ui_manager.vehicles_accordion:handle_mouse_down(x, y, button) then return true end
+    if ui_manager.clients_accordion.is_open and ui_manager.clients_accordion:handle_mouse_down(x, y, button) then return true end
+
+    -- 4. Check for clicks on content WITHIN each OPEN accordion.
+    -- This is the crucial fix for the invisible button click issue.
+
+    -- Clicks on trips in the trips panel
+    if ui_manager.trips_accordion.is_open and ui_manager.hovered_trip_index then
         Game.EventBus:publish("ui_assign_trip_clicked", ui_manager.hovered_trip_index)
-        return true 
+        return true
     end
-    
+
+    -- Clicks on upgrade category buttons (to open the modal)
     if ui_manager.upgrades_accordion.is_open then
-        -- Use generic button handler for upgrade buttons
         if self:handleGenericButtonClick(x, y, ui_manager.layout_cache.upgrades.buttons, Game) then
             local Modal = require("views.components.Modal")
             -- Find the clicked button to get its data
@@ -63,19 +75,24 @@ function UIController:handleMouseDown(x, y, button)
         end
     end
 
-    if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.hire_bike) then
-        Game.EventBus:publish("ui_buy_vehicle_clicked", "bike")
-        return true
+    -- Clicks on "hire vehicle" buttons
+    if ui_manager.vehicles_accordion.is_open then
+        if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.hire_bike) then
+            Game.EventBus:publish("ui_buy_vehicle_clicked", "bike")
+            return true
+        end
+        if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.hire_truck) then
+            Game.EventBus:publish("ui_buy_vehicle_clicked", "truck")
+            return true
+        end
     end
 
-    if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.hire_truck) then
-        Game.EventBus:publish("ui_buy_vehicle_clicked", "truck")
-        return true
-    end
-
-    if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.buy_client) then
-        Game.EventBus:publish("ui_buy_client_clicked")
-        return true
+    -- Clicks on "buy client" button
+    if ui_manager.clients_accordion.is_open then
+        if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.buy_client) then
+            Game.EventBus:publish("ui_buy_client_clicked")
+            return true
+        end
     end
 
     return false

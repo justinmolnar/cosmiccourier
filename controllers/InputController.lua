@@ -88,18 +88,16 @@ function InputController:mousewheelmoved(x, y)
 end
 
 function InputController:mousepressed(x, y, button)
-    -- Check debug menu first, but ONLY if the click is actually within the menu bounds
+    -- Check debug menu first
     if self.debug_menu_controller:isVisible() then
         if self.debug_menu_controller:handle_mouse_down(x, y, button) then
             return
         end
     end
-    
-    -- Now handle all the other UI interactions properly
+
+    -- This is the main UI controller, which now has the corrected logic from Fix #1
     local UIController = require("controllers.UIController")
     local ui_controller = UIController:new(self.game)
-    
-    -- Handle UI interactions if they exist
     if ui_controller:handleMouseDown(x, y, button) then
         return
     end
@@ -110,18 +108,15 @@ function InputController:mousepressed(x, y, button)
             return
         end
     end
-    
+
     if button == 1 then -- Left mouse button
-        -- Determine if click is in sidebar or game world
-        local sidebar_w = self.game.C and self.game.C.UI and self.game.C.UI.SIDEBAR_WIDTH or 280
+        local sidebar_w = self.game.C.UI.SIDEBAR_WIDTH
         
         if x < sidebar_w then
-            -- Sidebar click
-            self:handleSidebarClick(x, y)
+            -- This area is now fully handled by the UIController above
         else
-            -- Game world click
-            local world_x = x - sidebar_w
-            self:handleGameWorldClick(world_x, y)
+            -- This is the crucial part that calls our new helper function
+            self:handleGameWorldClick(x, y)
         end
     end
 end
@@ -139,16 +134,19 @@ function InputController:handleSidebarClick(x, y)
 end
 
 function InputController:handleGameWorldClick(x, y)
-    -- Handle event spawner clicks first
+    -- Convert screen coordinates to world coordinates
+    local world_x, world_y = self.game.camera:screenToWorld(x, y, self.game)
+
+    -- Handle event spawner clicks with the correct world coordinates
     if self.game.event_spawner and self.game.event_spawner.handle_click then
-        if self.game.event_spawner:handle_click(x, y, self.game) then
+        if self.game.event_spawner:handle_click(world_x, world_y, self.game) then
             return
         end
     end
-    
-    -- Handle entity selection/interaction
+
+    -- Handle entity selection with the correct world coordinates
     if self.game.entities and self.game.entities.handle_click then
-        self.game.entities:handle_click(x, y, self.game)
+        self.game.entities:handle_click(world_x, world_y, self.game)
     end
 end
 
