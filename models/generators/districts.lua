@@ -39,7 +39,7 @@ function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_
         -- Check if this district would overlap with any existing districts
         local overlaps = false
         
-        -- Check overlap with downtown
+        -- Check overlap with downtown - REDUCED BUFFER
         if Districts.doDistrictsOverlap(new_district, downtown_dist) then
             overlaps = true
         end
@@ -61,6 +61,18 @@ function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_
             overlaps = true
         end
         
+        -- REMOVED THE TERRAIN SAMPLING THAT WAS CAUSING UNIFORM PLACEMENT
+        -- Original code was:
+        -- if valid then
+        --     for i = 1, 5 do
+        --         local cx, cy = love.math.random(x, x + w), love.math.random(y, y + h)
+        --         if not Districts.inBounds(cx, cy, max_w, max_h) or grid[cy][cx].type ~= 'plot' then
+        --             valid = false
+        --             break
+        --         end
+        --     end
+        -- end
+        
         -- If no overlaps, add the district
         if not overlaps then
             table.insert(districts, new_district)
@@ -75,8 +87,8 @@ function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_
 end
 
 function Districts.doDistrictsOverlap(district1, district2)
-    -- Add a minimum spacing buffer between districts
-    local buffer = 15
+    -- REDUCED buffer from 15 to 5 to allow closer placement
+    local buffer = 5
     
     local d1_left = district1.x - buffer
     local d1_right = district1.x + district1.w + buffer
