@@ -37,8 +37,11 @@ function EventService.setupTripEvents(state, game)
     game.EventBus:subscribe("ui_assign_trip_clicked", function(trip_index)
         local selected_vehicle = game.entities.selected_vehicle
         if selected_vehicle and selected_vehicle:isAvailable(game) then
+            -- MODIFIED: The context switch is no longer needed here.
             local trip_to_assign = table.remove(game.entities.trips.pending, trip_index)
-            selected_vehicle:assignTrip(trip_to_assign, game)
+            if trip_to_assign then
+                selected_vehicle:assignTrip(trip_to_assign, game)
+            end
         end
     end)
 end

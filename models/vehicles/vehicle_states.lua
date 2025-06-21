@@ -87,6 +87,9 @@ function States.ReturningToDepot:enter(vehicle, game)
         vehicle:changeState(States.Stuck, game)
         return
     end
+
+    -- THE FIX: Ensure ETA calculation uses the correct map context
+    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
 end
 
 function States.ReturningToDepot:update(dt, vehicle, game)
@@ -123,6 +126,9 @@ function States.GoToPickup:enter(vehicle, game)
         vehicle:changeState(States.Stuck, game)
         return
     end
+
+    -- THE FIX: Ensure ETA calculation uses the correct map context
+    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
 end
 
 
@@ -176,6 +182,12 @@ States.GoToDropoff = State:new()
 States.GoToDropoff.name = "To Dropoff"
 function States.GoToDropoff:enter(vehicle, game)
     local PathfindingService = require("services.PathfindingService")
+
+    local trip = vehicle.cargo[1]
+    if trip and trip.is_long_distance then
+        vehicle:changeState(States.TravelingLongDistance, game)
+        return
+    end
     
     print(string.format("%s %d going to dropoff.", vehicle.type, vehicle.id))
     
@@ -185,6 +197,9 @@ function States.GoToDropoff:enter(vehicle, game)
         vehicle:changeState(States.Stuck, game)
         return
     end
+
+    -- THE FIX: Ensure ETA calculation uses the correct map context
+    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
 end
 
 
@@ -268,6 +283,50 @@ function States.DecideNextAction:enter(vehicle, game)
         -- If we have no work to do, go home.
         vehicle:changeState(States.ReturningToDepot, game)
     end
+end
+
+--------------------------------------------------------------------------------
+-- State: Traveling Long Distance
+--------------------------------------------------------------------------------
+States.TravelingLongDistance = State:new()
+States.TravelingLongDistance.name = "Traveling (Region)"
+
+function States.TravelingLongDistance:enter(vehicle, game)
+    print(string.format("%s %d beginning long-distance travel.", vehicle.type, vehicle.id))
+    vehicle.visible = false -- The vehicle is now off-map
+
+    local trip = vehicle.cargo[1]
+    if not trip then
+        -- Failsafe if something went wrong
+        vehicle:changeState(States.DecideNextAction, game)
+        return
+    end
+
+    -- In a full implementation, you'd calculate distance between cities.
+    -- For now, we'll use a fixed, long travel time for demonstration.
+    local ETA = 20 -- seconds
+    vehicle.travel_timer = ETA
+    trip:freeze()
+end
+
+function States.TravelingLongDistance:update(dt, vehicle, game)
+    vehicle.travel_timer = vehicle.travel_timer - dt
+
+    if vehicle.travel_timer <= 0 then
+        print(string.format("%s %d has arrived at the destination city depot.", vehicle.type, vehicle.id))
+        
+        -- Find the destination city's depot. For now, we assume it's the same as the main city's.
+        -- In the future, this would point to a specific depot in another city.
+        vehicle.grid_anchor = game.entities.depot_plot
+        vehicle:recalculatePixelPosition(game)
+
+        -- Change state to drop off the package at the new depot
+        vehicle:changeState(States.DoDropoff, game)
+    end
+end
+
+function States.TravelingLongDistance:exit(vehicle, game)
+    vehicle.visible = true -- The vehicle is now on-map again
 end
 
 --------------------------------------------------------------------------------

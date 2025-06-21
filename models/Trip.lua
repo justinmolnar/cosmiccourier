@@ -10,12 +10,13 @@ function Trip:new(base_payout, initial_bonus)
     instance.legs = {}
     instance.current_leg = 1
     
-    -- NEW: Time-delta tracking properties
     instance.is_in_transit = false
     instance.transit_start_time = 0
     instance.last_update_time = love.timer.getTime()
     
-    -- DEPRECATED: These will be stored in the leg object instead.
+    -- ADD THIS LINE: Flag for inter-city trips
+    instance.is_long_distance = false
+
     instance.start_plot = nil
     instance.end_plot = nil
 

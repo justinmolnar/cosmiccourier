@@ -16,8 +16,6 @@ function Vehicle:drawIcon(game, icon)
 end
 
 function Vehicle:new(id, depot_plot, game, vehicleType, properties)
-    -- THIS IS THE FIX: By requiring the states file here, we avoid the
-    -- circular dependency that happens during the initial game load.
     local States = require("models.vehicles.vehicle_states")
     
     local instance = setmetatable({}, Vehicle)
@@ -26,17 +24,19 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties)
     instance.type = vehicleType or "vehicle"
     instance.properties = properties or {}
     instance.depot_plot = depot_plot
-    -- CORRECTED: The typo 'depot_ot.y' has been fixed to 'depot_plot.y'
     instance.px, instance.py = game.maps.city:getPixelCoords(depot_plot.x, depot_plot.y)
     
-    instance.trip_queue = {} -- Trips assigned, but not yet picked up
-    instance.cargo = {}      -- Trips picked up and currently being delivered
+    instance.trip_queue = {}
+    instance.cargo = {}
     instance.path = {}
     
     instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
     
     instance.state = nil
     instance:changeState(States.Idle, game)
+
+    -- ADD THIS LINE: All vehicles start as visible
+    instance.visible = true
 
     return instance
 end
@@ -66,9 +66,69 @@ function Vehicle:assignTrip(trip, game)
     table.insert(self.trip_queue, trip)
 end
 
+function Vehicle:_resolveOffScreenState(game)
+    -- This function will continue to process instantaneous state changes
+    -- until the vehicle is in a state that involves travel (and has an ETA).
+    local state_name = self.state.name
+    print(string.format("Vehicle %d resolving off-screen state: %s", self.id, state_name))
+
+    if state_name == "To Pickup" then
+        self:changeState(States.DoPickup, game)
+    elseif state_name == "To Dropoff" then
+        self:changeState(States.DoDropoff, game)
+    elseif state_name == "Returning" then
+        self:changeState(States.Idle, game)
+    end
+
+    -- If the new state is ALSO instantaneous (like DoPickup), this will be called again
+    -- until it settles on a "travel" state. This handles the chaining.
+    if self.state.name == "Picking Up" or self.state.name == "Dropping Off" or self.state.name == "Deciding" then
+        self:_resolveOffScreenState(game)
+    end
+end
+
 function Vehicle:update(dt, game)
-    if self.state and self.state.update then
+    -- If the vehicle is on a special long-distance trip, let its state handle it.
+    if self.state and self.state.name == "Traveling (Region)" then
         self.state:update(dt, self, game)
+        return
+    end
+
+    -- If the player is watching the city, run the full, detailed simulation.
+    if game.active_map_key == "city" then
+        if self.state and self.state.update then
+            self.state:update(dt, self, game)
+        end
+        return
+    end
+
+    -- If we reach here, the player is zoomed out. Run the abstracted simulation.
+    if not self.current_path_eta or self.current_path_eta <= 0 then
+        -- This vehicle is idle and has no journey to simulate.
+        return
+    end
+
+    self.current_path_eta = self.current_path_eta - dt
+
+    if self.current_path_eta <= 0 then
+        -- The abstracted journey is complete. Teleport to the destination.
+        if self.path and #self.path > 0 then
+            local final_node = self.path[#self.path]
+            self.grid_anchor = {x = final_node.x, y = final_node.y}
+            self.path = {}
+        end
+
+        -- Resolve the sequence of off-screen actions until a new travel state is reached.
+        self:_resolveOffScreenState(game)
+        
+        -- After all actions are resolved, get the ETA for the new path.
+        if self.path and #self.path > 0 then
+            self.current_path_eta = require("services.PathfindingService").estimatePathTravelTime(self.path, self, game, game.maps.city)
+        else
+            self.current_path_eta = 0
+        end
+        
+        print(string.format("Vehicle %d finished abstracted action chain. New state: %s. New ETA: %.2f", self.id, self.state.name, self.current_path_eta or 0))
     end
 end
 
@@ -124,10 +184,8 @@ end
 
 function Vehicle:draw(game)
     local should_draw = false
-    -- MODIFIED: Read scale from the global game state
     local current_scale = game.state.current_map_scale
     
-    -- This generic draw logic can be simplified or specialized in subclasses
     if current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
         should_draw = true
     end
@@ -136,6 +194,7 @@ function Vehicle:draw(game)
         return
     end
 
+    -- Draw selection circle
     if self == game.entities.selected_vehicle then
         love.graphics.setColor(1, 1, 0)
         local radius = 16 / game.camera.scale
@@ -143,10 +202,9 @@ function Vehicle:draw(game)
         love.graphics.circle("line", self.px, self.py, radius)
         love.graphics.setLineWidth(1)
     end
-
-    if game.debug_mode then
-        self:drawDebug(game)
-    end
+    
+    -- Draw the vehicle's icon
+    self:drawIcon(game, self.type == "bike" and "🚲" or "🚚")
 end
 
 return Vehicle

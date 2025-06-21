@@ -41,20 +41,28 @@ end
 function TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
     local C_GAMEPLAY = game.C.GAMEPLAY
     
-    -- MODIFIED: Use game.maps.city
-    local city_plot = game.maps.city:getRandomCityBuildingPlot()
-    if not city_plot then
-        return nil
+    -- Use the region map to find a plot in the second city
+    local destination_plot = game.maps.region:getRandomBuildingPlot()
+    
+    -- Failsafe: if for some reason we can't get a plot from the region map, create a local trip instead.
+    if not destination_plot or destination_plot == client_plot then
+        return TripGenerator._createLocalTrip(client_plot, base_payout, speed_bonus, game)
     end
+    
+    print("TripGenerator: Created a long-distance (inter-city) trip!")
     
     base_payout = base_payout * C_GAMEPLAY.CITY_TRIP_PAYOUT_MULTIPLIER
     speed_bonus = speed_bonus * C_GAMEPLAY.CITY_TRIP_BONUS_MULTIPLIER
     
     local new_trip = Trip:new(base_payout, speed_bonus)
-    new_trip:addLeg(client_plot, game.entities.depot_plot, "bike")
-    new_trip:addLeg(game.entities.depot_plot, city_plot, "truck")
+    -- This flag tells the vehicle state machine to use the abstracted travel state
+    new_trip.is_long_distance = true
     
-    print("TripGenerator: Created multi-leg (bike->truck) trip")
+    -- Leg 1: Bike from downtown client to the main city depot
+    new_trip:addLeg(client_plot, game.entities.depot_plot, "bike")
+    -- Leg 2: Truck from the main city depot to the other city's depot (destination_plot)
+    new_trip:addLeg(game.entities.depot_plot, destination_plot, "truck")
+    
     return new_trip
 end
 

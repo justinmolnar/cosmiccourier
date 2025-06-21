@@ -31,31 +31,31 @@ function GameView:draw()
     
     active_map:draw()
 
-    -- MODIFIED: Only draw entities if we are on the city map
     if Game.active_map_key == "city" then
         if Game.entities.depot_plot then
             local depot_px, depot_py = active_map:getPixelCoords(Game.entities.depot_plot.x, Game.entities.depot_plot.y)
             love.graphics.setFont(Game.fonts.emoji)
-            love.graphics.setColor(0, 0, 0)
             love.graphics.push()
             love.graphics.translate(depot_px, depot_py)
-            love.graphics.scale(1 / Game.camera.scale, 1 / Game.camera.scale)
-            love.graphics.print("🏠", -14, -14)
-            love.graphics.pop()
-        end
-
-        love.graphics.setFont(Game.fonts.emoji)
-        for _, client in ipairs(Game.entities.clients) do
-            love.graphics.setColor(0, 0, 0)
-            love.graphics.push()
-            love.graphics.translate(client.px, client.py)
             love.graphics.scale(1 / Game.camera.scale, 1 / Game.camera.scale)
             love.graphics.print("🏢", -14, -14)
             love.graphics.pop()
         end
 
+        for _, client in ipairs(Game.entities.clients) do
+            love.graphics.setFont(Game.fonts.emoji)
+            love.graphics.push()
+            love.graphics.translate(client.px, client.py)
+            love.graphics.scale(1 / Game.camera.scale, 1 / Game.camera.scale)
+            love.graphics.print("🏠", -14, -14)
+            love.graphics.pop()
+        end
+
+        -- MODIFIED: Added a check for vehicle.visible
         for _, vehicle in ipairs(Game.entities.vehicles) do
-            vehicle:draw(Game)
+            if vehicle.visible then
+                vehicle:draw(Game)
+            end
         end
         
         Game.event_spawner:draw(Game)
@@ -94,19 +94,11 @@ function GameView:draw()
 
     love.graphics.pop()
     
-    love.graphics.setFont(Game.fonts.ui)
-    for _, ft in ipairs(Game.state.floating_texts) do
-        local CoordinateSystem = require("utils.CoordinateSystem")
-        local coord_system = CoordinateSystem.new(Game.C)
-        local screen_x, screen_y = coord_system:worldToScreen(ft.x, ft.y, Game.camera)
-        
-        love.graphics.setColor(1, 1, 0.8, ft.alpha)
-        love.graphics.printf(ft.text, screen_x - 75, screen_y, 150, "center")
-    end
-
     if Game.debug_mode and Game.active_map_key == "city" then
         for _, vehicle in ipairs(Game.entities.vehicles) do
-            vehicle:drawDebug(Game)
+            if vehicle.visible then
+                vehicle:drawDebug(Game)
+            end
         end
     end
     
