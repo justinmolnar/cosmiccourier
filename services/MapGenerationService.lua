@@ -184,6 +184,12 @@ function MapGenerationService.generateRegion(region_map)
     local main_city_center_x = REGION_W / 2
     local main_city_center_y = REGION_H / 2
     
+    -- STORE THE MAIN CITY OFFSET IN THE REGION MAP
+    region_map.main_city_offset = {
+        x = main_city_center_x - CITY_W/2,
+        y = main_city_center_y - CITY_H/2
+    }
+    
     print(string.format("MAIN CITY will occupy bounds: (%d,%d) to (%d,%d)", 
           main_city_center_x - CITY_W/2, main_city_center_y - CITY_H/2,
           main_city_center_x + CITY_W/2, main_city_center_y + CITY_H/2))
@@ -191,30 +197,24 @@ function MapGenerationService.generateRegion(region_map)
     MapGenerationService.generateCityAt(region_map.grid, main_city_center_x, main_city_center_y, C_MAP, 
                                        MapGenerationService._deepCopyParams(params))
 
-    -- SECOND CITY: Position it safely within bounds and away from main city
-    -- Calculate safe position that ensures both cities fit completely within region
+    -- Rest of the function stays the same...
     local safe_margin = 20
-    local min_distance = 250 -- Minimum distance between city centers
+    local min_distance = 250
     
-    -- Try bottom-left position first
     local second_city_x = CITY_W/2 + safe_margin
     local second_city_y = REGION_H - CITY_H/2 - safe_margin
     
-    -- Check if this is far enough from main city
     local distance = math.sqrt((second_city_x - main_city_center_x)^2 + (second_city_y - main_city_center_y)^2)
     if distance < min_distance then
-        -- Try top-left position instead
         second_city_y = CITY_H/2 + safe_margin
         distance = math.sqrt((second_city_x - main_city_center_x)^2 + (second_city_y - main_city_center_y)^2)
         
         if distance < min_distance then
-            -- Try far left position
             second_city_x = CITY_W/2 + safe_margin
-            second_city_y = REGION_H * 0.25 -- Quarter way down
+            second_city_y = REGION_H * 0.25
         end
     end
     
-    -- Final bounds check
     local second_bounds_x1 = second_city_x - CITY_W/2
     local second_bounds_y1 = second_city_y - CITY_H/2
     local second_bounds_x2 = second_city_x + CITY_W/2
@@ -226,7 +226,6 @@ function MapGenerationService.generateRegion(region_map)
         print(string.format("  Region size: %dx%d", REGION_W, REGION_H))
         print(string.format("  Second city bounds: (%d,%d) to (%d,%d)", 
               second_bounds_x1, second_bounds_y1, second_bounds_x2, second_bounds_y2))
-        -- Skip second city generation
     else
         print(string.format("SECOND CITY will occupy bounds: (%d,%d) to (%d,%d)", 
               second_bounds_x1, second_bounds_y1, second_bounds_x2, second_bounds_y2))
@@ -235,7 +234,6 @@ function MapGenerationService.generateRegion(region_map)
                                            MapGenerationService._deepCopyParams(params))
     end
 
-    -- Continue with the rest of the function...
     local city_map = Game.maps.city
     city_map.grid = MapGenerationService._createGrid(CITY_W, CITY_H, "grass")
 
