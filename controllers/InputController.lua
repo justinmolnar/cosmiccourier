@@ -41,6 +41,13 @@ function InputController:keypressed(key)
         end
         return
     end
+
+        -- TEMPORARY DEBUG KEY
+    if key == "a" then
+        self.game.state.upgrades.auto_dispatch_unlocked = true
+        print("DEBUG: Force enabled autodispatch")
+        return
+    end
     
     -- Money cheats
     if key == "-" then

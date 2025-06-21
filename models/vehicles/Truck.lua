@@ -7,7 +7,7 @@ setmetatable(Truck, {__index = Vehicle}) -- Inherit from Vehicle
 
 Truck.PROPERTIES = {
     cost = 1200,
-    cost_multiplier = 1.25,
+    cost_multiplier = 1,
     speed = 60,
     pathfinding_costs = {
         road = 10,

@@ -31,6 +31,7 @@ function GameView:draw()
     
     active_map:draw()
 
+    -- Draw city-specific content (depot, clients, etc.)
     if Game.active_map_key == "city" then
         if Game.entities.depot_plot then
             local depot_px, depot_py = active_map:getPixelCoords(Game.entities.depot_plot.x, Game.entities.depot_plot.y)
@@ -50,43 +51,44 @@ function GameView:draw()
             love.graphics.print("🏠", -14, -14)
             love.graphics.pop()
         end
-
-        -- MODIFIED: Added a check for vehicle.visible
-        for _, vehicle in ipairs(Game.entities.vehicles) do
-            if vehicle.visible then
-                vehicle:draw(Game)
-            end
-        end
         
         Game.event_spawner:draw(Game)
+    end
 
-        if ui_manager.hovered_trip_index then
-            local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
-            if trip and trip.legs[trip.current_leg] then
-                local leg = trip.legs[trip.current_leg]
-                local path_grid = active_map.grid
-                local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1) and active_map:findNearestRoadTile(Game.entities.depot_plot) or active_map:findNearestRoadTile(leg.start_plot)
-                local end_node = active_map:findNearestRoadTile(leg.end_plot)
-                if start_node and end_node and path_grid then
-                    local costs = leg.vehicleType == "bike" and Bike.PROPERTIES.pathfinding_costs or Truck.PROPERTIES.pathfinding_costs
-                    local path = Game.pathfinder.findPath(path_grid, start_node, end_node, costs, active_map)
-                    if path then
-                        local pixel_path = {}
-                        for _, node in ipairs(path) do
-                            local px, py = active_map:getPixelCoords(node.x, node.y)
-                            table.insert(pixel_path, px)
-                            table.insert(pixel_path, py)
-                        end
-                        local hover_color = Game.C.MAP.COLORS.HOVER
-                        love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.7)
-                        love.graphics.setLineWidth(3 / Game.camera.scale)
-                        love.graphics.line(pixel_path)
-                        love.graphics.setLineWidth(1)
-                        local circle_radius = 5 / Game.camera.scale
-                        love.graphics.setColor(hover_color)
-                        love.graphics.circle("fill", pixel_path[1], pixel_path[2], circle_radius)
-                        love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], circle_radius)
+    -- FIX: Draw vehicles at all zoom levels, but let the vehicle decide if it should be drawn
+    for _, vehicle in ipairs(Game.entities.vehicles) do
+        if vehicle.visible then
+            vehicle:draw(Game)
+        end
+    end
+
+    -- Draw trip path visualization (only for city view)
+    if Game.active_map_key == "city" and ui_manager.hovered_trip_index then
+        local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
+        if trip and trip.legs[trip.current_leg] then
+            local leg = trip.legs[trip.current_leg]
+            local path_grid = active_map.grid
+            local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1) and active_map:findNearestRoadTile(Game.entities.depot_plot) or active_map:findNearestRoadTile(leg.start_plot)
+            local end_node = active_map:findNearestRoadTile(leg.end_plot)
+            if start_node and end_node and path_grid then
+                local costs = leg.vehicleType == "bike" and Bike.PROPERTIES.pathfinding_costs or Truck.PROPERTIES.pathfinding_costs
+                local path = Game.pathfinder.findPath(path_grid, start_node, end_node, costs, active_map)
+                if path then
+                    local pixel_path = {}
+                    for _, node in ipairs(path) do
+                        local px, py = active_map:getPixelCoords(node.x, node.y)
+                        table.insert(pixel_path, px)
+                        table.insert(pixel_path, py)
                     end
+                    local hover_color = Game.C.MAP.COLORS.HOVER
+                    love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.7)
+                    love.graphics.setLineWidth(3 / Game.camera.scale)
+                    love.graphics.line(pixel_path)
+                    love.graphics.setLineWidth(1)
+                    local circle_radius = 5 / Game.camera.scale
+                    love.graphics.setColor(hover_color)
+                    love.graphics.circle("fill", pixel_path[1], pixel_path[2], circle_radius)
+                    love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], circle_radius)
                 end
             end
         end
@@ -94,6 +96,7 @@ function GameView:draw()
 
     love.graphics.pop()
     
+    -- Debug drawing (only for city view)
     if Game.debug_mode and Game.active_map_key == "city" then
         for _, vehicle in ipairs(Game.entities.vehicles) do
             if vehicle.visible then

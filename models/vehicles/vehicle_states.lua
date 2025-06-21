@@ -1,4 +1,4 @@
--- game/vehicle_states.lua
+-- models/vehicles/vehicle_states.lua
 -- Contains all the individual state objects for the Vehicle state machine.
 
 local States = {}
@@ -42,7 +42,6 @@ function moveAlongPath(dt, vehicle, game)
         vehicle.py = vehicle.py + math.sin(angle) * travel_dist
     end
 end
-
 
 --------------------------------------------------------------------------------
 -- Base State (for other states to inherit from)
@@ -88,7 +87,6 @@ function States.ReturningToDepot:enter(vehicle, game)
         return
     end
 
-    -- THE FIX: Ensure ETA calculation uses the correct map context
     vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
 end
 
@@ -127,10 +125,8 @@ function States.GoToPickup:enter(vehicle, game)
         return
     end
 
-    -- THE FIX: Ensure ETA calculation uses the correct map context
     vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
 end
-
 
 function States.GoToPickup:update(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then
@@ -165,9 +161,9 @@ function States.DoPickup:enter(vehicle, game)
         table.insert(vehicle.cargo, trip)
     end
     
-    print(string.format("Bike %d picked up %d packages (frozen %d timers).", vehicle.id, #trips_to_pickup, #trips_to_pickup))
+    print(string.format("%s %d picked up %d packages (frozen %d timers).", vehicle.type, vehicle.id, #trips_to_pickup, #trips_to_pickup))
     
-    -- FIX: After picking up, immediately decide the next state here.
+    -- After picking up, immediately decide the next state here.
     if #vehicle.cargo > 0 then
         vehicle:changeState(States.GoToDropoff, game)
     else
@@ -183,25 +179,21 @@ States.GoToDropoff.name = "To Dropoff"
 function States.GoToDropoff:enter(vehicle, game)
     local PathfindingService = require("services.PathfindingService")
 
-    local trip = vehicle.cargo[1]
-    if trip and trip.is_long_distance then
-        vehicle:changeState(States.TravelingLongDistance, game)
-        return
-    end
+    print(string.format("DEBUG: %s %d going to dropoff", vehicle.type, vehicle.id))
     
-    print(string.format("%s %d going to dropoff.", vehicle.type, vehicle.id))
-    
+    -- Since we removed is_long_distance from intra-city trips, 
+    -- all vehicles now use normal dropoff logic
     vehicle.path = PathfindingService.findPathToDropoff(vehicle, game)
     
     if not vehicle.path then
+        print(string.format("DEBUG: %s %d failed to find dropoff path, entering Stuck state", vehicle.type, vehicle.id))
         vehicle:changeState(States.Stuck, game)
         return
     end
 
-    -- THE FIX: Ensure ETA calculation uses the correct map context
     vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
+    print(string.format("DEBUG: %s %d path to dropoff: %d nodes, ETA: %.2fs", vehicle.type, vehicle.id, #vehicle.path, vehicle.current_path_eta))
 end
-
 
 function States.GoToDropoff:update(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then
@@ -224,8 +216,17 @@ function States.DoDropoff:enter(vehicle, game)
     local active_map = game.maps[game.active_map_key]
     if not active_map then return end
     
+    local is_abstracted_mode = (game.active_map_key ~= "city")
+    
+    print(string.format("DEBUG: %s %d starting dropoff at (%d,%d), abstracted: %s, cargo: %d", 
+          vehicle.type, vehicle.id, current_pos.x, current_pos.y, tostring(is_abstracted_mode), #vehicle.cargo))
+    
     for i, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
+        
+        print(string.format("DEBUG: Processing trip leg %d/%d - vehicle type needed: %s, current vehicle: %s", 
+              trip.current_leg, #trip.legs, leg.vehicleType, vehicle.type))
+        
         local destination_road_tile = nil
 
         -- Determine which grid to use for finding the destination
@@ -235,38 +236,67 @@ function States.DoDropoff:enter(vehicle, game)
             destination_road_tile = active_map:findNearestRoadTile(leg.end_plot)
         end
 
-        if destination_road_tile and current_pos.x == destination_road_tile.x and current_pos.y == destination_road_tile.y then
+        local at_destination = false
+        if is_abstracted_mode then
+            at_destination = true
+            print(string.format("DEBUG: %s %d: Abstracted dropoff assumed at destination", vehicle.type, vehicle.id))
+        else
+            at_destination = destination_road_tile and 
+                           current_pos.x == destination_road_tile.x and 
+                           current_pos.y == destination_road_tile.y
+            print(string.format("DEBUG: %s %d: Detailed dropoff position check - at_destination: %s", vehicle.type, vehicle.id, tostring(at_destination)))
+        end
+
+        if at_destination then
             trip:thaw()
             local is_final_destination = trip.current_leg >= #trip.legs
+            
+            print(string.format("DEBUG: %s %d dropoff SUCCESS - current_leg: %d, total_legs: %d, is_final: %s, is_long_distance: %s", 
+                  vehicle.type, vehicle.id, trip.current_leg, #trip.legs, tostring(is_final_destination), tostring(trip.is_long_distance)))
             
             if is_final_destination then
                 -- FINAL DELIVERY
                 local final_payout = trip.base_payout + trip.speed_bonus
                 local event_data = { payout = final_payout, bonus = trip.speed_bonus, base = trip.base_payout, x = vehicle.px, y = vehicle.py }
                 game.EventBus:publish("package_delivered", event_data)
-                print(string.format("%s %d delivered package! $%d", vehicle.type, vehicle.id, math.floor(final_payout)))
+                print(string.format("DEBUG: %s %d completed FINAL delivery! $%d", 
+                      vehicle.type, vehicle.id, math.floor(final_payout)))
                 trip_index_to_remove = i
             else
-                -- INTERMEDIATE STOP (HUB/DEPOT)
+                -- INTERMEDIATE STOP (HUB/DEPOT) - this should happen for bikes completing leg 1
+                local old_leg = trip.current_leg
                 trip.current_leg = trip.current_leg + 1
-                print(string.format("Trip transferred to leg %d/%d. Vehicle: %s", trip.current_leg, #trip.legs, trip.legs[trip.current_leg].vehicleType))
+                local new_leg = trip.legs[trip.current_leg]
                 
-                -- TODO: In the future, this would go to a specific hub's inventory.
-                -- For now, we put it back in the main pending list.
+                print(string.format("DEBUG: %s %d completed INTERMEDIATE stop (leg %d). Trip now needs %s for leg %d/%d", 
+                      vehicle.type, vehicle.id, old_leg, new_leg.vehicleType, trip.current_leg, #trip.legs))
+                
+                -- Put it back in the main pending list for the next vehicle type
                 table.insert(game.entities.trips.pending, trip)
+                print(string.format("DEBUG: Trip added back to pending queue for %s (now %d pending trips)", 
+                      new_leg.vehicleType, #game.entities.trips.pending))
                 trip_index_to_remove = i
             end
             
             break
+        else
+            print(string.format("DEBUG: %s %d NOT at destination: current=(%d,%d), target=(%d,%d)", 
+                  vehicle.type, vehicle.id, current_pos.x, current_pos.y, 
+                  destination_road_tile and destination_road_tile.x or -1, 
+                  destination_road_tile and destination_road_tile.y or -1))
         end
     end
 
     if trip_index_to_remove then
         table.remove(vehicle.cargo, trip_index_to_remove)
+        print(string.format("DEBUG: %s %d removed trip from cargo, %d remaining", vehicle.type, vehicle.id, #vehicle.cargo))
+    else
+        print(string.format("DEBUG: %s %d: No trip was dropped off!", vehicle.type, vehicle.id))
     end
 
     vehicle:changeState(States.DecideNextAction, game)
 end
+
 --------------------------------------------------------------------------------
 -- State: Decide Next Action (Instantaneous)
 --------------------------------------------------------------------------------
@@ -286,47 +316,62 @@ function States.DecideNextAction:enter(vehicle, game)
 end
 
 --------------------------------------------------------------------------------
--- State: Traveling Long Distance
+-- State: Traveling Long Distance (Fixed - No Abstraction)
 --------------------------------------------------------------------------------
 States.TravelingLongDistance = State:new()
 States.TravelingLongDistance.name = "Traveling (Region)"
 
 function States.TravelingLongDistance:enter(vehicle, game)
-    print(string.format("%s %d beginning long-distance travel.", vehicle.type, vehicle.id))
-    vehicle.visible = false -- The vehicle is now off-map
-
+    local PathfindingService = require("services.PathfindingService")
+    
+    print(string.format("DEBUG: %s %d beginning long-distance travel (NO abstraction)", vehicle.type, vehicle.id))
+    
+    -- DON'T make the vehicle invisible - keep it visible on all zoom levels
+    -- vehicle.visible = false -- REMOVED
+    
     local trip = vehicle.cargo[1]
     if not trip then
-        -- Failsafe if something went wrong
+        print(string.format("DEBUG: %s %d: No trip in cargo for long distance travel!", vehicle.type, vehicle.id))
         vehicle:changeState(States.DecideNextAction, game)
         return
     end
 
-    -- In a full implementation, you'd calculate distance between cities.
-    -- For now, we'll use a fixed, long travel time for demonstration.
-    local ETA = 20 -- seconds
-    vehicle.travel_timer = ETA
+    print(string.format("DEBUG: %s %d long distance trip details - current_leg: %d, total_legs: %d", 
+          vehicle.type, vehicle.id, trip.current_leg, #trip.legs))
+
+    -- Instead of abstracted travel, find a real path to the destination
+    local current_leg = trip.legs[trip.current_leg]
+    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, current_leg.end_plot, game, game.maps.city)
+    
+    if not vehicle.path then
+        print(string.format("DEBUG: %s %d failed to find long distance path, entering Stuck state", vehicle.type, vehicle.id))
+        vehicle:changeState(States.Stuck, game)
+        return
+    end
+    
+    -- Calculate ETA normally
+    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
+    
+    print(string.format("DEBUG: %s %d long distance path: %d nodes, ETA: %.2fs", vehicle.type, vehicle.id, #vehicle.path, vehicle.current_path_eta))
+    
     trip:freeze()
 end
 
 function States.TravelingLongDistance:update(dt, vehicle, game)
-    vehicle.travel_timer = vehicle.travel_timer - dt
-
-    if vehicle.travel_timer <= 0 then
-        print(string.format("%s %d has arrived at the destination city depot.", vehicle.type, vehicle.id))
-        
-        -- Find the destination city's depot. For now, we assume it's the same as the main city's.
-        -- In the future, this would point to a specific depot in another city.
-        vehicle.grid_anchor = game.entities.depot_plot
-        vehicle:recalculatePixelPosition(game)
-
-        -- Change state to drop off the package at the new depot
+    -- Use normal movement logic instead of abstracted timer
+    if not vehicle.path or #vehicle.path == 0 then
+        print(string.format("DEBUG: %s %d completed long distance travel, changing to DoDropoff", vehicle.type, vehicle.id))
         vehicle:changeState(States.DoDropoff, game)
+        return
     end
+    
+    -- Use the same movement logic as other travel states
+    moveAlongPath(dt, vehicle, game)
 end
 
 function States.TravelingLongDistance:exit(vehicle, game)
-    vehicle.visible = true -- The vehicle is now on-map again
+    -- No need to set visible = true since we never set it to false
+    print(string.format("DEBUG: %s %d finished long distance travel", vehicle.type, vehicle.id))
 end
 
 --------------------------------------------------------------------------------
@@ -349,6 +394,5 @@ function States.Stuck:update(dt, vehicle, game)
         vehicle:changeState(previous_state, game)
     end
 end
-
 
 return States

@@ -69,21 +69,84 @@ end
 function Vehicle:_resolveOffScreenState(game)
     -- This function will continue to process instantaneous state changes
     -- until the vehicle is in a state that involves travel (and has an ETA).
-    local state_name = self.state.name
-    print(string.format("Vehicle %d resolving off-screen state: %s", self.id, state_name))
+    local States = require("models.vehicles.vehicle_states")
+    local max_iterations = 10  -- Prevent infinite loops
+    local iterations = 0
+    
+    while iterations < max_iterations do
+        local state_name = self.state.name
+        local old_state = state_name
+        
+        print(string.format("Vehicle %d resolving off-screen state: %s (iteration %d)", self.id, state_name, iterations + 1))
 
-    if state_name == "To Pickup" then
-        self:changeState(States.DoPickup, game)
-    elseif state_name == "To Dropoff" then
-        self:changeState(States.DoDropoff, game)
-    elseif state_name == "Returning" then
-        self:changeState(States.Idle, game)
+        if state_name == "To Pickup" then
+            -- Arrived at pickup location, start picking up
+            self:changeState(States.DoPickup, game)
+            
+        elseif state_name == "To Dropoff" then
+            -- Arrived at dropoff location, start dropping off
+            self:changeState(States.DoDropoff, game)
+            
+        elseif state_name == "Returning" then
+            -- Check if we got new work while returning - if so, go to pickup instead
+            if #self.trip_queue > 0 then
+                print(string.format("Vehicle %d got new work while returning, switching to pickup", self.id))
+                self:changeState(States.GoToPickup, game)
+            else
+                -- No new work, arrived back at depot, go idle
+                self:changeState(States.Idle, game)
+            end
+            
+        elseif state_name == "Picking Up" then
+            -- The DoPickup state's enter method handles the logic and transitions automatically
+            -- No need to call enter again, it was already called by changeState
+            print(string.format("Vehicle %d completed pickup, should be in new state: %s", self.id, self.state.name))
+            
+        elseif state_name == "Dropping Off" then
+            -- The DoDropoff state's enter method handles the logic and transitions automatically
+            -- No need to call enter again, it was already called by changeState
+            print(string.format("Vehicle %d completed dropoff, should be in new state: %s", self.id, self.state.name))
+            
+        elseif state_name == "Deciding" then
+            -- The DecideNextAction state's enter method handles the logic and transitions automatically
+            print(string.format("Vehicle %d completed decision, should be in new state: %s", self.id, self.state.name))
+            
+        elseif state_name == "Idle" then
+            -- Check if we have new work to do
+            if #self.trip_queue > 0 then
+                self:changeState(States.GoToPickup, game)
+            else
+                -- Truly idle, no more state changes needed
+                print(string.format("Vehicle %d is truly idle with no work", self.id))
+                break
+            end
+            
+        else
+            -- Vehicle is in a travel state or unknown state, stop resolving
+            print(string.format("Vehicle %d in travel/final state: %s", self.id, state_name))
+            break
+        end
+        
+        iterations = iterations + 1
+        
+        -- If state didn't change, we're stuck - break out
+        if self.state.name == old_state then
+            print(string.format("WARNING: Vehicle %d state didn't change from %s, breaking loop", self.id, old_state))
+            break
+        end
+        
+        -- If we're now in a travel state, we're done
+        if self.state.name == "To Pickup" or 
+           self.state.name == "To Dropoff" or 
+           self.state.name == "Returning" or
+           self.state.name == "Traveling (Region)" then
+            print(string.format("Vehicle %d reached travel state: %s", self.id, self.state.name))
+            break
+        end
     end
-
-    -- If the new state is ALSO instantaneous (like DoPickup), this will be called again
-    -- until it settles on a "travel" state. This handles the chaining.
-    if self.state.name == "Picking Up" or self.state.name == "Dropping Off" or self.state.name == "Deciding" then
-        self:_resolveOffScreenState(game)
+    
+    if iterations >= max_iterations then
+        print(string.format("ERROR: Vehicle %d hit max iterations in state resolution!", self.id))
     end
 end
 
@@ -102,12 +165,62 @@ function Vehicle:update(dt, game)
         return
     end
 
-    -- If we reach here, the player is zoomed out. Run the abstracted simulation.
+    -- ABSTRACTED MODE: We reach here when player is zoomed out
+    
+    -- FIX: For now, trucks should always run in detailed mode regardless of zoom level
+    -- This is temporary until we implement proper truck abstraction
+    if self.type == "truck" then
+        print(string.format("DEBUG: Truck %d running in detailed mode despite zoom level %d", self.id, game.state.current_map_scale))
+        if self.state and self.state.update then
+            self.state:update(dt, self, game)
+        end
+        return
+    end
+    
+    -- ABSTRACTED MODE continues for bikes only...
+    
+    -- FIX 1: Handle vehicles that don't have a path (idle, or in instantaneous states)
     if not self.current_path_eta or self.current_path_eta <= 0 then
-        -- This vehicle is idle and has no journey to simulate.
+        -- If vehicle has no active journey, check if it needs to start one
+        if not self.current_path_eta then
+            -- Vehicle is in an instantaneous state - resolve it immediately
+            if self.state and (self.state.name == "Picking Up" or 
+                              self.state.name == "Dropping Off" or 
+                              self.state.name == "Deciding") then
+                self:_resolveOffScreenState(game)
+                -- After resolving, set up the new ETA if there's a path
+                if self.path and #self.path > 0 then
+                    self.current_path_eta = require("services.PathfindingService").estimatePathTravelTime(self.path, self, game, game.maps.city)
+                end
+            -- FIX 2: Handle idle vehicles that get new assignments
+            elseif self.state and self.state.name == "Idle" and #self.trip_queue > 0 then
+                -- Trigger the state change to start working
+                self:changeState(require("models.vehicles.vehicle_states").GoToPickup, game)
+                -- Set up ETA for the new journey
+                if self.path and #self.path > 0 then
+                    self.current_path_eta = require("services.PathfindingService").estimatePathTravelTime(self.path, self, game, game.maps.city)
+                end
+            end
+        end
         return
     end
 
+    -- FIX 2.5: Handle vehicles that are traveling but get new assignments
+    -- This covers the case where a vehicle is returning to depot but gets new work
+    if self.current_path_eta and self.current_path_eta > 0 then
+        if self.state and self.state.name == "Returning" and #self.trip_queue > 0 then
+            print(string.format("Vehicle %d canceling return journey to take new assignment", self.id))
+            -- Cancel the return journey and go directly to pickup
+            self:changeState(require("models.vehicles.vehicle_states").GoToPickup, game)
+            -- Set up ETA for the new pickup journey
+            if self.path and #self.path > 0 then
+                self.current_path_eta = require("services.PathfindingService").estimatePathTravelTime(self.path, self, game, game.maps.city)
+            end
+            return -- Exit early since we've started a new journey
+        end
+    end
+
+    -- FIX 3: Continue with existing travel simulation
     self.current_path_eta = self.current_path_eta - dt
 
     if self.current_path_eta <= 0 then
@@ -115,20 +228,24 @@ function Vehicle:update(dt, game)
         if self.path and #self.path > 0 then
             local final_node = self.path[#self.path]
             self.grid_anchor = {x = final_node.x, y = final_node.y}
+            self:recalculatePixelPosition(game)
             self.path = {}
+            print(string.format("Vehicle %d completed abstracted journey, now at (%d,%d)", 
+                  self.id, self.grid_anchor.x, self.grid_anchor.y))
         end
 
-        -- Resolve the sequence of off-screen actions until a new travel state is reached.
+        -- FIX 4: Resolve all instantaneous state changes
         self:_resolveOffScreenState(game)
         
         -- After all actions are resolved, get the ETA for the new path.
         if self.path and #self.path > 0 then
             self.current_path_eta = require("services.PathfindingService").estimatePathTravelTime(self.path, self, game, game.maps.city)
         else
-            self.current_path_eta = 0
+            self.current_path_eta = nil -- FIX 5: Clear ETA when no path
         end
         
-        print(string.format("Vehicle %d finished abstracted action chain. New state: %s. New ETA: %.2f", self.id, self.state.name, self.current_path_eta or 0))
+        print(string.format("Vehicle %d finished abstracted action chain. New state: %s. New ETA: %.2f", 
+              self.id, self.state.name, self.current_path_eta or 0))
     end
 end
 
@@ -186,7 +303,12 @@ function Vehicle:draw(game)
     local should_draw = false
     local current_scale = game.state.current_map_scale
     
-    if current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
+    -- FIX: Trucks should be drawn at all zoom levels since they're not abstracted
+    if self.type == "truck" then
+        should_draw = true
+        print(string.format("DEBUG: Drawing truck %d at zoom level %d", self.id, current_scale))
+    elseif current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
+        -- Bikes and other vehicles only draw at downtown and city scales
         should_draw = true
     end
 
