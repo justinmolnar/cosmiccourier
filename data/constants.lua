@@ -43,8 +43,10 @@ local C = {
         UI_BG           = {0.1, 0.1, 0.15},
         HOVER           = {1, 1, 0},
         DOWNTOWN_PLOT   = {0.85, 0.85, 0.8},
-        -- ADD THIS LINE:
-        DOWNTOWN_ROAD   = {0.3, 0.3, 0.35}, -- A dark color for contrast
+        DOWNTOWN_ROAD   = {0.3, 0.3, 0.35},
+        -- ADD THESE LINES
+        WATER           = {0.2, 0.3, 0.8},
+        MOUNTAIN        = {0.5, 0.45, 0.4},
         DEBUG_NODE      = {0, 1, 0},
     },
 

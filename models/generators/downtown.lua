@@ -26,27 +26,12 @@ function Downtown.generateConnectedRoads(grid, district, road_type, plot_type, n
     local grid_w, grid_h = #grid[1], #grid
     local road_tiles = {} -- Keep a list of all tiles that are roads
     
-    -- Debug: Print district values to see what we're getting
-    print("Downtown generator - district values:")
-    print("  x:", district.x, type(district.x))
-    print("  y:", district.y, type(district.y))
-    print("  w:", district.w, type(district.w))
-    print("  h:", district.h, type(district.h))
-    print("  num_roads:", num_roads)
-    
     -- Ensure all district values are numbers
     local dist_x = tonumber(district.x) or 0
     local dist_y = tonumber(district.y) or 0
     local dist_w = tonumber(district.w) or 10
     local dist_h = tonumber(district.h) or 10
     local num_roads_safe = tonumber(num_roads) or 50
-    
-    print("Downtown generator - converted values:")
-    print("  dist_x:", dist_x)
-    print("  dist_y:", dist_y)
-    print("  dist_w:", dist_w)
-    print("  dist_h:", dist_h)
-    print("  num_roads_safe:", num_roads_safe)
 
     -- 1. Fill district area with plots first
     for y = dist_y, dist_y + dist_h - 1 do
@@ -58,6 +43,7 @@ function Downtown.generateConnectedRoads(grid, district, road_type, plot_type, n
     end
 
     -- 2. Create a main horizontal and vertical "cross" to guarantee boundary connections.
+    -- THE FIX: Use math.floor to ensure the center coordinates are integers.
     local center_x = dist_x + math.floor(dist_w / 2)
     local center_y = dist_y + math.floor(dist_h / 2)
     
@@ -80,15 +66,13 @@ function Downtown.generateConnectedRoads(grid, district, road_type, plot_type, n
     for i = 1, num_roads_safe do
         if #road_tiles == 0 then break end
         
-        -- Pick a random existing road tile to start from
         local start_node = road_tiles[love.math.random(1, #road_tiles)]
         
-        -- Determine if the start node is on the horizontal or vertical axis of the cross
+        -- This comparison will now work correctly for all cities.
         local is_on_vertical_axis = (start_node.x == center_x)
         local is_on_horizontal_axis = (start_node.y == center_y)
 
         if is_on_vertical_axis or is_on_horizontal_axis then
-            -- Grow a perpendicular road from the main cross
             local dx, dy = 0, 0
             if is_on_vertical_axis then
                 dx = love.math.random(0,1) == 0 and -1 or 1 -- Grow left or right
@@ -102,7 +86,7 @@ function Downtown.generateConnectedRoads(grid, district, road_type, plot_type, n
                    cy < dist_y or cy >= dist_y + dist_h then 
                     break 
                 end
-                if grid[cy][cx].type == road_type then break end -- Stop if we hit another road
+                if grid[cy][cx].type == road_type then break end 
                 grid[cy][cx].type = road_type
                 table.insert(road_tiles, {x = cx, y = cy})
                 cx, cy = cx + dx, cy + dy

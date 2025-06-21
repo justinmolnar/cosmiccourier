@@ -3,7 +3,7 @@
 
 local ConnectingRoads = {}
 
-function ConnectingRoads.generateConnections(grid, districts, highway_points, map_w, map_h, params)
+function ConnectingRoads.generateConnections(grid, districts, highway_points, map_w, map_h, downtown_district, params)
     print("Starting organic walker-based road generation...")
     
     -- Use debug parameters or defaults
@@ -14,7 +14,7 @@ function ConnectingRoads.generateConnections(grid, districts, highway_points, ma
     local walker_death_rules_enabled = (params and params.walker_death_rules_enabled) ~= false -- Default true
     
     -- Find all district boundary road endpoints to start walkers from
-    local starting_points = ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_points, map_w, map_h)
+    local starting_points = ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_points, map_w, map_h, downtown_district)
     print("Found", #starting_points, "starting points for walkers")
     
     -- Create walkers from starting points
@@ -237,13 +237,12 @@ function ConnectingRoads.turnWalker(walker)
     walker.direction = turn_options[love.math.random(1, #turn_options)]
 end
 
-function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_points, map_w, map_h)
+function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_points, map_w, map_h, downtown_district)
     local boundary_points = {}
     
-    -- First, find downtown district (District 1) for reference
-    local downtown = districts[1]
-    local downtown_center_x = downtown.x + downtown.w / 2
-    local downtown_center_y = downtown.y + downtown.h / 2
+    -- MODIFIED: Use the passed-in downtown_district instead of assuming the first one.
+    local downtown_center_x = downtown_district.x + math.floor(downtown_district.w / 2)
+    local downtown_center_y = downtown_district.y + math.floor(downtown_district.h / 2)
     
     for district_idx, district in ipairs(districts) do
         local district_center_x = district.x + district.w / 2
@@ -259,13 +258,9 @@ function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_poin
         
         -- Check all edges of the district for roads that could extend outward
         local edges = {
-            -- Top edge
             {x_start = district.x, x_end = district.x + district.w - 1, y = district.y, direction = {x = 0, y = -1}, side = "top"},
-            -- Bottom edge  
             {x_start = district.x, x_end = district.x + district.w - 1, y = district.y + district.h - 1, direction = {x = 0, y = 1}, side = "bottom"},
-            -- Left edge
             {x = district.x, y_start = district.y, y_end = district.y + district.h - 1, direction = {x = -1, y = 0}, side = "left"},
-            -- Right edge
             {x = district.x + district.w - 1, y_start = district.y, y_end = district.y + district.h - 1, direction = {x = 1, y = 0}, side = "right"}
         }
         
@@ -305,7 +300,6 @@ function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_poin
         
         -- Now limit walkers per side based on facing toward downtown
         for side_name, side_roads in pairs(sides) do
-            -- Determine if this side faces toward downtown center
             local faces_downtown = false
             
             if side_name == "top" and district_center_y > downtown_center_y then
@@ -318,10 +312,8 @@ function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_poin
                 faces_downtown = true
             end
             
-            -- Set limits: 8 for sides facing downtown, 4 for sides facing away
             local max_walkers_this_side = faces_downtown and 8 or 4
             
-            -- Shuffle the roads and take up to the limit
             for i = #side_roads, 2, -1 do
                 local j = love.math.random(i)
                 side_roads[i], side_roads[j] = side_roads[j], side_roads[i]
@@ -329,7 +321,6 @@ function ConnectingRoads.findDistrictBoundaryRoads(grid, districts, highway_poin
             
             local roads_to_use = math.min(#side_roads, max_walkers_this_side)
             for i = 1, roads_to_use do
-                -- Mark whether this walker faces downtown
                 side_roads[i].faces_downtown = faces_downtown
                 table.insert(boundary_points, side_roads[i])
             end

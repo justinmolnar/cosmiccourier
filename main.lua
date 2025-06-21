@@ -87,10 +87,10 @@ function love.load()
     Game.game_view = GameView:new(Game)
     Game.ui_view = UIView:new(Game)
 
-    -- MODIFIED: Generate the city map specifically
+    -- MODIFIED: Generate the REGION map on startup now
     ErrorService.withErrorHandling(function()
-        Game.maps.city:generate()
-    end, "Map Generation")
+        Game.maps.region:generateRegion()
+    end, "Region Map Generation")
     
     Game.entities:init(Game)
     

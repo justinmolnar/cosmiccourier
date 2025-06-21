@@ -103,6 +103,12 @@ function GameView:draw()
         love.graphics.setColor(1, 1, 0.8, ft.alpha)
         love.graphics.printf(ft.text, screen_x - 75, screen_y, 150, "center")
     end
+
+    if Game.debug_mode and Game.active_map_key == "city" then
+        for _, vehicle in ipairs(Game.entities.vehicles) do
+            vehicle:drawDebug(Game)
+        end
+    end
     
     love.graphics.setScissor()
 end

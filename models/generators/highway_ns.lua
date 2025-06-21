@@ -107,8 +107,9 @@ end
 
 function HighwayNS.calculateCurveAroundDistrict(current, ideal_next, district, curve_distance)
     -- Calculate district center and boundaries
-    local dist_center_x = district.x + district.w / 2
-    local dist_center_y = district.y + district.h / 2
+    -- THE FIX: Use math.floor to ensure integer coordinates
+    local dist_center_x = district.x + math.floor(district.w / 2)
+    local dist_center_y = district.y + math.floor(district.h / 2)
     
     -- Vector from district center to our ideal next position
     local away_x = ideal_next.x - dist_center_x

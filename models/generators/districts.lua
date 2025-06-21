@@ -3,11 +3,18 @@
 
 local Districts = {}
 
-function Districts.generateAll(grid, map_w, map_h, downtown_district, params)
+function Districts.generateAll(grid, map_w, map_h, downtown_district_params, params)
     local all_districts = {}
     
-    -- 1. The downtown district is already generated, so we just add its definition to our list.
-    table.insert(all_districts, downtown_district)
+    -- MODIFIED: Use the passed-in downtown parameters directly.
+    -- This was the source of the bug; it was implicitly relying on old state.
+    local downtown_dist = {
+        x = downtown_district_params.x,
+        y = downtown_district_params.y,
+        w = downtown_district_params.w,
+        h = downtown_district_params.h
+    }
+    table.insert(all_districts, downtown_dist)
     
     -- Use debug parameters or defaults
     local num_districts = (params and params.num_districts) or 8
@@ -15,14 +22,14 @@ function Districts.generateAll(grid, map_w, map_h, downtown_district, params)
     local district_max_size = (params and params.district_max_size) or 80
     local district_placement_attempts = (params and params.district_placement_attempts) or 1000
     
-    -- 2. Generate non-overlapping districts using proper placement
-    local other_districts = Districts.placeNonOverlappingDistricts(grid, num_districts, map_w, map_h, downtown_district, 
+    -- Generate non-overlapping districts using proper placement
+    local other_districts = Districts.placeNonOverlappingDistricts(grid, num_districts, map_w, map_h, downtown_dist, 
                                                                    district_min_size, district_max_size, district_placement_attempts)
     for _, district in ipairs(other_districts) do
         table.insert(all_districts, district)
     end
     
-    -- 3. Fill districts with connected road networks (like downtown)
+    -- Fill districts with connected road networks
     for _, district in ipairs(other_districts) do
         Districts.generateConnectedRoadNetwork(grid, district, params)
     end
@@ -35,6 +42,15 @@ function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_
     local districts = {}
     local attempts = 0
     
+    -- MODIFIED: Create a local copy of the downtown district to check against.
+    -- This was the source of the bug; it was implicitly using incorrect coordinates.
+    local downtown_boundary = {
+        x = downtown_dist.x,
+        y = downtown_dist.y,
+        w = downtown_dist.w,
+        h = downtown_dist.h
+    }
+    
     while #districts < num_districts and attempts < max_attempts do
         local w = love.math.random(district_min_size, district_max_size)
         local h = love.math.random(district_min_size, district_max_size)
@@ -43,15 +59,13 @@ function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_
         
         local new_district = {x = x, y = y, w = w, h = h}
         
-        -- Check if this district would overlap with any existing districts
         local overlaps = false
         
-        -- Check overlap with downtown - REDUCED BUFFER
-        if Districts.doDistrictsOverlap(new_district, downtown_dist) then
+        -- Check overlap with downtown using our corrected local boundary
+        if Districts.doDistrictsOverlap(new_district, downtown_boundary) then
             overlaps = true
         end
         
-        -- Check overlap with other districts
         if not overlaps then
             for _, existing_district in ipairs(districts) do
                 if Districts.doDistrictsOverlap(new_district, existing_district) then
@@ -61,17 +75,14 @@ function Districts.placeNonOverlappingDistricts(grid, num_districts, max_w, max_
             end
         end
         
-        -- Check if the district would be too close to map edges
         local min_border_distance = 10
         if x < min_border_distance or y < min_border_distance or 
            x + w > max_w - min_border_distance or y + h > max_h - min_border_distance then
             overlaps = true
         end
         
-        -- If no overlaps, add the district
         if not overlaps then
             table.insert(districts, new_district)
-            print(string.format("Placed district %d at (%d,%d) size %dx%d", #districts, x, y, w, h))
         end
         
         attempts = attempts + 1

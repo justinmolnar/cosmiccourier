@@ -78,7 +78,14 @@ function Vehicle:isAvailable(game)
 end
 
 function Vehicle:drawDebug(game)
-    local C = game.C
+    -- MODIFIED: This function now draws in screen-space to avoid scaling issues.
+    local CoordinateSystem = require("utils.CoordinateSystem")
+    local coord_system = CoordinateSystem.new(game.C)
+
+    -- 1. Convert the vehicle's world position to screen coordinates.
+    local screen_x, screen_y = coord_system:worldToScreen(self.px, self.py, game.camera)
+
+    -- 2. Define the content of the debug menu.
     local line_h = 15
     local state_name = self.state and self.state.name or "N/A"
     local path_count = self.path and #self.path or 0
@@ -94,24 +101,25 @@ function Vehicle:drawDebug(game)
         string.format("Cargo: %d | Queue: %d", #self.cargo, #self.trip_queue),
         string.format("Pos: %d, %d", math.floor(self.px), math.floor(self.py))
     }
-
-    love.graphics.push()
-    love.graphics.translate(self.px + 20, self.py - 20)
-    love.graphics.scale(1 / game.camera.scale, 1 / game.camera.scale)
+    
+    -- 3. Draw the menu directly using screen coordinates.
+    -- No push, pop, translate, or scale needed for the menu itself.
+    local menu_x = screen_x + 20
+    local menu_y = screen_y - 20
     
     love.graphics.setColor(0, 0, 0, 0.7)
-    love.graphics.rectangle("fill", -5, -5, 200, #debug_lines * line_h + 10)
+    love.graphics.rectangle("fill", menu_x - 5, menu_y - 5, 200, #debug_lines * line_h + 10)
+    
+    local old_font = love.graphics.getFont()
+    love.graphics.setFont(game.fonts.ui_small)
+    
     love.graphics.setColor(0, 1, 0)
     for i, line in ipairs(debug_lines) do
-        love.graphics.print(line, 0, (i-1) * line_h)
+        love.graphics.print(line, menu_x, menu_y + (i-1) * line_h)
     end
     
-    love.graphics.pop()
+    love.graphics.setFont(old_font)
     love.graphics.setColor(1, 1, 1)
-
-    if self.path and #self.path > 0 then
-        -- This path drawing logic can remain as is.
-    end
 end
 
 function Vehicle:draw(game)

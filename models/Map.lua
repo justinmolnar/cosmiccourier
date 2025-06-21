@@ -54,13 +54,18 @@ local function getTileColor(tile_type, is_in_downtown, C_MAP)
             return C_MAP.COLORS.DOWNTOWN_PLOT
         end
     else
+        -- MODIFIED: Added cases for water and mountain tiles
         if tile_type == "road" or tile_type == "downtown_road" or 
            tile_type == "arterial" or tile_type == "highway" or 
            tile_type == "highway_ring" or tile_type == "highway_ns" or 
            tile_type == "highway_ew" then
             return C_MAP.COLORS.ROAD
         elseif tile_type == "grass" then 
-            return C_MAP.COLORS.GRASS 
+            return C_MAP.COLORS.GRASS
+        elseif tile_type == "water" then
+            return C_MAP.COLORS.WATER
+        elseif tile_type == "mountain" then
+            return C_MAP.COLORS.MOUNTAIN
         else
             return C_MAP.COLORS.PLOT
         end
@@ -273,6 +278,11 @@ function Map:getRandomDowntownBuildingPlot()
     end
     
     return self:getRandomBuildingPlot() -- Fallback to any plot if none are found
+end
+
+function Map:generateRegion()
+    local MapGenerationService = require("services.MapGenerationService")
+    MapGenerationService.generateRegion(self)
 end
 
 function Map:getScaleName() 

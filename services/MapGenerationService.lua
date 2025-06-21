@@ -33,66 +33,50 @@ function MapGenerationService.generateMap(map)
     print("MapGenerationService: Generation complete. Found " .. #map.building_plots .. " valid building plots.")
 end
 
--- NEW, REUSABLE FUNCTION TO "STAMP" A CITY
-function MapGenerationService.generateCityAt(target_grid, center_x, center_y, city_config, params, map_instance)
-    print(string.format("Generating city at (%d, %d)", center_x, center_y))
+function MapGenerationService.generateCityAt(target_grid, center_x, center_y, city_config, params)
+    print(string.format("--- BEGIN CITY GENERATION AT (%d, %d) ---", center_x, center_y))
 
     local city_w = city_config.CITY_GRID_WIDTH
     local city_h = city_config.CITY_GRID_HEIGHT
 
-    -- Define the city's overall bounding box on the target grid
-    local city_bounds = {
-        x = center_x - math.floor(city_w / 2),
-        y = center_y - math.floor(city_h / 2),
-        w = city_w,
-        h = city_h
+    local temp_grid = MapGenerationService._createGrid(city_w, city_h, "grass")
+
+    local temp_downtown_district = {
+        x = math.floor(city_w / 2) - math.floor(city_config.DOWNTOWN_GRID_WIDTH / 2),
+        y = math.floor(city_h / 2) - math.floor(city_config.DOWNTOWN_GRID_HEIGHT / 2),
+        w = city_config.DOWNTOWN_GRID_WIDTH,
+        h = city_config.DOWNTOWN_GRID_HEIGHT
     }
-
-    -- 1. Create Downtown in the center of the city area
-    local downtown_w = city_config.DOWNTOWN_GRID_WIDTH
-    local downtown_h = city_config.DOWNTOWN_GRID_HEIGHT
-    local downtown_district = {
-        x = center_x - math.floor(downtown_w / 2),
-        y = center_y - math.floor(downtown_h / 2),
-        w = downtown_w,
-        h = downtown_h
-    }
+    Downtown.generateDowntownModule(temp_grid, temp_downtown_district, "downtown_road", "downtown_plot", params)
     
-    -- Ensure the map instance knows where its primary downtown is, for entity placement
-    if map_instance then
-        map_instance.downtown_offset = { x = downtown_district.x, y = downtown_district.y }
+    local all_districts = Districts.generateAll(temp_grid, city_w, city_h, temp_downtown_district, params)
+
+    local highway_paths = MapGenerationService._generateHighways(all_districts, city_w, city_h, temp_downtown_district, params)
+    
+    local highway_points = MapGenerationService._extractHighwayPoints(highway_paths.ring_road, highway_paths.highways)
+    local connections = ConnectingRoads.generateConnections(temp_grid, all_districts, highway_points, city_w, city_h, temp_downtown_district, params)
+
+    MapGenerationService._drawAllRoadsToGrid(temp_grid, highway_paths.ring_road, highway_paths.highways, connections, params, city_config)
+    ConnectingRoads.drawConnections(temp_grid, connections, params)
+
+    local target_start_x = center_x - math.floor(city_w / 2)
+    local target_start_y = center_y - math.floor(city_h / 2)
+
+    for y = 1, city_h do
+        for x = 1, city_w do
+            local source_tile = temp_grid[y][x]
+            if source_tile.type ~= "grass" then
+                local target_x = target_start_x + x
+                local target_y = target_start_y + y
+                if target_grid[target_y] and target_grid[target_y][target_x] then
+                    -- THE FIX: The original code had 'grid[y][x]' here by mistake.
+                    -- It should be using the calculated target_y and target_x.
+                    target_grid[target_y][target_x] = source_tile
+                end
+            end
+        end
     end
-    
-    Downtown.generateDowntownModule(target_grid, downtown_district, "downtown_road", "downtown_plot", params)
-    
-    -- 2. Generate surrounding districts
-    local all_districts = Districts.generateAll(target_grid, city_bounds.w, city_bounds.h, downtown_district, params)
-
-    -- 3. Generate highway network for this city
-    local ring_road_nodes = RingRoad.generatePath(all_districts, city_bounds.w, city_bounds.h, params)
-    local ring_road_curve = {}
-    if #ring_road_nodes > 0 then
-        ring_road_curve = MapGenerationService._generateSplinePoints(ring_road_nodes, 10)
-    end
-
-    local ns_paths = HighwayNS.generatePaths(city_bounds.w, city_bounds.h, all_districts, params)
-    local ew_paths = HighwayEW.generatePaths(city_bounds.w, city_bounds.h, all_districts, params)
-    
-    local all_highway_paths = {}
-    for _, path in ipairs(ns_paths) do table.insert(all_highway_paths, path) end
-    for _, path in ipairs(ew_paths) do table.insert(all_highway_paths, path) end
-
-    local merged_highway_paths = HighwayMerger.applyMergingLogic(all_highway_paths, ring_road_curve, params)
-    
-    -- 4. Generate roads connecting everything
-    local highway_points = MapGenerationService._extractHighwayPoints(ring_road_curve, merged_highway_paths)
-    local connections = ConnectingRoads.generateConnections(target_grid, all_districts, highway_points, city_bounds.w, city_bounds.h, params)
-
-    -- 5. Draw all the generated roads onto the target grid
-    MapGenerationService._drawAllRoadsToGrid(target_grid, ring_road_curve, merged_highway_paths, connections, params, city_config)
-    ConnectingRoads.drawConnections(target_grid, connections, params)
-
-    print(string.format("Finished generating city at (%d, %d)", center_x, center_y))
+    print(string.format("--- END CITY GENERATION AT (%d, %d). Stamped onto main grid. ---", center_x, center_y))
 end
 
 
@@ -195,6 +179,133 @@ function MapGenerationService._drawThickLineColored(grid, x1, y1, x2, y2, road_t
             end
         end
     end
+end
+
+function MapGenerationService._generateRivers(grid)
+    local w, h = #grid[1], #grid
+    -- Start a river near the top, somewhere in the middle 60% of the map
+    local river_x = w * (0.2 + love.math.random() * 0.6)
+    local river_y = 1
+
+    -- A simple random walk downwards for a river
+    while river_y <= h do
+        river_x = river_x + love.math.random(-1, 1)
+        river_x = math.max(3, math.min(w - 2, river_x)) -- Clamp to map bounds, with a small margin
+        
+        -- Draw a thick line for the river tile
+        for i = -2, 2 do
+            if grid[river_y] and grid[river_y][math.floor(river_x + i)] then
+                grid[river_y][math.floor(river_x + i)].type = "water"
+            end
+        end
+        river_y = river_y + 1
+    end
+    print("Generated a river.")
+end
+
+function MapGenerationService._generateMountains(grid)
+    local w, h = #grid[1], #grid
+    local num_ranges = 3
+    
+    for i = 1, num_ranges do
+        local mountain_x = love.math.random(0, w)
+        local mountain_y = love.math.random(0, h)
+        local mountain_size = love.math.random(30, 60)
+
+        -- A simple circle of mountain tiles
+        for y_offset = -mountain_size, mountain_size do
+            for x_offset = -mountain_size, mountain_size do
+                if math.sqrt(x_offset^2 + y_offset^2) < mountain_size then
+                    local final_x = math.floor(mountain_x + x_offset)
+                    local final_y = math.floor(mountain_y + y_offset)
+                     if grid[final_y] and grid[final_y][final_x] then
+                        grid[final_y][final_x].type = "mountain"
+                     end
+                end
+            end
+        end
+    end
+    print("Generated " .. num_ranges .. " mountain ranges.")
+end
+
+function MapGenerationService.generateRegion(region_map)
+    local C_MAP = region_map.C.MAP
+    local REGION_W = C_MAP.REGION_GRID_WIDTH
+    local REGION_H = C_MAP.REGION_GRID_HEIGHT
+    local CITY_W = C_MAP.CITY_GRID_WIDTH
+    local CITY_H = C_MAP.CITY_GRID_HEIGHT
+    local params = region_map.debug_params or {}
+
+    region_map.grid = MapGenerationService._createGrid(REGION_W, REGION_H, "grass")
+
+    MapGenerationService._generateRivers(region_map.grid)
+    MapGenerationService._generateMountains(region_map.grid)
+
+    local main_city_center_x = REGION_W / 2
+    local main_city_center_y = REGION_H / 2
+    MapGenerationService.generateCityAt(region_map.grid, main_city_center_x, main_city_center_y, C_MAP, params)
+
+    local second_city_x = REGION_W * 0.25
+    local second_city_y = REGION_H * 0.6
+    MapGenerationService.generateCityAt(region_map.grid, second_city_x, second_city_y, C_MAP, {})
+
+    local city_map = Game.maps.city
+    city_map.grid = MapGenerationService._createGrid(CITY_W, CITY_H, "grass")
+
+    local source_start_x = main_city_center_x - math.floor(CITY_W / 2)
+    local source_start_y = main_city_center_y - math.floor(CITY_H / 2)
+    for y = 1, CITY_H do
+        for x = 1, CITY_W do
+            local sx, sy = source_start_x + x, source_start_y + y
+            if region_map.grid[sy] and region_map.grid[sy][sx] then
+                city_map.grid[y][x] = region_map.grid[sy][sx]
+            end
+        end
+    end
+    
+    region_map.building_plots = region_map:getPlotsFromGrid(region_map.grid)
+    city_map.building_plots = city_map:getPlotsFromGrid(city_map.grid)
+    
+    city_map.downtown_offset = {
+        x = math.floor(CITY_W / 2) - math.floor(C_MAP.DOWNTOWN_GRID_WIDTH / 2),
+        y = math.floor(CITY_H / 2) - math.floor(C_MAP.DOWNTOWN_GRID_HEIGHT / 2)
+    }
+
+    region_map.downtown_offset = {
+        x = main_city_center_x - math.floor(C_MAP.DOWNTOWN_GRID_WIDTH / 2),
+        y = main_city_center_y - math.floor(C_MAP.DOWNTOWN_GRID_HEIGHT / 2)
+    }
+    
+    Game.entities.depot_plot = city_map:getRandomDowntownBuildingPlot()
+    print("Region generation complete.")
+end
+
+function MapGenerationService._generateHighways(all_districts, map_w, map_h, downtown_district, params)
+    local highway_paths = { ring_road = {}, highways = {} }
+    
+    -- Generate ring road if enabled
+    if params.generate_ringroad ~= false then
+        -- MODIFIED: Pass the downtown_district to the ring road generator
+        local ring_road_nodes = RingRoad.generatePath(all_districts, map_w, map_h, downtown_district, params)
+        if #ring_road_nodes > 0 then 
+            highway_paths.ring_road = MapGenerationService._generateSplinePoints(ring_road_nodes, 10) 
+        end
+    end
+    
+    -- Generate highways if enabled
+    if params.generate_highways ~= false then
+        local ns_highway_paths = HighwayNS.generatePaths(map_w, map_h, all_districts, params)
+        local ew_highway_paths = HighwayEW.generatePaths(map_w, map_h, all_districts, params)
+        
+        local all_highway_paths = {}
+        for _, path in ipairs(ns_highway_paths) do table.insert(all_highway_paths, path) end
+        for _, path in ipairs(ew_highway_paths) do table.insert(all_highway_paths, path) end
+
+        highway_paths.highways = HighwayMerger.applyMergingLogic(all_highway_paths, highway_paths.ring_road, params)
+    end
+    
+    print("Generated highways with debug parameters")
+    return highway_paths
 end
 
 return MapGenerationService
