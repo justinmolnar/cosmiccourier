@@ -3,29 +3,58 @@
 
 local HighwayEW = {}
 
-function HighwayEW.generatePaths(map_w, map_h, districts, params)
+function HighwayEW.generatePaths(map_w, map_h, all_districts, cities_data, params)
     local paths = {}
-    local EXTENSION = 100
-    
-    -- Use debug parameters or defaults
-    local num_highways = (params and params.num_ew_highways) or 2
+    local EXTENSION = 100 -- How far off-map the highway starts/ends
+
+    -- Use debug parameters or defaults from the params table
     local highway_step_size = (params and params.highway_step_size) or 30
     local highway_curve_distance = (params and params.highway_curve_distance) or 50
     local highway_buffer = (params and params.highway_buffer) or 35
-    
-    -- Generate specified number of East-West highways
-    for i = 1, num_highways do
-        local y_pos = map_h * (i / (num_highways + 1)) -- Distribute evenly
-        local path = HighwayEW.createFlowingPath(
-            {x = -EXTENSION, y = y_pos}, 
-            {x = map_w + EXTENSION, y = y_pos}, 
-            districts,
-            highway_step_size,
-            highway_curve_distance,
-            highway_buffer
-        )
-        table.insert(paths, path)
+    local vertical_offset_range = (params and params.highway_y_offset) or 40
+
+    if not cities_data or #cities_data == 0 then return {} end
+
+    -- Sort cities by their horizontal position to connect them from left to right
+    table.sort(cities_data, function(a, b) return a.center_x < b.center_x end)
+
+    local path_nodes = {}
+    local current_point
+
+    -- 1. Start the highway from the left edge of the map, aligned with the first city
+    local first_city = cities_data[1]
+    local start_y = first_city.center_y + love.math.random(-vertical_offset_range, vertical_offset_range)
+    local start_point = { x = -EXTENSION, y = start_y }
+
+    -- 2. Route the highway to the ring road of the first city
+    local target_point = HighwayEW.getRandomPointOnRingRoad(first_city.ring_road, all_districts)
+    if not target_point then return {} end -- Cannot proceed if city has no ring road
+
+    local segment = HighwayEW.createFlowingPath(start_point, target_point, all_districts, highway_step_size, highway_curve_distance, highway_buffer)
+    for _, node in ipairs(segment) do table.insert(path_nodes, node) end
+    current_point = target_point
+
+    -- 3. Route the highway between all subsequent cities
+    for i = 2, #cities_data do
+        local next_city = cities_data[i]
+        target_point = HighwayEW.getRandomPointOnRingRoad(next_city.ring_road, all_districts)
+        if target_point then
+            segment = HighwayEW.createFlowingPath(current_point, target_point, all_districts, highway_step_size, highway_curve_distance, highway_buffer)
+            for _, node in ipairs(segment) do table.insert(path_nodes, node) end
+            current_point = target_point
+        end
     end
+
+    -- 4. Route the highway from the last city to the right edge of the map
+    local last_city = cities_data[#cities_data]
+    local end_y = last_city.center_y + love.math.random(-vertical_offset_range, vertical_offset_range)
+    local end_point = { x = map_w + EXTENSION, y = end_y }
+    
+    segment = HighwayEW.createFlowingPath(current_point, end_point, all_districts, highway_step_size, highway_curve_distance, highway_buffer)
+    for _, node in ipairs(segment) do table.insert(path_nodes, node) end
+
+    -- Add the completed, continuous path to the final list of paths
+    table.insert(paths, path_nodes)
     
     return paths
 end
@@ -85,6 +114,35 @@ function HighwayEW.createFlowingPath(start_point, end_point, districts, step_siz
     local PathSmoother = require("models.generators.path_smoother")
     local smoothed_path = PathSmoother.smoothSharpAngles(path)
     return smoothed_path
+end
+
+function HighwayEW.getRandomPointOnRingRoad(ring_road_nodes, all_districts)
+    if not ring_road_nodes or #ring_road_nodes == 0 then return nil end
+
+    local attempts = 0
+    while attempts < 20 do
+        local random_index = love.math.random(1, #ring_road_nodes)
+        local point = ring_road_nodes[random_index]
+        local is_in_district = false
+        
+        -- Check if the point is inside any district
+        for _, district in ipairs(all_districts) do
+            if point.x >= district.x and point.x < district.x + district.w and
+               point.y >= district.y and point.y < district.y + district.h then
+                is_in_district = true
+                break
+            end
+        end
+
+        if not is_in_district then
+            return point -- Found a good point
+        end
+        
+        attempts = attempts + 1
+    end
+
+    -- If we failed to find a point outside a district, just return a random one
+    return ring_road_nodes[love.math.random(1, #ring_road_nodes)]
 end
 
 function HighwayEW.findConflictingDistrict(point, districts, buffer)

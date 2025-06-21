@@ -180,62 +180,77 @@ function MapGenerationService.generateRegion(region_map)
     MapGenerationService._generateRivers(region_map.grid)
     MapGenerationService._generateMountains(region_map.grid)
 
-    -- MAIN CITY: Center of the region
+    -- Generate cities and collect their LOCAL data
+    local local_cities_data = {}
+    
+    -- MAIN CITY
     local main_city_center_x = REGION_W / 2
     local main_city_center_y = REGION_H / 2
+    local main_city_data = MapGenerationService.generateCityAt(region_map.grid, main_city_center_x, main_city_center_y, C_MAP, MapGenerationService._deepCopyParams(params))
+    table.insert(local_cities_data, main_city_data)
     
-    -- STORE THE MAIN CITY OFFSET IN THE REGION MAP
-    region_map.main_city_offset = {
-        x = main_city_center_x - CITY_W/2,
-        y = main_city_center_y - CITY_H/2
-    }
-    
-    print(string.format("MAIN CITY will occupy bounds: (%d,%d) to (%d,%d)", 
-          main_city_center_x - CITY_W/2, main_city_center_y - CITY_H/2,
-          main_city_center_x + CITY_W/2, main_city_center_y + CITY_H/2))
-    
-    MapGenerationService.generateCityAt(region_map.grid, main_city_center_x, main_city_center_y, C_MAP, 
-                                       MapGenerationService._deepCopyParams(params))
+    -- SECOND CITY
+    local second_city_x = CITY_W / 2 + 20
+    local second_city_y = REGION_H - CITY_H / 2 - 20
+    local second_city_data = MapGenerationService.generateCityAt(region_map.grid, second_city_x, second_city_y, C_MAP, MapGenerationService._deepCopyParams(params))
+    table.insert(local_cities_data, second_city_data)
 
-    -- Rest of the function stays the same...
-    local safe_margin = 20
-    local min_distance = 250
-    
-    local second_city_x = CITY_W/2 + safe_margin
-    local second_city_y = REGION_H - CITY_H/2 - safe_margin
-    
-    local distance = math.sqrt((second_city_x - main_city_center_x)^2 + (second_city_y - main_city_center_y)^2)
-    if distance < min_distance then
-        second_city_y = CITY_H/2 + safe_margin
-        distance = math.sqrt((second_city_x - main_city_center_x)^2 + (second_city_y - main_city_center_y)^2)
+    -- THE FIX: Translate all local city data into global region coordinates
+    local regional_cities_data = {}
+    local all_districts_in_region = {}
+    for _, city in ipairs(local_cities_data) do
+        local city_offset_x = city.center_x - (CITY_W / 2)
+        local city_offset_y = city.center_y - (CITY_H / 2)
         
-        if distance < min_distance then
-            second_city_x = CITY_W/2 + safe_margin
-            second_city_y = REGION_H * 0.25
+        -- Translate districts
+        for _, dist in ipairs(city.districts) do
+            dist.x = dist.x + city_offset_x
+            dist.y = dist.y + city_offset_y
+            table.insert(all_districts_in_region, dist)
+        end
+
+        -- Translate ring road points
+        local regional_ring_road = {}
+        for _, point in ipairs(city.ring_road) do
+            table.insert(regional_ring_road, {
+                x = point.x + city_offset_x,
+                y = point.y + city_offset_y
+            })
+        end
+
+        table.insert(regional_cities_data, {
+            center_x = city.center_x,
+            center_y = city.center_y,
+            ring_road = regional_ring_road,
+            districts = city.districts -- These are now also in region coordinates
+        })
+    end
+
+    -- Generate REGIONAL highways using the correctly translated data
+    print("--- BEGIN REGIONAL HIGHWAY GENERATION ---")
+    local regional_ns_highways = HighwayNS.generatePaths(REGION_W, REGION_H, all_districts_in_region, params)
+    local regional_ew_highways = HighwayEW.generatePaths(REGION_W, REGION_H, all_districts_in_region, regional_cities_data, params)
+    
+    local all_regional_highways = {}
+    for _, path in ipairs(regional_ns_highways) do table.insert(all_regional_highways, path) end
+    for _, path in ipairs(regional_ew_highways) do table.insert(all_regional_highways, path) end
+
+    -- Draw the new regional highways onto the main region grid
+    local num_ns = (params and params.num_ns_highways) or 2
+    for i, path in ipairs(all_regional_highways) do
+        local highway_type = (i <= num_ns) and "highway_ns" or "highway_ew"
+        local highway_curve = MapGenerationService._generateSplinePoints(path, 10)
+        for j = 1, #highway_curve - 1 do
+            MapGenerationService._drawThickLineColored(region_map.grid, highway_curve[j].x, highway_curve[j].y, highway_curve[j+1].x, highway_curve[j+1].y, highway_type, 3)
         end
     end
-    
-    local second_bounds_x1 = second_city_x - CITY_W/2
-    local second_bounds_y1 = second_city_y - CITY_H/2
-    local second_bounds_x2 = second_city_x + CITY_W/2
-    local second_bounds_y2 = second_city_y + CITY_H/2
-    
-    if second_bounds_x1 < 1 or second_bounds_y1 < 1 or 
-       second_bounds_x2 > REGION_W or second_bounds_y2 > REGION_H then
-        print("ERROR: Cannot fit second city within region bounds!")
-        print(string.format("  Region size: %dx%d", REGION_W, REGION_H))
-        print(string.format("  Second city bounds: (%d,%d) to (%d,%d)", 
-              second_bounds_x1, second_bounds_y1, second_bounds_x2, second_bounds_y2))
-    else
-        print(string.format("SECOND CITY will occupy bounds: (%d,%d) to (%d,%d)", 
-              second_bounds_x1, second_bounds_y1, second_bounds_x2, second_bounds_y2))
-        
-        MapGenerationService.generateCityAt(region_map.grid, second_city_x, second_city_y, C_MAP, 
-                                           MapGenerationService._deepCopyParams(params))
-    end
+    print("--- END REGIONAL HIGHWAY GENERATION ---")
 
+    -- The rest of the function for setting up city/downtown offsets and plots remains the same...
     local city_map = Game.maps.city
     city_map.grid = MapGenerationService._createGrid(CITY_W, CITY_H, "grass")
+
+    region_map.main_city_offset = { x = main_city_center_x - CITY_W/2, y = main_city_center_y - CITY_H/2 }
 
     local source_start_x = main_city_center_x - math.floor(CITY_W / 2)
     local source_start_y = main_city_center_y - math.floor(CITY_H / 2)
@@ -251,15 +266,8 @@ function MapGenerationService.generateRegion(region_map)
     region_map.building_plots = region_map:getPlotsFromGrid(region_map.grid)
     city_map.building_plots = city_map:getPlotsFromGrid(city_map.grid)
     
-    city_map.downtown_offset = {
-        x = math.floor(CITY_W / 2) - math.floor(C_MAP.DOWNTOWN_GRID_WIDTH / 2),
-        y = math.floor(CITY_H / 2) - math.floor(C_MAP.DOWNTOWN_GRID_HEIGHT / 2)
-    }
-
-    region_map.downtown_offset = {
-        x = main_city_center_x - math.floor(C_MAP.DOWNTOWN_GRID_WIDTH / 2),
-        y = main_city_center_y - math.floor(C_MAP.DOWNTOWN_GRID_HEIGHT / 2)
-    }
+    city_map.downtown_offset = { x = math.floor(CITY_W / 2) - math.floor(C_MAP.DOWNTOWN_GRID_WIDTH / 2), y = math.floor(CITY_H / 2) - math.floor(C_MAP.DOWNTOWN_GRID_HEIGHT / 2) }
+    region_map.downtown_offset = { x = main_city_center_x - math.floor(C_MAP.DOWNTOWN_GRID_WIDTH / 2), y = main_city_center_y - math.floor(C_MAP.DOWNTOWN_GRID_HEIGHT / 2) }
     
     Game.entities.depot_plot = city_map:getRandomDowntownBuildingPlot()
     print("Region generation complete!")
@@ -286,36 +294,31 @@ function MapGenerationService.generateCityAt(target_grid, center_x, center_y, ci
     
     local all_districts = Districts.generateAll(temp_grid, city_w, city_h, temp_downtown_district, city_params)
 
-    local highway_paths = MapGenerationService._generateHighways(all_districts, city_w, city_h, temp_downtown_district, city_params)
+    -- Generate the Ring Road for this city
+    local ring_road_nodes = {}
+    if params.generate_ringroad ~= false then
+        ring_road_nodes = RingRoad.generatePath(all_districts, city_w, city_h, temp_downtown_district, params)
+    end
+    local ring_road_curve = {}
+    if #ring_road_nodes > 0 then 
+        ring_road_curve = MapGenerationService._generateSplinePoints(ring_road_nodes, 10) 
+    end
     
-    local highway_points = MapGenerationService._extractHighwayPoints(highway_paths.ring_road, highway_paths.highways)
-    local connections = ConnectingRoads.generateConnections(temp_grid, all_districts, highway_points, city_w, city_h, temp_downtown_district, city_params)
+    -- Generate connecting roads within the city
+    local highway_points_for_connections = MapGenerationService._extractHighwayPoints(ring_road_curve, {})
+    local connections = ConnectingRoads.generateConnections(temp_grid, all_districts, highway_points_for_connections, city_w, city_h, temp_downtown_district, city_params)
 
-    MapGenerationService._drawAllRoadsToGrid(temp_grid, highway_paths.ring_road, highway_paths.highways, connections, city_params, city_config)
+    -- Draw only the local roads (ring road and connectors) to the temporary grid
+    MapGenerationService._drawAllRoadsToGrid(temp_grid, ring_road_curve, {}, connections, city_params, city_config)
     ConnectingRoads.drawConnections(temp_grid, connections, city_params)
 
-    -- Count non-grass tiles in temp grid BEFORE stamping
-    local non_grass_count = 0
-    for y = 1, city_h do
-        for x = 1, city_w do
-            if temp_grid[y][x].type ~= "grass" then
-                non_grass_count = non_grass_count + 1
-            end
-        end
-    end
-    print(string.format("DEBUG: Temp grid has %d non-grass tiles before stamping", non_grass_count))
-
+    -- Stamping logic remains the same...
+    local stamped_count = 0
     local target_start_x = center_x - math.floor(city_w / 2)
     local target_start_y = center_y - math.floor(city_h / 2)
-    
-    print(string.format("DEBUG: Stamping to region bounds: (%d,%d) to (%d,%d)", 
-          target_start_x, target_start_y, target_start_x + city_w, target_start_y + city_h))
-
-    -- SAFE stamping with bounds checking
     local region_w = #target_grid[1]
     local region_h = #target_grid
-    local stamped_count = 0
-    
+
     for y = 1, city_h do
         for x = 1, city_w do
             local source_tile = temp_grid[y][x]
@@ -323,7 +326,6 @@ function MapGenerationService.generateCityAt(target_grid, center_x, center_y, ci
                 local target_x = target_start_x + x - 1
                 local target_y = target_start_y + y - 1
                 
-                -- CRITICAL: Proper bounds checking
                 if target_y >= 1 and target_y <= region_h and 
                    target_x >= 1 and target_x <= region_w and
                    target_grid[target_y] and target_grid[target_y][target_x] then
@@ -334,8 +336,15 @@ function MapGenerationService.generateCityAt(target_grid, center_x, center_y, ci
         end
     end
     
-    print(string.format("DEBUG: Successfully stamped %d/%d tiles", stamped_count, non_grass_count))
-    print(string.format("--- END CITY GENERATION AT (%d, %d) ---", center_x, center_y))
+    print(string.format("--- END CITY GENERATION AT (%d, %d). Stamped %d tiles. ---", center_x, center_y, stamped_count))
+
+    -- Return the generated data for use by the regional generator
+    return {
+        districts = all_districts,
+        ring_road = ring_road_curve,
+        center_x = center_x,
+        center_y = center_y
+    }
 end
 
 -- HELPER AND UTILITY FUNCTIONS (moved from Map.lua)

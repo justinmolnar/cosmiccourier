@@ -22,12 +22,15 @@ function VehicleFactory.createVehicle(vehicleType, id, depot_plot, game)
         error("VehicleFactory: Could not load vehicle class for type '" .. vehicleType .. "'")
     end
     
-    local vehicle = VehicleClass:new(id, depot_plot, game)
+    -- All current vehicles are created on the "city" map.
+    -- Future vehicles like trains could be created on the "region" map.
+    local operational_map_key = "city"
+    local vehicle = VehicleClass:new(id, depot_plot, game, vehicleType, VehicleClass.PROPERTIES, operational_map_key)
     
     -- IMPORTANT: Recalculate position for the current map scale
     vehicle:recalculatePixelPosition(game)
     
-    print("VehicleFactory: Created " .. vehicleType .. " #" .. id)
+    print("VehicleFactory: Created " .. vehicleType .. " #" .. id .. " on map '" .. operational_map_key .. "'")
     
     return vehicle
 end

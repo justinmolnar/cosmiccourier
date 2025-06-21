@@ -1,13 +1,19 @@
 -- services/PathfindingService.lua
 local PathfindingService = {}
 
-function PathfindingService.findVehiclePath(vehicle, start_plot, end_plot, game, map)
+function PathfindingService.findVehiclePath(vehicle, start_plot, end_plot, game)
     if not start_plot or not end_plot then
         print(string.format("ERROR: PathfindingService - Invalid plots for %s %d", vehicle.type, vehicle.id))
         return nil
     end
     
-    -- MODIFIED: Use the map that was passed in, instead of the global active map
+    -- Use the vehicle's operational map, not a hard-coded one.
+    local map = game.maps[vehicle.operational_map_key]
+    if not map then
+        print(string.format("ERROR: PathfindingService - Could not find operational map '%s' for vehicle %d", vehicle.operational_map_key, vehicle.id))
+        return nil
+    end
+    
     local path_grid = map.grid
     if not path_grid or #path_grid == 0 then
         print(string.format("ERROR: PathfindingService - No map grid available for %s %d", vehicle.type, vehicle.id))
@@ -62,11 +68,12 @@ function PathfindingService.findPathToPickup(vehicle, trip, game)
     return PathfindingService.findVehiclePath(vehicle, current_pos, leg.start_plot, game, game.maps.city)
 end
 
-function PathfindingService.estimatePathTravelTime(path, vehicle, game, map)
+function PathfindingService.estimatePathTravelTime(path, vehicle, game)
     if not path or #path == 0 then return 0 end
 
     local total_distance = 0
-    -- MODIFIED: Use the tile size from the map that was passed in.
+    -- Use the vehicle's operational map to get the correct tile size.
+    local map = game.maps[vehicle.operational_map_key]
     local TILE_SIZE = map.C.MAP.TILE_SIZE
 
     -- Start from the vehicle's current position

@@ -10,13 +10,11 @@ local States = {}
 function moveAlongPath(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then return end
 
-    -- THE FIX: Hardcode the map to 'city' since all pathfinding is done on the city grid.
-    -- This prevents the truck from using the 'region' map's coordinates when zoomed out.
-    local map_for_pathing = game.maps.city
+    -- Use the vehicle's operational map, not a hard-coded one.
+    local map_for_pathing = game.maps[vehicle.operational_map_key]
     if not map_for_pathing then return end
 
     local target_node = vehicle.path[1]
-    -- Use the corrected map reference here.
     local target_px, target_py = map_for_pathing:getPixelCoords(target_node.x, target_node.y)
 
     local angle = math.atan2(target_py - vehicle.py, target_px - vehicle.px)
@@ -175,17 +173,30 @@ function States.DoPickup:enter(vehicle, game)
 end
 
 --------------------------------------------------------------------------------
--- State: Go To Dropoff
+-- State: Go To Dropoff (Decision Point)
 --------------------------------------------------------------------------------
 States.GoToDropoff = State:new()
 States.GoToDropoff.name = "To Dropoff"
 function States.GoToDropoff:enter(vehicle, game)
     local PathfindingService = require("services.PathfindingService")
 
-    print(string.format("DEBUG: %s %d going to dropoff", vehicle.type, vehicle.id))
+    print(string.format("DEBUG: %s %d deciding dropoff", vehicle.type, vehicle.id))
+
+    -- Check if the primary trip in cargo requires long-distance travel
+    local trip = vehicle.cargo[1]
+    if trip and trip.is_long_distance then
+        print(string.format("DEBUG: %s %d has a long-distance trip, transitioning to GoToNetworkEntry", vehicle.type, vehicle.id))
+        
+        -- Transition to the state that handles getting TO the network.
+        vehicle:changeState(States.GoToNetworkEntry, game, { 
+            network_type = "highway", 
+            destination_map = "region",
+            destination_plot = trip.legs[#trip.legs].end_plot 
+        })
+        return
+    end
     
-    -- Since we removed is_long_distance from intra-city trips, 
-    -- all vehicles now use normal dropoff logic
+    -- If not long distance, proceed with normal local dropoff logic
     vehicle.path = PathfindingService.findPathToDropoff(vehicle, game)
     
     if not vehicle.path then
@@ -194,7 +205,7 @@ function States.GoToDropoff:enter(vehicle, game)
         return
     end
 
-    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
+    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle, game)
     print(string.format("DEBUG: %s %d path to dropoff: %d nodes, ETA: %.2fs", vehicle.type, vehicle.id, #vehicle.path, vehicle.current_path_eta))
 end
 
@@ -319,62 +330,119 @@ function States.DecideNextAction:enter(vehicle, game)
 end
 
 --------------------------------------------------------------------------------
--- State: Traveling Long Distance (Fixed - No Abstraction)
+-- State: GoToNetworkEntry (Generic)
 --------------------------------------------------------------------------------
-States.TravelingLongDistance = State:new()
-States.TravelingLongDistance.name = "Traveling (Region)"
-
-function States.TravelingLongDistance:enter(vehicle, game)
+States.GoToNetworkEntry = State:new()
+States.GoToNetworkEntry.name = "Going to Network Entry"
+function States.GoToNetworkEntry:enter(vehicle, game, params)
     local PathfindingService = require("services.PathfindingService")
-    
-    print(string.format("DEBUG: %s %d beginning long-distance travel (NO abstraction)", vehicle.type, vehicle.id))
-    
-    -- DON'T make the vehicle invisible - keep it visible on all zoom levels
-    -- vehicle.visible = false -- REMOVED
-    
-    local trip = vehicle.cargo[1]
-    if not trip then
-        print(string.format("DEBUG: %s %d: No trip in cargo for long distance travel!", vehicle.type, vehicle.id))
-        vehicle:changeState(States.DecideNextAction, game)
-        return
-    end
+    params = params or {}
+    local network_type = params.network_type or "highway"
 
-    print(string.format("DEBUG: %s %d long distance trip details - current_leg: %d, total_legs: %d", 
-          vehicle.type, vehicle.id, trip.current_leg, #trip.legs))
+    print(string.format("DEBUG: %s %d finding path to nearest '%s' entry.", vehicle.type, vehicle.id, network_type))
 
-    -- Instead of abstracted travel, find a real path to the destination
-    local current_leg = trip.legs[trip.current_leg]
-    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, current_leg.end_plot, game, game.maps.city)
+    -- In a real implementation, this would use a function like:
+    -- vehicle.path = PathfindingService.findPathToNearestTileOfType(vehicle, network_type, game)
+    -- For now, we will use the depot as a stand-in for the "highway entrance".
+    vehicle.path = PathfindingService.findPathToDepot(vehicle, game)
     
     if not vehicle.path then
-        print(string.format("DEBUG: %s %d failed to find long distance path, entering Stuck state", vehicle.type, vehicle.id))
         vehicle:changeState(States.Stuck, game)
         return
     end
-    
-    -- Calculate ETA normally
-    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
-    
-    print(string.format("DEBUG: %s %d long distance path: %d nodes, ETA: %.2fs", vehicle.type, vehicle.id, #vehicle.path, vehicle.current_path_eta))
-    
-    trip:freeze()
+
+    -- Store the parameters so we can pass them to the next state upon arrival.
+    vehicle.network_travel_params = params
 end
 
-function States.TravelingLongDistance:update(dt, vehicle, game)
-    -- Use normal movement logic instead of abstracted timer
+function States.GoToNetworkEntry:update(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then
-        print(string.format("DEBUG: %s %d completed long distance travel, changing to DoDropoff", vehicle.type, vehicle.id))
-        vehicle:changeState(States.DoDropoff, game)
+        -- Arrived at the network entry point. Now, begin the main journey.
+        vehicle:changeState(States.TravelingOnNetwork, game, vehicle.network_travel_params)
+        vehicle.network_travel_params = nil -- Clean up stored params
         return
     end
-    
-    -- Use the same movement logic as other travel states
     moveAlongPath(dt, vehicle, game)
 end
 
-function States.TravelingLongDistance:exit(vehicle, game)
-    -- No need to set visible = true since we never set it to false
-    print(string.format("DEBUG: %s %d finished long distance travel", vehicle.type, vehicle.id))
+--------------------------------------------------------------------------------
+-- State: TravelingOnNetwork (Generic)
+--------------------------------------------------------------------------------
+States.TravelingOnNetwork = State:new()
+States.TravelingOnNetwork.name = "Traveling on Network"
+function States.TravelingOnNetwork:enter(vehicle, game, params)
+    params = params or {}
+    local destination_map_key = params.destination_map or "region"
+    local destination_plot = params.destination_plot or vehicle.cargo[1].legs[#vehicle.cargo[1].legs].end_plot
+
+    print(string.format("DEBUG: %s %d entering '%s' network. Destination map: %s", 
+          vehicle.type, vehicle.id, params.network_type or "unknown", destination_map_key))
+
+    -- THE MAP SWITCH
+    vehicle.operational_map_key = destination_map_key
+    vehicle:recalculatePixelPosition(game)
+
+    -- Pathfind on the new network. This requires a way to find the "entry point" to the destination.
+    -- For now, we'll create a placeholder destination on the region map.
+    -- A real implementation would look up the region coordinates for the destination city.
+    local destination_on_network = { x = 150, y = 650 } -- Placeholder
+
+    local PathfindingService = require("services.PathfindingService")
+    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, destination_on_network, game)
+
+    if not vehicle.path then
+        print(string.format("ERROR: Could not find path on '%s' map!", destination_map_key))
+        vehicle:changeState(States.Stuck, game)
+        return
+    end
+
+    -- Store the final destination plot for when we exit the network
+    vehicle.final_destination_plot = destination_plot
+end
+
+function States.TravelingOnNetwork:update(dt, vehicle, game)
+    if not vehicle.path or #vehicle.path == 0 then
+        -- Arrived at the network exit point. Time to switch back to a local map.
+        vehicle:changeState(States.ExitingNetwork, game)
+        return
+    end
+    moveAlongPath(dt, vehicle, game)
+end
+
+--------------------------------------------------------------------------------
+-- State: ExitingNetwork (Generic)
+--------------------------------------------------------------------------------
+States.ExitingNetwork = State:new()
+States.ExitingNetwork.name = "Exiting Network"
+function States.ExitingNetwork:enter(vehicle, game)
+    print(string.format("DEBUG: %s %d is exiting network, returning to city logic.", vehicle.type, vehicle.id))
+
+    -- SWITCH BACK to the city map for final delivery.
+    vehicle.operational_map_key = "city"
+    vehicle:recalculatePixelPosition(game)
+    
+    local PathfindingService = require("services.PathfindingService")
+    
+    -- Use the stored final destination to find the path.
+    local final_plot = vehicle.final_destination_plot or vehicle.cargo[1].legs[#vehicle.cargo[1].legs].end_plot
+    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, final_plot, game)
+
+    if not vehicle.path then
+        vehicle:changeState(States.Stuck, game)
+        return
+    end
+
+    -- Clear the stored destination
+    vehicle.final_destination_plot = nil
+end
+
+function States.ExitingNetwork:update(dt, vehicle, game)
+     if not vehicle.path or #vehicle.path == 0 then
+        -- Arrived at the final destination.
+        vehicle:changeState(States.DoDropoff, game)
+        return
+    end
+    moveAlongPath(dt, vehicle, game)
 end
 
 --------------------------------------------------------------------------------

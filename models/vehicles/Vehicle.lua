@@ -15,7 +15,7 @@ function Vehicle:drawIconAt(game, px, py, icon)
     love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
 end
 
-function Vehicle:new(id, depot_plot, game, vehicleType, properties)
+function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_map_key)
     local States = require("models.vehicles.vehicle_states")
     
     local instance = setmetatable({}, Vehicle)
@@ -24,7 +24,12 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties)
     instance.type = vehicleType or "vehicle"
     instance.properties = properties or {}
     instance.depot_plot = depot_plot
-    instance.px, instance.py = game.maps.city:getPixelCoords(depot_plot.x, depot_plot.y)
+    
+    -- Vehicle now knows its operational map.
+    instance.operational_map_key = operational_map_key or "city"
+    local home_map = game.maps[instance.operational_map_key]
+
+    instance.px, instance.py = home_map:getPixelCoords(depot_plot.x, depot_plot.y)
     
     instance.trip_queue = {}
     instance.cargo = {}
@@ -41,24 +46,22 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties)
 end
 
 function Vehicle:recalculatePixelPosition(game)
-    -- This function now ONLY ever calculates position based on the city map,
-    -- ensuring self.px/py are always in a consistent coordinate system.
-    local city_map = game.maps.city
-    if city_map then
-        self.px, self.py = city_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
+    -- This function now uses the vehicle's operational_map_key to calculate its position.
+    local home_map = game.maps[self.operational_map_key]
+    if home_map then
+        self.px, self.py = home_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
     end
 end
 
 function Vehicle:_getRegionDrawPosition(game)
     local region_map = game.maps.region
-    local tile_size = region_map.C.MAP.TILE_SIZE -- Both maps use the same tile size
+    local tile_size = region_map.C.MAP.TILE_SIZE
 
     -- Get the region grid coordinates where the city map begins.
     local city_start_in_region_x = region_map.main_city_offset.x
     local city_start_in_region_y = region_map.main_city_offset.y
     
     -- Calculate the pixel coordinate of the top-left corner of the city's area within the region map.
-    -- We subtract 1 because grid coordinates are 1-based.
     local city_top_left_px_in_region = (city_start_in_region_x - 1) * tile_size
     local city_top_left_py_in_region = (city_start_in_region_y - 1) * tile_size
 
@@ -118,34 +121,67 @@ function Vehicle:_resolveOffScreenState(game)
 
         if state_name == "To Pickup" then
             self:changeState(States.DoPickup, game)
+            
         elseif state_name == "To Dropoff" then
             self:changeState(States.DoDropoff, game)
+            
         elseif state_name == "Returning" then
+            -- Check if we got new work while returning - if so, go to pickup instead
             if #self.trip_queue > 0 then
+                print(string.format("Vehicle %d got new work while returning, switching to pickup", self.id))
                 self:changeState(States.GoToPickup, game)
             else
+                -- No new work, arrived back at depot, go idle
                 self:changeState(States.Idle, game)
             end
-        elseif state_name == "Picking Up" or state_name == "Dropping Off" or state_name == "Deciding" then
-            -- These states transition automatically in their enter methods
+            
+        elseif state_name == "Picking Up" then
+            -- The DoPickup state's enter method handles the logic and transitions automatically
+            -- No need to call enter again, it was already called by changeState
+            print(string.format("Vehicle %d completed pickup, should be in new state: %s", self.id, self.state.name))
+            
+        elseif state_name == "Dropping Off" then
+            -- The DoDropoff state's enter method handles the logic and transitions automatically
+            -- No need to call enter again, it was already called by changeState
+            print(string.format("Vehicle %d completed dropoff, should be in new state: %s", self.id, self.state.name))
+            
+        elseif state_name == "Deciding" then
+            -- The DecideNextAction state's enter method handles the logic and transitions automatically
+            print(string.format("Vehicle %d completed decision, should be in new state: %s", self.id, self.state.name))
+            
         elseif state_name == "Idle" then
+            -- Check if we have new work to do
             if #self.trip_queue > 0 then
                 self:changeState(States.GoToPickup, game)
             else
+                -- Truly idle, no more state changes needed
+                print(string.format("Vehicle %d is truly idle with no work", self.id))
                 break
             end
+            
         else
+            -- Vehicle is in a travel state or unknown state, stop resolving
+            print(string.format("Vehicle %d in travel/final state: %s", self.id, state_name))
             break
         end
         
         iterations = iterations + 1
+        
+        -- If state didn't change, we're stuck - break out
         if self.state.name == old_state then
+            print(string.format("WARNING: Vehicle %d state didn't change from %s, breaking loop", self.id, old_state))
             break
         end
+        
+        -- If we're now in a travel state, we're done.
+        -- Updated this check to include the new highway states.
         if self.state.name == "To Pickup" or 
            self.state.name == "To Dropoff" or 
            self.state.name == "Returning" or
-           self.state.name == "Traveling (Region)" then
+           self.state.name == "To Highway" or
+           self.state.name == "On Highway" or
+           self.state.name == "Exiting Highway" then
+            print(string.format("Vehicle %d reached travel state: %s", self.id, self.state.name))
             break
         end
     end
@@ -156,14 +192,15 @@ function Vehicle:_resolveOffScreenState(game)
 end
 
 function Vehicle:update(dt, game)
-    local current_scale = game.state.current_map_scale
-    local C_MAP = game.C.MAP
-    
+    -- This special check is now obsolete. The logic below handles all states correctly.
+    --[[
     if self.state and self.state.name == "Traveling (Region)" then
         self.state:update(dt, self, game)
         return
     end
+    ]]
 
+    -- Determine if this vehicle should run in detailed or abstracted mode
     local should_abstract = self:shouldUseAbstractedSimulation(game)
     
     if should_abstract then
@@ -295,14 +332,20 @@ function Vehicle:draw(game)
     if not self.visible then return end
 
     local draw_px, draw_py
-    local current_scale = game.state.current_map_scale
+    local active_map_key = game.active_map_key
 
-    if current_scale == game.C.MAP.SCALES.REGION then
-        -- On the region map, transform city-world coordinates to region-world coordinates for drawing.
-        draw_px, draw_py = self:_getRegionDrawPosition(game)
-    else
-        -- On city/downtown maps, the vehicle's internal px/py are already correct.
+    if self.operational_map_key == active_map_key then
+        -- The vehicle lives on the map we're currently viewing. Draw it at its native position.
         draw_px, draw_py = self.px, self.py
+    else
+        -- We are viewing a vehicle on a different map (e.g., a city truck on the region map).
+        if self.operational_map_key == "city" and active_map_key == "region" then
+            draw_px, draw_py = self:_getRegionDrawPosition(game)
+        else
+            -- Placeholder for future cases (e.g., drawing a region-based train on a city map)
+            -- For now, we just use its default position to avoid errors.
+            draw_px, draw_py = self.px, self.py
+        end
     end
 
     -- Draw selection circle
@@ -314,7 +357,7 @@ function Vehicle:draw(game)
         love.graphics.setLineWidth(1)
     end
     
-    -- Draw the vehicle's icon at the correct position
+    -- Draw the vehicle's icon at the correct, calculated position
     self:drawIconAt(game, draw_px, draw_py, self.type == "bike" and "🚲" or "🚚")
 end
 
