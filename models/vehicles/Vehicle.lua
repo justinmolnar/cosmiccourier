@@ -42,11 +42,68 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties)
 end
 
 function Vehicle:recalculatePixelPosition(game)
-    -- MODIFIED: Get coordinates from the active map
+    local current_scale = game.state.current_map_scale
     local active_map = game.maps[game.active_map_key]
-    if active_map then
-        self.px, self.py = active_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
+    
+    print(string.format("DEBUG: Vehicle %d recalculatePixelPosition called - scale: %d, active_map_key: %s", 
+          self.id, current_scale, game.active_map_key))
+    
+    if current_scale == game.C.MAP.SCALES.REGION then
+        print(string.format("DEBUG: Vehicle %d using region position calculation", self.id))
+        -- At region scale, we need to transform coordinates from city space to region space
+        self:_calculateRegionPosition(game)
+    else
+        print(string.format("DEBUG: Vehicle %d using normal position calculation", self.id))
+        -- At city/downtown scale, use the active map directly
+        if active_map then
+            self.px, self.py = active_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
+            print(string.format("DEBUG: Vehicle %d normal pixels: (%.1f, %.1f)", self.id, self.px, self.py))
+        end
     end
+end
+
+function Vehicle:_calculateRegionPosition(game)
+    local C_MAP = game.C.MAP
+    local region_map = game.maps.region
+    
+    -- Get the vehicle's grid position in city coordinates (relative to city map 0,0)
+    local city_grid_x = self.grid_anchor.x
+    local city_grid_y = self.grid_anchor.y
+    
+    -- Use the stored main city offset from when the region was generated
+    local city_start_in_region_x = region_map.main_city_offset.x
+    local city_start_in_region_y = region_map.main_city_offset.y
+    
+    -- Transform the vehicle's city grid position to region grid position
+    local region_grid_x = city_start_in_region_x + city_grid_x
+    local region_grid_y = city_start_in_region_y + city_grid_y
+    
+    -- Convert region grid coordinates to pixel coordinates
+    self.px = (region_grid_x - 0.5) * C_MAP.TILE_SIZE
+    self.py = (region_grid_y - 0.5) * C_MAP.TILE_SIZE
+    
+    -- DEBUG OUTPUT
+    print(string.format("DEBUG: Vehicle %d DYNAMIC position transformation:", self.id))
+    print(string.format("  City grid (relative to city 0,0): (%d, %d)", city_grid_x, city_grid_y))
+    print(string.format("  City starts at region grid: (%.1f, %.1f)", city_start_in_region_x, city_start_in_region_y))
+    print(string.format("  Final region grid: (%.1f, %.1f)", region_grid_x, region_grid_y))
+    print(string.format("  Final pixels: (%.1f, %.1f)", self.px, self.py))
+end
+
+function Vehicle:shouldDrawAtCurrentScale(game)
+    local current_scale = game.state.current_map_scale
+    local C_MAP = game.C.MAP
+    
+    if self.type == "bike" then
+        -- Bikes only show at downtown and city scales
+        return current_scale == C_MAP.SCALES.DOWNTOWN or current_scale == C_MAP.SCALES.CITY
+    elseif self.type == "truck" then
+        -- Trucks show at all scales
+        return true
+    end
+    
+    -- Default: show at all scales
+    return true
 end
 
 function Vehicle:changeState(newState, game)
@@ -151,37 +208,37 @@ function Vehicle:_resolveOffScreenState(game)
 end
 
 function Vehicle:update(dt, game)
+    local current_scale = game.state.current_map_scale
+    local C_MAP = game.C.MAP
+    
     -- If the vehicle is on a special long-distance trip, let its state handle it.
     if self.state and self.state.name == "Traveling (Region)" then
         self.state:update(dt, self, game)
         return
     end
 
-    -- If the player is watching the city, run the full, detailed simulation.
-    if game.active_map_key == "city" then
-        if self.state and self.state.update then
-            self.state:update(dt, self, game)
-        end
-        return
+    -- Determine if this vehicle should run in detailed or abstracted mode
+    local should_abstract = self:shouldUseAbstractedSimulation(game)
+    
+    if should_abstract then
+        self:updateAbstracted(dt, game)
+    else
+        self:updateDetailed(dt, game)
     end
+end
 
-    -- ABSTRACTED MODE: We reach here when player is zoomed out
-    
-    -- FIX: For now, trucks should always run in detailed mode regardless of zoom level
-    -- This is temporary until we implement proper truck abstraction
-    if self.type == "truck" then
-        print(string.format("DEBUG: Truck %d running in detailed mode despite zoom level %d", self.id, game.state.current_map_scale))
-        if self.state and self.state.update then
-            self.state:update(dt, self, game)
-        end
-        return
+function Vehicle:updateDetailed(dt, game)
+    -- Run the full, detailed simulation
+    if self.state and self.state.update then
+        self.state:update(dt, self, game)
     end
+end
+
+function Vehicle:updateAbstracted(dt, game)
+    -- Simplified simulation for abstracted vehicles
     
-    -- ABSTRACTED MODE continues for bikes only...
-    
-    -- FIX 1: Handle vehicles that don't have a path (idle, or in instantaneous states)
+    -- Handle vehicles that don't have a path (idle, or in instantaneous states)
     if not self.current_path_eta or self.current_path_eta <= 0 then
-        -- If vehicle has no active journey, check if it needs to start one
         if not self.current_path_eta then
             -- Vehicle is in an instantaneous state - resolve it immediately
             if self.state and (self.state.name == "Picking Up" or 
@@ -190,37 +247,40 @@ function Vehicle:update(dt, game)
                 self:_resolveOffScreenState(game)
                 -- After resolving, set up the new ETA if there's a path
                 if self.path and #self.path > 0 then
-                    self.current_path_eta = require("services.PathfindingService").estimatePathTravelTime(self.path, self, game, game.maps.city)
+                    local PathfindingService = require("services.PathfindingService")
+                    self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
                 end
-            -- FIX 2: Handle idle vehicles that get new assignments
             elseif self.state and self.state.name == "Idle" and #self.trip_queue > 0 then
                 -- Trigger the state change to start working
-                self:changeState(require("models.vehicles.vehicle_states").GoToPickup, game)
+                local States = require("models.vehicles.vehicle_states")
+                self:changeState(States.GoToPickup, game)
                 -- Set up ETA for the new journey
                 if self.path and #self.path > 0 then
-                    self.current_path_eta = require("services.PathfindingService").estimatePathTravelTime(self.path, self, game, game.maps.city)
+                    local PathfindingService = require("services.PathfindingService")
+                    self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
                 end
             end
         end
         return
     end
 
-    -- FIX 2.5: Handle vehicles that are traveling but get new assignments
-    -- This covers the case where a vehicle is returning to depot but gets new work
+    -- Handle vehicles that are traveling but get new assignments
     if self.current_path_eta and self.current_path_eta > 0 then
         if self.state and self.state.name == "Returning" and #self.trip_queue > 0 then
             print(string.format("Vehicle %d canceling return journey to take new assignment", self.id))
             -- Cancel the return journey and go directly to pickup
-            self:changeState(require("models.vehicles.vehicle_states").GoToPickup, game)
+            local States = require("models.vehicles.vehicle_states")
+            self:changeState(States.GoToPickup, game)
             -- Set up ETA for the new pickup journey
             if self.path and #self.path > 0 then
-                self.current_path_eta = require("services.PathfindingService").estimatePathTravelTime(self.path, self, game, game.maps.city)
+                local PathfindingService = require("services.PathfindingService")
+                self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
             end
-            return -- Exit early since we've started a new journey
+            return
         end
     end
 
-    -- FIX 3: Continue with existing travel simulation
+    -- Continue with existing travel simulation
     self.current_path_eta = self.current_path_eta - dt
 
     if self.current_path_eta <= 0 then
@@ -234,14 +294,15 @@ function Vehicle:update(dt, game)
                   self.id, self.grid_anchor.x, self.grid_anchor.y))
         end
 
-        -- FIX 4: Resolve all instantaneous state changes
+        -- Resolve all instantaneous state changes
         self:_resolveOffScreenState(game)
         
         -- After all actions are resolved, get the ETA for the new path.
         if self.path and #self.path > 0 then
-            self.current_path_eta = require("services.PathfindingService").estimatePathTravelTime(self.path, self, game, game.maps.city)
+            local PathfindingService = require("services.PathfindingService")
+            self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
         else
-            self.current_path_eta = nil -- FIX 5: Clear ETA when no path
+            self.current_path_eta = nil
         end
         
         print(string.format("Vehicle %d finished abstracted action chain. New state: %s. New ETA: %.2f", 
@@ -249,9 +310,26 @@ function Vehicle:update(dt, game)
     end
 end
 
+
+
 function Vehicle:isAvailable(game)
     local total_load = #self.trip_queue + #self.cargo
     return total_load < game.state.upgrades.vehicle_capacity
+end
+
+function Vehicle:shouldUseAbstractedSimulation(game)
+    local current_scale = game.state.current_map_scale
+    local C_MAP = game.C.MAP
+    
+    -- Bikes are abstracted when player is viewing region scale
+    if self.type == "bike" and current_scale == C_MAP.SCALES.REGION then
+        return true
+    end
+    
+    -- Trucks always run detailed simulation (for now)
+    -- In the future, you might want to abstract trucks at planetary scale
+    
+    return false
 end
 
 function Vehicle:drawDebug(game)
@@ -300,17 +378,30 @@ function Vehicle:drawDebug(game)
 end
 
 function Vehicle:draw(game)
-    local should_draw = false
+    -- Check if this vehicle should be drawn at the current scale
+    if not self:shouldDrawAtCurrentScale(game) then
+        return
+    end
+    
     local current_scale = game.state.current_map_scale
     
-    -- Only draw vehicles at downtown and city scales
-    -- At region scale, neither bikes nor trucks should be visible
-    if current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
-        should_draw = true
-    end
-
-    if not should_draw then
+    -- Handle abstracted drawing for bikes at region level
+    if self.type == "bike" and current_scale == game.C.MAP.SCALES.REGION then
+        -- Bikes are abstracted at region level - don't draw them
         return
+    end
+    
+    -- Continue with normal drawing for visible vehicles
+    if not self.visible then
+        return
+    end
+    
+    -- DEBUG: Print camera and vehicle info
+    if current_scale == game.C.MAP.SCALES.REGION then
+        print(string.format("DEBUG: Drawing vehicle %d at scale %d", self.id, current_scale))
+        print(string.format("  Vehicle pixels: (%.1f, %.1f)", self.px, self.py))
+        print(string.format("  Camera: x=%.1f, y=%.1f, scale=%.3f", game.camera.x, game.camera.y, game.camera.scale))
+        print(string.format("  Active map key: %s", game.active_map_key))
     end
 
     -- Draw selection circle

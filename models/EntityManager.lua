@@ -17,13 +17,17 @@ function Entities:new()
         game.EventBus:subscribe("map_scale_changed", function()
             print("Map scale changed! Recalculating all entity positions...")
             
-            for _, vehicle in ipairs(instance.vehicles) do
+            print(string.format("DEBUG: Found %d vehicles to recalculate", #game.entities.vehicles))
+            for i, vehicle in ipairs(game.entities.vehicles) do
+                print(string.format("DEBUG: Recalculating vehicle %d (type: %s)", vehicle.id, vehicle.type))
                 if vehicle.recalculatePixelPosition then
                     vehicle:recalculatePixelPosition(game)
+                else
+                    print(string.format("ERROR: Vehicle %d has no recalculatePixelPosition method!", vehicle.id))
                 end
             end
-    
-            for _, client in ipairs(instance.clients) do
+
+            for _, client in ipairs(game.entities.clients) do
                 if client.recalculatePixelPosition then
                     client:recalculatePixelPosition(game)
                 end

@@ -23,6 +23,10 @@ function VehicleFactory.createVehicle(vehicleType, id, depot_plot, game)
     end
     
     local vehicle = VehicleClass:new(id, depot_plot, game)
+    
+    -- IMPORTANT: Recalculate position for the current map scale
+    vehicle:recalculatePixelPosition(game)
+    
     print("VehicleFactory: Created " .. vehicleType .. " #" .. id)
     
     return vehicle
