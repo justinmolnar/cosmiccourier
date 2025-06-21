@@ -27,7 +27,6 @@ function Truck:new(id, depot_plot, game)
 
     -- A truck starts at the same depot as a bike. Its anchor should be the
     -- road tile nearest to the main depot plot.
-    -- MODIFIED: Use game.maps.city
     local depot_road_anchor = game.maps.city:findNearestRoadTile(depot_plot)
     if depot_road_anchor then
         instance.grid_anchor = depot_road_anchor
@@ -42,19 +41,7 @@ function Truck:new(id, depot_plot, game)
     return instance
 end
 
-function Truck:recalculatePixelPosition(game)
-    -- MODIFIED: This function is now identical to the base vehicle's function.
-    -- The camera handles all visual scaling, so no special logic is needed here.
-    local active_map = game.maps[game.active_map_key]
-    if active_map then
-        self.px, self.py = active_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
-    end
-end
-
--- Override the draw method for trucks
-function Truck:draw(game)
-    Vehicle.draw(self, game)
-    self:drawIcon(game, "🚚")
-end
+-- The recalculatePixelPosition and draw methods have been removed from this file.
+-- The correct methods will be inherited from Vehicle.lua.
 
 return Truck

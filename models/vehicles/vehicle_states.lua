@@ -10,11 +10,14 @@ local States = {}
 function moveAlongPath(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then return end
 
-    local active_map = game.maps[game.active_map_key]
-    if not active_map then return end
+    -- THE FIX: Hardcode the map to 'city' since all pathfinding is done on the city grid.
+    -- This prevents the truck from using the 'region' map's coordinates when zoomed out.
+    local map_for_pathing = game.maps.city
+    if not map_for_pathing then return end
 
     local target_node = vehicle.path[1]
-    local target_px, target_py = active_map:getPixelCoords(target_node.x, target_node.y)
+    -- Use the corrected map reference here.
+    local target_px, target_py = map_for_pathing:getPixelCoords(target_node.x, target_node.y)
 
     local angle = math.atan2(target_py - vehicle.py, target_px - vehicle.px)
 

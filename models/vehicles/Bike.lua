@@ -28,10 +28,7 @@ function Bike:new(id, depot_plot, game)
     return instance
 end
 
--- Override the draw method for bikes
-function Bike:draw(game)
-    Vehicle.draw(self, game)
-    self:drawIcon(game, "🚲")
-end
+-- The draw method has been removed from this file.
+-- The correct draw method will be inherited from Vehicle.lua.
 
 return Bike

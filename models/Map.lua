@@ -54,7 +54,6 @@ local function getTileColor(tile_type, is_in_downtown, C_MAP)
             return C_MAP.COLORS.DOWNTOWN_PLOT
         end
     else
-        -- MODIFIED: Added cases for water and mountain tiles
         if tile_type == "road" or tile_type == "downtown_road" or 
            tile_type == "arterial" or tile_type == "highway" or 
            tile_type == "highway_ring" or tile_type == "highway_ns" or 
@@ -140,12 +139,10 @@ end
 function Map:setScale(new_scale)
     if not self.C.MAP.SCALE_NAMES[new_scale] then return false end
 
-    -- Get the map instance that corresponds to the new scale
     local target_map_key = (new_scale == self.C.MAP.SCALES.REGION) and "region" or "city"
     local target_map = Game.maps[target_map_key]
     Game.active_map_key = target_map_key
     
-    -- MODIFIED: Set the single source of truth for the game's scale
     Game.state.current_map_scale = new_scale
     
     local screen_w, screen_h = love.graphics.getDimensions()
@@ -240,6 +237,11 @@ end
 -- == PUBLIC API METHODS
 -- =============================================================================
 
+function Map:pixelToGrid(pixel_x, pixel_y)
+    local TILE_SIZE = self.C.MAP.TILE_SIZE
+    return math.floor(pixel_x / TILE_SIZE + 0.5), math.floor(pixel_y / TILE_SIZE + 0.5)
+end
+
 function Map:getRandomCityBuildingPlot()
     local city_plots = {}
     local x_min = self.downtown_offset.x
@@ -286,7 +288,6 @@ function Map:generateRegion()
 end
 
 function Map:getScaleName() 
-    -- MODIFIED: Read the scale from the global game state to ensure it's always correct.
     return self.C.MAP.SCALE_NAMES[Game.state.current_map_scale] or "Unknown Scale" 
 end
 
