@@ -90,16 +90,24 @@ function EventService.setupZoomEvents(state, game)
     end)
 
     game.EventBus:subscribe("ui_zoom_out_clicked", function()
-        if state.metro_license_unlocked and game.map:getCurrentScale() == game.C.MAP.SCALES.DOWNTOWN then
-            game.map:setScale(game.C.MAP.SCALES.CITY)
-            print("Zoomed out to city view")
+        local current_scale = game.state.current_map_scale
+        local city_map = game.maps.city
+
+        if current_scale == game.C.MAP.SCALES.DOWNTOWN then
+            city_map:setScale(game.C.MAP.SCALES.CITY)
+        elseif current_scale == game.C.MAP.SCALES.CITY then
+            city_map:setScale(game.C.MAP.SCALES.REGION)
         end
     end)
 
     game.EventBus:subscribe("ui_zoom_in_clicked", function()
-        if game.map:getCurrentScale() == game.C.MAP.SCALES.CITY then
-            game.map:setScale(game.C.MAP.SCALES.DOWNTOWN)
-            print("Zoomed in to downtown view")
+        local current_scale = game.state.current_map_scale
+        local city_map = game.maps.city
+        
+        if current_scale == game.C.MAP.SCALES.REGION then
+            city_map:setScale(game.C.MAP.SCALES.CITY)
+        elseif current_scale == game.C.MAP.SCALES.CITY then
+            city_map:setScale(game.C.MAP.SCALES.DOWNTOWN)
         end
     end)
 end

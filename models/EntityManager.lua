@@ -35,13 +35,15 @@ function Entities:new()
 end
 
 function Entities:init(game)
+    -- MODIFIED: Use game.maps.city to find the depot plot
+    self.depot_plot = game.maps.city:getRandomDowntownBuildingPlot()
     self:addClient(game)
-    self.depot_plot = game.map:getRandomDowntownBuildingPlot()
     self:addVehicle(game, "bike")
 end
 
 function Entities:addClient(game)
-    local client_plot = game.map:getRandomDowntownBuildingPlot()
+    -- MODIFIED: Use game.maps.city to find a plot for the client
+    local client_plot = game.maps.city:getRandomDowntownBuildingPlot()
     if client_plot then
         local new_client = Client:new(client_plot, game)
         table.insert(self.clients, new_client)

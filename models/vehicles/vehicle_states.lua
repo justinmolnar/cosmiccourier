@@ -10,8 +10,11 @@ local States = {}
 function moveAlongPath(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then return end
 
+    local active_map = game.maps[game.active_map_key]
+    if not active_map then return end
+
     local target_node = vehicle.path[1]
-    local target_px, target_py = game.map:getPixelCoords(target_node.x, target_node.y)
+    local target_px, target_py = active_map:getPixelCoords(target_node.x, target_node.y)
 
     local angle = math.atan2(target_py - vehicle.py, target_px - vehicle.px)
 
@@ -203,6 +206,8 @@ function States.DoDropoff:enter(vehicle, game)
     local trip_index_to_remove = nil
     
     local current_pos = vehicle.grid_anchor
+    local active_map = game.maps[game.active_map_key]
+    if not active_map then return end
     
     for i, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
@@ -210,9 +215,9 @@ function States.DoDropoff:enter(vehicle, game)
 
         -- Determine which grid to use for finding the destination
         if leg.vehicleType == "bike" then
-            destination_road_tile = game.map:findNearestDowntownRoadTile(leg.end_plot)
+            destination_road_tile = active_map:findNearestRoadTile(leg.end_plot)
         else -- For trucks and future vehicles, use the city-scale finder
-            destination_road_tile = game.map:findNearestRoadTile(leg.end_plot)
+            destination_road_tile = active_map:findNearestRoadTile(leg.end_plot)
         end
 
         if destination_road_tile and current_pos.x == destination_road_tile.x and current_pos.y == destination_road_tile.y then

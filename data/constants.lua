@@ -28,6 +28,10 @@ local C = {
     -- City scale (much larger area)
     CITY_GRID_WIDTH      = 372,
     CITY_GRID_HEIGHT     = 270,
+
+    -- Region scale (NEW)
+    REGION_GRID_WIDTH    = 1024,
+    REGION_GRID_HEIGHT   = 768,
     
     TILE_SIZE            = 2,
     NUM_SECONDARY_ROADS  = 100, -- Increased from 40 to make downtown denser
@@ -45,18 +49,18 @@ local C = {
     },
 
     SCALES = {
-        DOWNTOWN = 1,
-        CITY = 2,
-        REGION = 3,
-        PLANET = 4,
-    },
+            DOWNTOWN = 1,
+            CITY = 2,
+            REGION = 3,
+            PLANET = 4,
+        },
 
     SCALE_NAMES = {
-        [1] = "Downtown Core",
-        [2] = "Metropolitan Area", 
-        [3] = "Regional Network",
-        [4] = "Planetary Grid",
-    },
+            [1] = "Downtown Core",
+            [2] = "Metropolitan Area", 
+            [3] = "Regional Network",
+            [4] = "Planetary Grid",
+        },
 },
 
     GAMEPLAY = {
@@ -78,8 +82,8 @@ local C = {
     },
 
     ZOOM = {
-        BUTTONS_APPEAR_THRESHOLD = 75000,
-        PRICE_REVEAL_THRESHOLD   = 90000,
+        BUTTONS_APPEAR_THRESHOLD = 25000,
+        PRICE_REVEAL_THRESHOLD   = 45000,
         METRO_LICENSE_COST       = 50000,
         ZOOM_BUTTON_SIZE         = 30,
         ZOOM_BUTTON_MARGIN       = 10,

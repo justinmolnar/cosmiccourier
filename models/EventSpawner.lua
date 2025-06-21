@@ -25,13 +25,16 @@ function EventSpawner:update(dt, game)
     -- If no clickable is active, count down to the next one.
     self.spawn_timer = self.spawn_timer - dt
     if self.spawn_timer <= 0 then
-        -- *** FIX: Calculate spawn area based on the CURRENT map dimensions, not old constants ***
-        local current_grid = game.map.grid
-        if not current_grid or #current_grid == 0 then return end -- Safety check
+        -- MODIFIED: Get grid and tile size from the active map
+        local active_map = game.maps[game.active_map_key]
+        if not active_map then return end
+        
+        local current_grid = active_map.grid
+        if not current_grid or #current_grid == 0 then return end
 
         local grid_w = #current_grid[1]
         local grid_h = #current_grid
-        local tile_size = game.map:getCurrentTileSize()
+        local tile_size = active_map:getCurrentTileSize()
 
         local map_w_pixels = grid_w * tile_size
         local map_h_pixels = grid_h * tile_size

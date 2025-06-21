@@ -26,7 +26,8 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties)
     instance.type = vehicleType or "vehicle"
     instance.properties = properties or {}
     instance.depot_plot = depot_plot
-    instance.px, instance.py = game.map:getPixelCoords(depot_plot.x, depot_plot.y)
+    -- CORRECTED: The typo 'depot_ot.y' has been fixed to 'depot_plot.y'
+    instance.px, instance.py = game.maps.city:getPixelCoords(depot_plot.x, depot_plot.y)
     
     instance.trip_queue = {} -- Trips assigned, but not yet picked up
     instance.cargo = {}      -- Trips picked up and currently being delivered
@@ -41,7 +42,11 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties)
 end
 
 function Vehicle:recalculatePixelPosition(game)
-    self.px, self.py = game.map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
+    -- MODIFIED: Get coordinates from the active map
+    local active_map = game.maps[game.active_map_key]
+    if active_map then
+        self.px, self.py = active_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
+    end
 end
 
 function Vehicle:changeState(newState, game)
@@ -111,7 +116,8 @@ end
 
 function Vehicle:draw(game)
     local should_draw = false
-    local current_scale = game.map:getCurrentScale()
+    -- MODIFIED: Read scale from the global game state
+    local current_scale = game.state.current_map_scale
     
     -- This generic draw logic can be simplified or specialized in subclasses
     if current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then

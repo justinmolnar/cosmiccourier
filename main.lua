@@ -42,7 +42,12 @@ function love.load()
         EventBus = require("core.event_bus"),
         state = nil,
         time = require("core.time"):new(),
-        map = require("models.Map"):new(C),
+        -- MODIFIED: From 'map' to 'maps' to hold multiple map instances
+        maps = {
+            city = require("models.Map"):new(C),
+            region = require("models.Map"):new(C) -- Add a map for the region view
+        },
+        active_map_key = "city", -- The key of the map currently being viewed/simulated
         entities = require("models.EntityManager"):new(),
         autodispatcher = require("models.AutoDispatcher"):new(C),
         event_spawner = require("models.EventSpawner"):new(C),
@@ -78,12 +83,13 @@ function love.load()
     Game.entities.event_bus_listener_setup(Game)
 
     Game.game_controller = GameController:new(Game)
-    Game.input_controller = InputController:new(Game) -- This now includes debug menu
+    Game.input_controller = InputController:new(Game)
     Game.game_view = GameView:new(Game)
     Game.ui_view = UIView:new(Game)
 
+    -- MODIFIED: Generate the city map specifically
     ErrorService.withErrorHandling(function()
-        Game.map:generate()
+        Game.maps.city:generate()
     end, "Map Generation")
     
     Game.entities:init(Game)
@@ -109,7 +115,8 @@ function love.load()
         love.graphics.setFont(Game.fonts.ui)
     end, "Font Loading")
     
-    Game.map:setScale(C.MAP.SCALES.DOWNTOWN)
+    -- MODIFIED: Set the initial scale on the city map
+    Game.maps.city:setScale(C.MAP.SCALES.DOWNTOWN)
     
     -- Set up auto-save timer
     local auto_save_interval = GameConfig.get("ui", "auto_save_interval")

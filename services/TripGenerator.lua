@@ -41,7 +41,8 @@ end
 function TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
     local C_GAMEPLAY = game.C.GAMEPLAY
     
-    local city_plot = game.map:getRandomCityBuildingPlot()
+    -- MODIFIED: Use game.maps.city
+    local city_plot = game.maps.city:getRandomCityBuildingPlot()
     if not city_plot then
         return nil
     end
@@ -58,7 +59,8 @@ function TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, ga
 end
 
 function TripGenerator._createLocalTrip(client_plot, base_payout, speed_bonus, game)
-    local end_plot = game.map:getRandomDowntownBuildingPlot()
+    -- MODIFIED: Use game.maps.city
+    local end_plot = game.maps.city:getRandomDowntownBuildingPlot()
     if not end_plot then
         return nil
     end

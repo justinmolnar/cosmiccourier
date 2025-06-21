@@ -3,7 +3,7 @@
 
 local Districts = {}
 
-function Districts.generateAll(grid, map_w, map_h, downtown_district, map, params)
+function Districts.generateAll(grid, map_w, map_h, downtown_district, params)
     local all_districts = {}
     
     -- 1. The downtown district is already generated, so we just add its definition to our list.

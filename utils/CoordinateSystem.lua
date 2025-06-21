@@ -47,24 +47,6 @@ function CoordinateSystem:worldToScreen(world_x, world_y, camera)
     return screen_x, screen_y
 end
 
--- Scale-aware conversions
-function CoordinateSystem:getDowntownPixelCoords(grid_x, grid_y, current_scale, downtown_offset)
-    if current_scale == self.C.MAP.SCALES.DOWNTOWN then
-        local DOWNTOWN_TILE_SIZE = 16
-        return (grid_x - 0.5) * DOWNTOWN_TILE_SIZE, (grid_y - 0.5) * DOWNTOWN_TILE_SIZE
-    else
-        return self:gridToPixel(grid_x, grid_y)
-    end
-end
-
-function CoordinateSystem:getCurrentTileSize(current_scale)
-    if current_scale == self.C.MAP.SCALES.DOWNTOWN then
-        return 16
-    else
-        return self.C.MAP.TILE_SIZE
-    end
-end
-
 -- Distance calculations
 function CoordinateSystem:gridDistance(x1, y1, x2, y2)
     return math.sqrt((x2 - x1)^2 + (y2 - y1)^2)

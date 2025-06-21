@@ -6,15 +6,21 @@ function PathfindingService.findVehiclePath(vehicle, start_plot, end_plot, game)
         print(string.format("ERROR: PathfindingService - Invalid plots for %s %d", vehicle.type, vehicle.id))
         return nil
     end
+
+    local active_map = game.maps[game.active_map_key]
+    if not active_map then
+        print(string.format("ERROR: PathfindingService - No active map for %s %d", vehicle.type, vehicle.id))
+        return nil
+    end
     
-    local path_grid = game.map.grid
+    local path_grid = active_map.grid
     if not path_grid then
         print(string.format("ERROR: PathfindingService - No map grid available for %s %d", vehicle.type, vehicle.id))
         return nil
     end
     
-    local start_node = game.map:findNearestRoadTile(start_plot)
-    local end_node = game.map:findNearestRoadTile(end_plot)
+    local start_node = active_map:findNearestRoadTile(start_plot)
+    local end_node = active_map:findNearestRoadTile(end_plot)
     
     if not start_node then
         print(string.format("ERROR: PathfindingService - No road near start for %s %d", vehicle.type, vehicle.id))
@@ -26,7 +32,6 @@ function PathfindingService.findVehiclePath(vehicle, start_plot, end_plot, game)
         return nil
     end
     
-    -- Same start and end, no path needed
     if start_node.x == end_node.x and start_node.y == end_node.y then
         return {}
     end
@@ -37,14 +42,13 @@ function PathfindingService.findVehiclePath(vehicle, start_plot, end_plot, game)
         return nil
     end
     
-    local path = game.pathfinder.findPath(path_grid, start_node, end_node, costs, game.map)
+    local path = game.pathfinder.findPath(path_grid, start_node, end_node, costs, active_map)
     
     if not path then
         print(string.format("ERROR: PathfindingService - No path found for %s %d", vehicle.type, vehicle.id))
         return nil
     end
     
-    -- Remove the first node since we're already there
     if #path > 0 then
         table.remove(path, 1)
     end

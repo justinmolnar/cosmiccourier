@@ -46,8 +46,12 @@ function GameController:update(dt)
         self.game.time:update(scaled_dt, self.game)
     end, "Time System Update")
     
+    -- MODIFIED: Update the active map
     self.game.error_service.withErrorHandling(function()
-        self.game.map:update(scaled_dt)
+        local active_map = self.game.maps[self.game.active_map_key]
+        if active_map then
+            active_map:update(scaled_dt)
+        end
     end, "Map Update")
     
     self.game.error_service.withErrorHandling(function()
@@ -111,8 +115,8 @@ function GameController:updatePerformanceStats(dt)
 end
 
 function GameController:checkCriticalErrors()
-    -- Check for critical game state issues
-    if not self.game.map or not self.game.entities or not self.game.state then
+    -- MODIFIED: Check for the maps table instead of a single map
+    if not self.game.maps or not self.game.entities or not self.game.state then
         self.game.error_service.logError("GameController", "Critical game components missing!")
         self:pauseGame()
         return
@@ -193,9 +197,13 @@ function GameController:emergencyReset()
         collectgarbage("collect")
         
         -- Reinitialize critical systems if needed
-        if not self.game.map then
-            self.game.map = require("models.Map"):new(self.game.C)
-            self.game.map:generate()
+        -- MODIFIED: Check the maps table
+        if not self.game.maps then
+            self.game.maps = {
+                city = require("models.Map"):new(self.game.C),
+                region = require("models.Map"):new(self.game.C)
+            }
+            self.game.maps.city:generate()
         end
         
         if not self.game.entities then
@@ -263,13 +271,14 @@ end
 
 -- Get current game statistics
 function GameController:getGameStats()
+    local active_map = self.game.maps[self.game.active_map_key]
     local stats = {
         money = self.game.state.money,
         vehicles = #self.game.entities.vehicles,
         clients = #self.game.entities.clients,
         pending_trips = #self.game.entities.trips.pending,
-        current_scale = self.game.map:getCurrentScale(),
-        scale_name = self.game.map:getScaleName(),
+        current_scale = self.game.state.current_map_scale,
+        scale_name = active_map:getScaleName(),
         time_played = self.game.time.total_time or 0,
         rush_hour_active = self.game.state.rush_hour.active,
     }

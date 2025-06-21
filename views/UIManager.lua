@@ -123,13 +123,15 @@ end
 
 function UIManager:_calculateAccordionStats(game)
     local state = game.state
-    local is_downtown = game.map:getCurrentScale() == game.C.MAP.SCALES.DOWNTOWN
+    -- MODIFIED: Read scale from the global game state
+    local current_scale = game.state.current_map_scale
+    local is_downtown = (current_scale == game.C.MAP.SCALES.DOWNTOWN)
 
     local core_trips, city_trips = 0, 0
     for _, trip in ipairs(game.entities.trips.pending) do
         local final_leg = trip.legs[#trip.legs]
         if final_leg then
-            if game.map:isPlotInDowntown(final_leg.end_plot) then
+            if game.maps.city:isPlotInDowntown(final_leg.end_plot) then
                 core_trips = core_trips + 1
             else
                 city_trips = city_trips + 1
@@ -141,7 +143,7 @@ function UIManager:_calculateAccordionStats(game)
 
     local bike_count, truck_count, idle_count = 0, 0, 0
     for _, v in ipairs(game.entities.vehicles) do
-        local vehicle_is_in_downtown = game.map:isPlotInDowntown(v.grid_anchor)
+        local vehicle_is_in_downtown = game.maps.city:isPlotInDowntown(v.grid_anchor)
         if (is_downtown and vehicle_is_in_downtown) or not is_downtown then
             if v.type == "bike" then bike_count = bike_count + 1 end
             if v.type == "truck" then truck_count = truck_count + 1 end
@@ -152,7 +154,7 @@ function UIManager:_calculateAccordionStats(game)
 
     local client_count = 0
     for _, c in ipairs(game.entities.clients) do
-        local client_is_in_downtown = game.map:isPlotInDowntown(c.plot)
+        local client_is_in_downtown = game.maps.city:isPlotInDowntown(c.plot)
         if (is_downtown and client_is_in_downtown) or not is_downtown then
             client_count = client_count + 1
         end
