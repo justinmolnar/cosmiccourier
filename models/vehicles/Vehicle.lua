@@ -51,22 +51,25 @@ end
 
 function Vehicle:_getRegionDrawPosition(game)
     local region_map = game.maps.region
-    local city_map = game.maps.city
+    local tile_size = region_map.C.MAP.TILE_SIZE -- Both maps use the same tile size
 
-    -- Use the stored main city offset from when the region was generated
+    -- Get the region grid coordinates where the city map begins.
     local city_start_in_region_x = region_map.main_city_offset.x
     local city_start_in_region_y = region_map.main_city_offset.y
+    
+    -- Calculate the pixel coordinate of the top-left corner of the city's area within the region map.
+    -- We subtract 1 because grid coordinates are 1-based.
+    local city_top_left_px_in_region = (city_start_in_region_x - 1) * tile_size
+    local city_top_left_py_in_region = (city_start_in_region_y - 1) * tile_size
 
-    -- Find which city grid tile the vehicle is on
-    local city_grid_x, city_grid_y = city_map:pixelToGrid(self.px, self.py)
+    -- The vehicle's self.px and self.py are its pixel coordinates relative to the city map's origin.
+    -- We add them to the city's top-left pixel position within the region to get the final, smooth draw position.
+    local final_draw_px = city_top_left_px_in_region + self.px
+    local final_draw_py = city_top_left_py_in_region + self.py
     
-    -- Transform the vehicle's city grid position to region grid position
-    local region_grid_x = city_start_in_region_x + city_grid_x
-    local region_grid_y = city_start_in_region_y + city_grid_y
-    
-    -- Convert region grid coordinates to region-world pixel coordinates for drawing
-    return region_map:getPixelCoords(region_grid_x, region_grid_y)
+    return final_draw_px, final_draw_py
 end
+
 
 function Vehicle:shouldDrawAtCurrentScale(game)
     local current_scale = game.state.current_map_scale
