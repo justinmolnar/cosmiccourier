@@ -303,12 +303,9 @@ function Vehicle:draw(game)
     local should_draw = false
     local current_scale = game.state.current_map_scale
     
-    -- FIX: Trucks should be drawn at all zoom levels since they're not abstracted
-    if self.type == "truck" then
-        should_draw = true
-        print(string.format("DEBUG: Drawing truck %d at zoom level %d", self.id, current_scale))
-    elseif current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
-        -- Bikes and other vehicles only draw at downtown and city scales
+    -- Only draw vehicles at downtown and city scales
+    -- At region scale, neither bikes nor trucks should be visible
+    if current_scale == game.C.MAP.SCALES.DOWNTOWN or current_scale == game.C.MAP.SCALES.CITY then
         should_draw = true
     end
 

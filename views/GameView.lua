@@ -55,10 +55,23 @@ function GameView:draw()
         Game.event_spawner:draw(Game)
     end
 
-    -- FIX: Draw vehicles at all zoom levels, but let the vehicle decide if it should be drawn
+    -- Draw vehicles with scale-specific filtering
     for _, vehicle in ipairs(Game.entities.vehicles) do
         if vehicle.visible then
-            vehicle:draw(Game)
+            local current_scale = Game.state.current_map_scale
+            local should_draw = false
+            
+            -- Trucks render at all zoom levels
+            if vehicle.type == "truck" then
+                should_draw = true
+            -- Bikes only render at downtown and city scales
+            elseif vehicle.type == "bike" and (current_scale == Game.C.MAP.SCALES.DOWNTOWN or current_scale == Game.C.MAP.SCALES.CITY) then
+                should_draw = true
+            end
+            
+            if should_draw then
+                vehicle:draw(Game)
+            end
         end
     end
 
