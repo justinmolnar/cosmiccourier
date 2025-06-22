@@ -195,4 +195,62 @@ function GameView:drawDebugInfo(game)
     end
 end
 
+function GameView:drawLabGrid()
+    if not self.Game.debug_lab_grid then return end
+
+    local grid = self.Game.debug_lab_grid
+    local C_MAP = self.Game.C.MAP
+    local screen_w, screen_h = love.graphics.getDimensions()
+    
+    local tile_colors = {
+        commercial = C_MAP.COLORS.DOWNTOWN_PLOT,
+        industrial = {0.6, 0.6, 0.55},
+        residential = C_MAP.COLORS.PLOT,
+        grass = C_MAP.COLORS.GRASS,
+        arterial = {0.9, 0.9, 0.9},
+        local_road = C_MAP.COLORS.ROAD,
+        building_plot = C_MAP.COLORS.PLOT,
+        checker_a = {0.8, 0.2, 0.2}, -- Red
+        checker_b = {0.2, 0.2, 0.8},  -- Blue
+        error = {1, 0, 1}, -- Bright magenta for errors
+    }
+    
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.rectangle("fill", 0, 0, screen_w, screen_h)
+
+    local TILE_SIZE = 4
+    local total_w = #grid[1] * TILE_SIZE
+    local total_h = #grid * TILE_SIZE
+    local start_x = (self.Game.C.UI.SIDEBAR_WIDTH + (screen_w - self.Game.C.UI.SIDEBAR_WIDTH) - total_w) / 2
+    local start_y = (screen_h - total_h) / 2
+    
+    love.graphics.push()
+    love.graphics.translate(start_x, start_y)
+
+    for y = 1, #grid do
+        for x = 1, #grid[1] do
+            local tile = grid[y][x]
+            local color
+
+            -- THE FIX: Add a check for the WFC placeholder types before
+            -- falling back to the zone color.
+            if tile.type == "arterial" then
+                color = tile_colors.arterial
+            elseif tile.type == "local_road" then
+                color = tile_colors.local_road
+            elseif tile.type == "checker_a" or tile.type == "checker_b" then
+                color = tile_colors[tile.type]
+            else
+                -- It's a plot, so color it by its underlying zone type
+                color = tile_colors[tile.zone_type] or tile_colors.grass
+            end
+            
+            love.graphics.setColor(color)
+            love.graphics.rectangle("fill", (x-1) * TILE_SIZE, (y-1) * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        end
+    end
+    
+    love.graphics.pop()
+end
+
 return GameView

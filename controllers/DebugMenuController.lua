@@ -10,74 +10,148 @@ function DebugMenuController:new(game)
     instance.visible = false
     instance.x = 100
     instance.y = 50
-    instance.w = 450  -- Made wider for toggles
-    instance.h = 700  -- Made taller
+    instance.w = 450
+    instance.h = 700
     instance.dragging = false
     instance.drag_offset_x = 0
     instance.drag_offset_y = 0
     instance.scroll_y = 0
     instance.content_height = 0
     instance.dragging_scrollbar = false
-    instance.text_input_active = nil -- Which parameter is being edited
-    instance.text_input_value = "" -- Current text being typed
-    
-    -- Debug parameters that can be tweaked
+    instance.text_input_active = nil
+    instance.text_input_value = ""
+
+    instance.tabs = {"Main", "Lab"}
+    instance.active_tab = "Main"
+
     instance.params = {
-        -- Component Toggles (NEW)
-        generate_downtown = true,
-        generate_districts = true,
-        generate_highways = true,
-        generate_ringroad = true,
-        generate_connections = true,
+        lab_width = {value = 150, tab = "Lab"},
+        lab_height = {value = 150, tab = "Lab"},
+        use_wfc_for_zones = {value = false, tab = "Lab"},
+        use_wfc_for_details = {value = false, tab = "Lab"},
         
-        -- Highway Generation
-        highway_merge_distance = 50,
-        highway_merge_strength = 0.8,
-        highway_parallel_merge_distance = 80,
-        highway_curve_distance = 50,
-        highway_step_size = 30,
-        highway_buffer = 35,
-        num_ns_highways = 2,
-        num_ew_highways = 2,
+        generate_downtown = {value = true, tab = "Main"},
+        generate_districts = {value = true, tab = "Main"},
+        generate_highways = {value = true, tab = "Main"},
+        generate_ringroad = {value = true, tab = "Main"},
+        generate_connections = {value = true, tab = "Main"},
         
-        -- Ring Road Generation
-        ring_min_angle = 45, -- degrees
-        ring_min_arc_distance = 30,
-        ring_edge_threshold = 0.1, -- percentage of map
-        ring_center_distance_threshold = 0.15, -- percentage of map
+        highway_merge_distance = {value = 50, tab = "Main"},
+        highway_merge_strength = {value = 0.8, tab = "Main"},
+        highway_parallel_merge_distance = {value = 80, tab = "Main"},
+        highway_curve_distance = {value = 50, tab = "Main"},
+        highway_step_size = {value = 30, tab = "Main"},
+        highway_buffer = {value = 35, tab = "Main"},
+        num_ns_highways = {value = 2, tab = "Main"},
+        num_ew_highways = {value = 2, tab = "Main"},
         
-        -- District Generation
-        num_districts = 10,
-        district_min_size = 40,
-        district_max_size = 80,
-        district_placement_attempts = 500,
-        downtown_roads = 40,
-        district_roads_min = 15,
-        district_roads_max = 30,
+        ring_min_angle = {value = 45, tab = "Main"},
+        ring_min_arc_distance = {value = 30, tab = "Main"},
+        ring_edge_threshold = {value = 0.1, tab = "Main"},
+        ring_center_distance_threshold = {value = 0.15, tab = "Main"},
         
-        -- Connecting Roads
-        walker_connection_distance = 25,
-        walker_split_chance = 0.05,
-        walker_turn_chance = 0.15,
-        walker_max_active = 3,
-        walker_death_rules_enabled = true,
+        num_districts = {value = 10, tab = "Main"},
+        district_min_size = {value = 40, tab = "Main"},
+        district_max_size = {value = 80, tab = "Main"},
+        district_placement_attempts = {value = 500, tab = "Main"},
+        downtown_roads = {value = 40, tab = "Main"},
+        district_roads_min = {value = 15, tab = "Main"},
+        district_roads_max = {value = 30, tab = "Main"},
         
-        -- Path Smoothing
-        smoothing_max_angle = 126, -- degrees
-        smoothing_enabled = true,
+        walker_connection_distance = {value = 25, tab = "Main"},
+        walker_split_chance = {value = 0.05, tab = "Main"},
+        walker_turn_chance = {value = 0.15, tab = "Main"},
+        walker_max_active = {value = 3, tab = "Main"},
+        walker_death_rules_enabled = {value = true, tab = "Main"},
+        
+        smoothing_max_angle = {value = 126, tab = "Main"},
+        smoothing_enabled = {value = true, tab = "Main"},
     }
     
-    -- Button definitions
     instance.buttons = {
-        {id = "regen_all", text = "Regenerate Everything", color = {0.8, 0.2, 0.2}},
-        {id = "clear_all", text = "Clear All Roads", color = {0.6, 0.6, 0.6}},
-        {id = "regen_downtown", text = "Regen Downtown Only", color = {0.2, 0.8, 0.2}},
-        {id = "regen_districts", text = "Regen Districts Only", color = {0.2, 0.6, 0.8}},
-        {id = "regen_ring", text = "Regen Ring Road Only", color = {0.2, 0.4, 0.8}},
-        {id = "regen_highways", text = "Regen Highways Only", color = {0.6, 0.8, 0.2}},
-        {id = "regen_connections", text = "Regen Connections Only", color = {0.8, 0.6, 0.2}},
-        {id = "test_pathfinding", text = "Test Pathfinding (Random)", color = {0.8, 0.2, 0.8}},
-        {id = "reset_params", text = "Reset All Parameters", color = {0.4, 0.4, 0.4}},
+        {id = "generate_new_city_lab", text = "Generate New City (LAB)", color = {0.8, 0.4, 0.8}, tab = "Lab"},
+        {id = "regen_lab_zones", text = "Regen Lab Zones", color = {0.2, 0.8, 0.8}, tab = "Lab"},
+        {id = "regen_lab_arterials", text = "Regen Lab Arterials", color = {0.8, 0.8, 0.2}, tab = "Lab"},
+        {id = "regen_lab_local_roads", text = "Regen Lab Local Roads", color = {0.8, 0.6, 0.2}, tab = "Lab"},
+        {id = "clear_lab_view", text = "Clear Lab View", color = {0.6, 0.6, 0.6}, tab = "Lab"},
+        
+        {id = "regen_all", text = "Regenerate Everything", color = {0.8, 0.2, 0.2}, tab = "Main"},
+        {id = "clear_all", text = "Clear All Roads", color = {0.6, 0.6, 0.6}, tab = "Main"},
+        {id = "regen_downtown", text = "Regen Downtown Only", color = {0.2, 0.8, 0.2}, tab = "Main"},
+        {id = "regen_districts", text = "Regen Districts Only", color = {0.2, 0.6, 0.8}, tab = "Main"},
+        {id = "regen_ring", text = "Regen Ring Road Only", color = {0.2, 0.4, 0.8}, tab = "Main"},
+        {id = "regen_highways", text = "Regen Highways Only", color = {0.6, 0.8, 0.2}, tab = "Main"},
+        {id = "regen_connections", text = "Regen Connections Only", color = {0.8, 0.6, 0.2}, tab = "Main"},
+        {id = "test_pathfinding", text = "Test Pathfinding (Random)", color = {0.8, 0.2, 0.8}, tab = "Main"},
+        {id = "reset_params", text = "Reset All Parameters", color = {0.4, 0.4, 0.4}, tab = "Main"},
+    }
+
+    instance.actions = {
+        generate_new_city_lab = function(self)
+            local NewCityGenService = require("services.NewCityGenService")
+            local generator_params = {
+                width = self.params.lab_width.value,
+                height = self.params.lab_height.value,
+                use_wfc_for_zones = self.params.use_wfc_for_zones.value,
+                use_wfc_for_details = self.params.use_wfc_for_details.value
+            }
+            self.game.debug_lab_grid = NewCityGenService.generateDetailedCity(generator_params, self.game)
+            self.game.error_service.logInfo("DebugMenu", "Generated new city in the lab.")
+        end,
+        regen_lab_zones = function(self)
+             if not self.game.debug_lab_grid then
+                self.game.error_service.logWarning("DebugMenu", "Cannot regenerate zones, no lab grid exists.")
+                return
+            end
+            local NewCityGenService = require("services.NewCityGenService")
+            local generator_params = { 
+                use_wfc_for_zones = self.params.use_wfc_for_zones.value 
+            }
+            NewCityGenService.generateZoneBlobs(self.game.debug_lab_grid, generator_params)
+            self.game.error_service.logInfo("DebugMenu", "Regenerated lab zone data.")
+        end,
+        regen_lab_arterials = function(self)
+            if not self.game.debug_lab_grid then
+                self.game.error_service.logWarning("DebugMenu", "Cannot regenerate arterials, no lab grid exists.")
+                return
+            end
+            local NewCityGenService = require("services.NewCityGenService")
+            local generator_params = {}
+            NewCityGenService.generateArterialRoads(self.game.debug_lab_grid, generator_params, self.game)
+            self.game.error_service.logInfo("DebugMenu", "Regenerated lab arterial roads.")
+        end,
+        regen_lab_local_roads = function(self)
+            if not self.game.debug_lab_grid then
+                self.game.error_service.logWarning("DebugMenu", "Cannot regenerate local roads, no lab grid exists.")
+                return
+            end
+            local NewCityGenService = require("services.NewCityGenService")
+            local generator_params = {
+                use_wfc_for_details = self.params.use_wfc_for_details.value
+            }
+            NewCityGenService.generateLocalRoads(self.game.debug_lab_grid, generator_params)
+            self.game.error_service.logInfo("DebugMenu", "Regenerated lab local roads.")
+        end,
+        clear_lab_view = function(self)
+            self.game.debug_lab_grid = nil
+            self.game.error_service.logInfo("DebugMenu", "Cleared the lab view grid.")
+        end,
+        regen_all = function(self)
+            self:applyParametersToModules()
+            self.game.map:generate()
+            self.game.error_service.logInfo("DebugMenu", "Regenerated entire map with current parameters.")
+        end,
+        clear_all = function(self)
+            self:clearAllRoads()
+            self.game.error_service.logInfo("DebugMenu", "Cleared all roads and structures.")
+        end,
+        regen_downtown = function(self) self:regenerateDowntownOnly() end,
+        regen_districts = function(self) self:regenerateDistrictsOnly() end,
+        regen_ring = function(self) self:regenerateRingRoadOnly() end,
+        regen_highways = function(self) self:regenerateHighwaysOnly() end,
+        regen_connections = function(self) self:regenerateConnectionsOnly() end,
+        test_pathfinding = function(self) self:testPathfinding() end,
+        reset_params = function(self) self:resetParameters() end
     }
     
     return instance
@@ -99,112 +173,154 @@ end
 function DebugMenuController:handle_mouse_down(x, y, button)
     if not self.visible then return false end
     
-    -- First check if click is even within menu bounds - if not, return false immediately
+    -- Close the menu if the click is outside its bounds
     if not (x >= self.x and x <= self.x + self.w and y >= self.y and y <= self.y + self.h) then
-        -- Click is outside menu - cancel any text input and don't consume the click
+        self.visible = false
         self.text_input_active = nil
         return false
     end
+
+    -- Check for clicks on the main menu chrome (title bar, close button)
+    if self:_handleMenuChromeClick(x, y, button) then return true end
+
+    -- NEW: Check for clicks on the tabs
+    if self:_handleTabClick(x, y, button) then return true end
     
-    -- Check if click is within menu bounds
-    if x >= self.x and x <= self.x + self.w and y >= self.y and y <= self.y + self.h then
-        
-        -- Check scrollbar first
-        if self.content_height > self.h - 60 then
-            local scrollbar_x = self.x + self.w - 15
-            local scrollbar_w = 10
-            local scrollbar_y_start = self.y + 30
-            local scrollbar_h = self.h - 60
-            
-            if x >= scrollbar_x and x <= scrollbar_x + scrollbar_w and 
-               y >= scrollbar_y_start and y <= scrollbar_y_start + scrollbar_h then
-                
-                -- Check if clicking on the scrollbar handle for dragging
-                local scrollbar_handle_h = scrollbar_h * ((self.h - 60) / self.content_height)
-                scrollbar_handle_h = math.max(scrollbar_handle_h, 15)
-                local scroll_percentage = self.scroll_y / math.max(1, self.content_height - (self.h - 60))
-                local handle_y = scrollbar_y_start + ((scrollbar_h - scrollbar_handle_h) * scroll_percentage)
-                
-                if y >= handle_y and y <= handle_y + scrollbar_handle_h then
-                    -- Start dragging the handle
-                    self.dragging_scrollbar = true
-                    self.scrollbar_drag_start_y = y
-                    self.scroll_y_at_drag_start = self.scroll_y
-                    return true
-                else
-                    -- Click elsewhere on scrollbar track - jump to that position
-                    local click_position = (y - scrollbar_y_start) / scrollbar_h
-                    self.scroll_y = click_position * math.max(0, self.content_height - (self.h - 60))
-                    self.scroll_y = math.max(0, math.min(self.scroll_y, math.max(0, self.content_height - (self.h - 60))))
-                    return true
+    -- The click is inside the main content area, so check for controls there.
+    -- We still need to handle the scrollbar, parameters, and buttons.
+    if self:_handleScrollbarClick(x, y, button) then return true end
+    if self:_handleParameterClick(x, y, button) then return true end
+    if self:_handleActionButtonClick(x, y, button) then return true end
+    
+    -- Consume the click even if it's on empty space within the menu
+    return true
+end
+
+function DebugMenuController:_handleMenuChromeClick(x, y, button)
+    -- Check title bar for dragging
+    if y >= self.y and y <= self.y + 25 then
+        self.dragging = true
+        self.drag_offset_x = x - self.x
+        self.drag_offset_y = y - self.y
+        return true
+    end
+    
+    -- Check close button
+    if x >= self.x + self.w - 25 and x <= self.x + self.w - 4 and y >= self.y + 2 and y <= self.y + 23 then
+        self.visible = false
+        return true
+    end
+
+    return false
+end
+
+function DebugMenuController:_handleTabClick(x, y, button)
+    local tab_y = self.y + 25
+    local tab_h = 25
+    if y >= tab_y and y <= tab_y + tab_h then
+        local tab_w = self.w / #self.tabs
+        for i, tab_name in ipairs(self.tabs) do
+            local tab_x = self.x + (i - 1) * tab_w
+            if x >= tab_x and x <= tab_x + tab_w then
+                if self.active_tab ~= tab_name then
+                    self.active_tab = tab_name
+                    self.scroll_y = 0 -- Reset scroll on tab change
                 end
+                return true
             end
         end
-        -- Check title bar for dragging
-        if y <= self.y + 25 then
-            self.dragging = true
-            self.drag_offset_x = x - self.x
-            self.drag_offset_y = y - self.y
+    end
+    return false
+end
+
+function DebugMenuController:_handleScrollbarClick(x, y, button)
+    if self.content_height <= self.h - 60 then return false end
+
+    local scrollbar_x = self.x + self.w - 15
+    local scrollbar_w = 10
+    local scrollbar_y_start = self.y + 50 -- Below tabs now
+    local scrollbar_h = self.h - 80
+
+    if x >= scrollbar_x and x <= scrollbar_x + scrollbar_w and 
+       y >= scrollbar_y_start and y <= scrollbar_y_start + scrollbar_h then
+        
+        local handle_h = scrollbar_h * ((self.h - 80) / self.content_height)
+        handle_h = math.max(handle_h, 15)
+        local scroll_percentage = self.scroll_y / math.max(1, self.content_height - (self.h - 80))
+        local handle_y = scrollbar_y_start + ((scrollbar_h - handle_h) * scroll_percentage)
+        
+        if y >= handle_y and y <= handle_y + handle_h then
+            self.dragging_scrollbar = true
+            self.scrollbar_drag_start_y = y
+            self.scroll_y_at_drag_start = self.scroll_y
+            return true
+        else
+            local click_position = (y - scrollbar_y_start) / scrollbar_h
+            self.scroll_y = click_position * math.max(0, self.content_height - (self.h - 80))
+            self.scroll_y = math.max(0, math.min(self.scroll_y, math.max(0, self.content_height - (self.h - 80))))
             return true
         end
-        
-        -- Check close button
-        if x >= self.x + self.w - 25 and x <= self.x + self.w - 4 and y >= self.y + 2 and y <= self.y + 23 then
-            self.visible = false
-            return true
-        end
-        
-        -- Check buttons
-        local content_y = self.y + 35 - self.scroll_y
-        
-        -- Parameter adjustment buttons (both on the right side now)
-        local param_y = content_y + 20 -- Skip header
-        for param_name, value in pairs(self.params) do
-            if type(value) == "number" then
-                -- Check if clicking on the value text (to start editing)
+    end
+    return false
+end
+
+function DebugMenuController:_handleParameterClick(x, y, button)
+    local content_y = self.y + 55 - self.scroll_y -- Start below tabs
+    local param_y = content_y + 20
+
+    for param_name, param_data in pairs(self.params) do
+        if param_data.tab == self.active_tab then
+            if type(param_data.value) == "number" then
                 local value_x = self.x + 35
                 local value_w = self.w - 140
                 if x >= value_x and x <= value_x + value_w and y >= param_y and y <= param_y + 20 then
                     self.text_input_active = param_name
-                    self.text_input_value = tostring(value)
+                    self.text_input_value = tostring(param_data.value)
                     return true
                 end
                 
-                -- Minus button (now on the right, left of plus)
                 if x >= self.x + self.w - 70 and x <= self.x + self.w - 50 and y >= param_y and y <= param_y + 20 then
                     self:adjustParameter(param_name, -1)
                     return true
                 end
-                -- Plus button (far right)
+
                 if x >= self.x + self.w - 50 and x <= self.x + self.w - 30 and y >= param_y and y <= param_y + 20 then
                     self:adjustParameter(param_name, 1)
                     return true
                 end
                 param_y = param_y + 25
-            elseif type(value) == "boolean" then
-                -- Toggle button
+            elseif type(param_data.value) == "boolean" then
                 if x >= self.x + 10 and x <= self.x + self.w - 10 and y >= param_y and y <= param_y + 20 then
-                    self.params[param_name] = not self.params[param_name]
-                    self.game.error_service.logInfo("DebugMenu", "Toggled " .. param_name .. " to " .. tostring(self.params[param_name]))
+                    self.params[param_name].value = not self.params[param_name].value
+                    self.game.error_service.logInfo("DebugMenu", "Toggled " .. param_name .. " to " .. tostring(self.params[param_name].value))
                     return true
                 end
                 param_y = param_y + 25
             end
         end
-        
-        -- Action buttons
-        param_y = param_y + 20
-        for i, btn in ipairs(self.buttons) do
-            local btn_y = param_y + (i - 1) * 35
-            if x >= self.x + 10 and x <= self.x + self.w - 10 and y >= btn_y and y <= btn_y + 30 then
+    end
+    return false
+end
+
+function DebugMenuController:_handleActionButtonClick(x, y, button)
+    local content_y = self.y + 55 - self.scroll_y
+    local param_count = 0
+    for _, param_data in pairs(self.params) do
+        if param_data.tab == self.active_tab then param_count = param_count + 1 end
+    end
+
+    local button_start_y = content_y + (param_count * 25) + 40
+    local current_button_y = button_start_y
+
+    for i, btn in ipairs(self.buttons) do
+        if btn.tab == self.active_tab then
+            if x >= self.x + 10 and x <= self.x + self.w - 10 and y >= current_button_y and y <= current_button_y + 30 then
                 self:executeAction(btn.id)
                 return true
             end
+            current_button_y = current_button_y + 35
         end
-        
-        return true -- Consume click even if not on specific element
     end
-    
     return false
 end
 
@@ -371,56 +487,13 @@ end
 function DebugMenuController:executeAction(action_id)
     self.game.error_service.logInfo("DebugMenu", "Executing action: " .. action_id)
     
-    local function safeExecute(func, action_name)
-        self.game.error_service.withErrorHandling(func, "Debug Menu: " .. action_name)
-    end
-    
-    if action_id == "regen_all" then
-        safeExecute(function()
-            self:applyParametersToModules()
-            self.game.map:generate()
-            self.game.error_service.logInfo("DebugMenu", "Regenerated entire map with current parameters")
-        end, "Regenerate All")
-        
-    elseif action_id == "clear_all" then
-        safeExecute(function()
-            self:clearAllRoads()
-            self.game.error_service.logInfo("DebugMenu", "Cleared all roads and structures")
-        end, "Clear All")
-        
-    elseif action_id == "regen_downtown" then
-        safeExecute(function()
-            self:regenerateDowntownOnly()
-        end, "Regenerate Downtown")
-        
-    elseif action_id == "regen_districts" then
-        safeExecute(function()
-            self:regenerateDistrictsOnly()
-        end, "Regenerate Districts")
-        
-    elseif action_id == "regen_ring" then
-        safeExecute(function()
-            self:regenerateRingRoadOnly()
-        end, "Regenerate Ring Road")
-        
-    elseif action_id == "regen_highways" then
-        safeExecute(function()
-            self:regenerateHighwaysOnly()
-        end, "Regenerate Highways")
-        
-    elseif action_id == "regen_connections" then
-        safeExecute(function()
-            self:regenerateConnectionsOnly()
-        end, "Regenerate Connections")
-        
-    elseif action_id == "test_pathfinding" then
-        safeExecute(function()
-            self:testPathfinding()
-        end, "Test Pathfinding")
-        
-    elseif action_id == "reset_params" then
-        self:resetParameters()
-        self.game.error_service.logInfo("DebugMenu", "Reset all parameters to defaults")
+    local action_func = self.actions[action_id]
+    if action_func then
+        self.game.error_service.withErrorHandling(function()
+            action_func(self) -- Pass 'self' to the action function
+        end, "Debug Menu: " .. action_id)
+    else
+        self.game.error_service.logWarning("DebugMenu", "Unknown action ID: " .. action_id)
     end
 end
 

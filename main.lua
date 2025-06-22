@@ -148,6 +148,12 @@ end
 function love.draw()
     Game.ui_view:draw()
     Game.game_view:draw()
+
+    -- NEW: Draw the Lab Grid on top of the game world, but under the UI
+    if Game.debug_lab_grid then
+        Game.game_view:drawLabGrid()
+    end
+
     Game.zoom_controls:draw(Game)
     Game.ui_manager.modal_manager:draw(Game)
     
