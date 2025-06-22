@@ -15,106 +15,104 @@ function TripGenerator.generateTrip(client_plot, game)
     local base_payout = C_GAMEPLAY.BASE_TRIP_PAYOUT
     local speed_bonus = C_GAMEPLAY.INITIAL_SPEED_BONUS
     
-    -- Determine if this should be a multi-leg city trip
-    local should_create_city_trip = TripGenerator._shouldCreateCityTrip(game)
-    
-    print(string.format("DEBUG: Generating trip - should_create_city_trip: %s", tostring(should_create_city_trip)))
-    
-    if should_create_city_trip then
-        return TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
-    else
-        return TripGenerator._createLocalTrip(client_plot, base_payout, speed_bonus, game)
-    end
-end
-
-function TripGenerator._shouldCreateCityTrip(game)
     -- Check if trucks exist
     local trucks_exist = false
-    local truck_count = 0
     for _, v in ipairs(game.entities.vehicles) do
         if v.type == "truck" then
             trucks_exist = true
-            truck_count = truck_count + 1
+            break
         end
     end
-    
-    local should_create = trucks_exist and love.math.random() < 0.3
-    print(string.format("DEBUG: City trip check - trucks_exist: %s (count: %d), random < 0.3: %s, result: %s", 
-          tostring(trucks_exist), truck_count, tostring(love.math.random() < 0.3), tostring(should_create)))
-    
-    return should_create
+
+    if not trucks_exist then
+        return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
+    else
+        local rand = love.math.random()
+        if rand < 0.5 then
+            return TripGenerator._createInterCityTrip(client_plot, base_payout, speed_bonus, game)
+        elseif rand < 0.75 then
+            return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
+        else
+            return TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
+        end
+    end
 end
 
-function TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
-    local C_GAMEPLAY = game.C.GAMEPLAY
+function TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
+    print("DEBUG: Creating downtown trip")
     
-    print("DEBUG: Starting city trip creation")
-    
-    -- FIX: For now, only create trips within the same city (downtown → city outskirts)
-    -- Use the city map to find a plot outside of downtown instead of the region map
-    local destination_plot = game.maps.city:getRandomCityBuildingPlot()
-    
-    -- DEBUG: Log destination plot details
-    print(string.format("DEBUG: City map destination_plot: (%d,%d)", 
-          destination_plot and destination_plot.x or -1, 
-          destination_plot and destination_plot.y or -1))
-    
-    -- Failsafe: if for some reason we can't get a plot from the city map, create a local trip instead.
-    if not destination_plot or destination_plot == client_plot then
-        print("DEBUG: City trip failed - no valid destination or same as client, creating local trip instead")
-        return TripGenerator._createLocalTrip(client_plot, base_payout, speed_bonus, game)
-    end
-    
-    -- Check if depot exists
-    if not game.entities.depot_plot then
-        print("DEBUG: City trip failed - no depot_plot available")
-        return TripGenerator._createLocalTrip(client_plot, base_payout, speed_bonus, game)
-    end
-    
-    print("DEBUG: Created intra-city trip (downtown to city outskirts)!")
-    
-    base_payout = base_payout * C_GAMEPLAY.CITY_TRIP_PAYOUT_MULTIPLIER
-    speed_bonus = speed_bonus * C_GAMEPLAY.CITY_TRIP_BONUS_MULTIPLIER
-    
-    print(string.format("DEBUG: City trip payout: base=%d, speed_bonus=%d", base_payout, speed_bonus))
-    
-    local new_trip = Trip:new(base_payout, speed_bonus)
-    -- FIX: This is no longer a long distance trip since it's within the same city
-    -- new_trip.is_long_distance = true -- REMOVED
-    
-    -- Leg 1: Bike from downtown client to the main city depot
-    new_trip:addLeg(client_plot, game.entities.depot_plot, "bike")
-    -- Leg 2: Truck from the main city depot to city outskirts (within same city)
-    new_trip:addLeg(game.entities.depot_plot, destination_plot, "truck")
-    
-    print(string.format("DEBUG: Trip legs created:"))
-    print(string.format("  Leg 1: bike (%d,%d) -> (%d,%d)", 
-          client_plot.x, client_plot.y, 
-          game.entities.depot_plot.x, game.entities.depot_plot.y))
-    print(string.format("  Leg 2: truck (%d,%d) -> (%d,%d)", 
-          game.entities.depot_plot.x, game.entities.depot_plot.y,
-          destination_plot.x, destination_plot.y))
-    print(string.format("  is_long_distance: %s", tostring(new_trip.is_long_distance)))
-    
-    return new_trip
-end
-
-function TripGenerator._createLocalTrip(client_plot, base_payout, speed_bonus, game)
-    print("DEBUG: Creating local trip")
-    
-    -- MODIFIED: Use game.maps.city
     local end_plot = game.maps.city:getRandomDowntownBuildingPlot()
-    if not end_plot then
-        print("DEBUG: Local trip failed - no end plot available")
+    if not end_plot or end_plot == client_plot then
+        print("DEBUG: Downtown trip failed - no valid destination, trying again next time.")
         return nil
     end
     
-    print(string.format("DEBUG: Local trip: bike (%d,%d) -> (%d,%d)", 
+    print(string.format("DEBUG: Downtown trip: bike (%d,%d) -> (%d,%d)", 
           client_plot.x, client_plot.y, end_plot.x, end_plot.y))
     
     local new_trip = Trip:new(base_payout, speed_bonus)
     new_trip:addLeg(client_plot, end_plot, "bike")
     
+    return new_trip
+end
+
+function TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
+    print("DEBUG: Creating city trip")
+    local C_GAMEPLAY = game.C.GAMEPLAY
+
+    local start_plot = game.maps.city:getRandomDowntownBuildingPlot()
+    local destination_plot = game.maps.city:getRandomCityBuildingPlot()
+    
+    if not start_plot or not destination_plot or not game.entities.depot_plot then
+        print("DEBUG: City trip creation failed - missing plots.")
+        return nil
+    end
+
+    -- Increase payout for a longer trip
+    base_payout = base_payout * C_GAMEPLAY.CITY_TRIP_PAYOUT_MULTIPLIER
+    speed_bonus = speed_bonus * C_GAMEPLAY.CITY_TRIP_BONUS_MULTIPLIER
+
+    local new_trip = Trip:new(base_payout, speed_bonus)
+    new_trip.is_long_distance = false -- Explicitly not long distance
+    
+    -- Leg 1: Bike from client to depot
+    new_trip:addLeg(start_plot, game.entities.depot_plot, "bike")
+    -- Leg 2: Truck from depot to city destination
+    new_trip:addLeg(game.entities.depot_plot, destination_plot, "truck")
+    
+    print("DEBUG: City trip created (Bike -> Depot -> Truck)")
+    return new_trip
+end
+
+function TripGenerator._createInterCityTrip(client_plot, base_payout, speed_bonus, game)
+    print("DEBUG: Creating INTER-CITY trip")
+    local C_GAMEPLAY = game.C.GAMEPLAY
+    local MapGenerationService = require("services.MapGenerationService")
+
+    local start_plot = game.maps.city:getRandomDowntownBuildingPlot()
+    
+    -- THE FIX: Get a plot from the destination city's pre-generated data.
+    -- This plot will have coordinates that are LOCAL to that city's grid.
+    local final_destination_plot = MapGenerationService.getPlotInAnotherCity(game, 1)
+
+    if not start_plot or not final_destination_plot or not game.entities.depot_plot then
+        print("DEBUG: Inter-city trip creation failed - missing plots or not enough cities.")
+        return nil
+    end
+
+    -- Significantly increase payout for long-distance trips
+    base_payout = base_payout * C_GAMEPLAY.CITY_TRIP_PAYOUT_MULTIPLIER * 5 
+    speed_bonus = speed_bonus * C_GAMEPLAY.CITY_TRIP_BONUS_MULTIPLIER * 5
+
+    local new_trip = Trip:new(base_payout, speed_bonus)
+    new_trip.is_long_distance = true -- CRITICAL FLAG
+    
+    -- Build the multi-leg itinerary
+    new_trip:addLeg(start_plot, game.entities.depot_plot, "bike")
+    -- The final destination plot is now correctly local to the destination city.
+    new_trip:addLeg(game.entities.depot_plot, final_destination_plot, "truck")
+
+    print("DEBUG: Inter-city trip created to a new city with a LOCAL destination plot.")
     return new_trip
 end
 

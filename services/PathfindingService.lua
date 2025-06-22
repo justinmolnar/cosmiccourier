@@ -68,6 +68,31 @@ function PathfindingService.findPathToPickup(vehicle, trip, game)
     return PathfindingService.findVehiclePath(vehicle, current_pos, leg.start_plot, game, game.maps.city)
 end
 
+function PathfindingService.findPathToRandomHighway(vehicle, game)
+    local city_map = game.maps.city
+    local highway_tiles = {}
+    
+    -- Collect all possible highway tiles
+    for y, row in ipairs(city_map.grid) do
+        for x, tile in ipairs(row) do
+            if string.find(tile.type, "highway") then
+                table.insert(highway_tiles, {x = x, y = y})
+            end
+        end
+    end
+
+    if #highway_tiles == 0 then 
+        print("ERROR: No highway tiles found on city map for pathfinding.")
+        return nil 
+    end
+
+    -- Pick a random one as the destination
+    local destination_plot = highway_tiles[love.math.random(1, #highway_tiles)]
+    
+    -- Find a path from where the vehicle is to that random highway tile
+    return PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, destination_plot, game)
+end
+
 function PathfindingService.estimatePathTravelTime(path, vehicle, game)
     if not path or #path == 0 then return 0 end
 

@@ -17,7 +17,6 @@ function AutoDispatcher:update(dt, game)
     if not game.state.upgrades.auto_dispatch_unlocked then
         -- Only log this occasionally to avoid spam
         if math.floor(love.timer.getTime()) % 5 == 0 and self.last_debug_time ~= math.floor(love.timer.getTime()) then
-            print("AutoDispatcher: auto_dispatch_unlocked is FALSE")
             self.last_debug_time = math.floor(love.timer.getTime())
         end
         return

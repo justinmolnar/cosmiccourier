@@ -184,11 +184,13 @@ function States.GoToDropoff:enter(vehicle, game)
 
     -- Check if the primary trip in cargo requires long-distance travel
     local trip = vehicle.cargo[1]
-    if trip and trip.is_long_distance then
-        print(string.format("DEBUG: %s %d has a long-distance trip, transitioning to GoToNetworkEntry", vehicle.type, vehicle.id))
+    
+    -- THE FIX: If it's a long-distance truck trip, bypass the broken "GoToNetworkEntry"
+    -- state and go DIRECTLY to "TravelingOnNetwork".
+    if trip and trip.is_long_distance and vehicle.type == "truck" then
+        print(string.format("DEBUG: %s %d has a long-distance trip, transitioning directly to TravelingOnNetwork", vehicle.type, vehicle.id))
         
-        -- Transition to the state that handles getting TO the network.
-        vehicle:changeState(States.GoToNetworkEntry, game, { 
+        vehicle:changeState(States.TravelingOnNetwork, game, { 
             network_type = "highway", 
             destination_map = "region",
             destination_plot = trip.legs[#trip.legs].end_plot 
@@ -227,7 +229,7 @@ function States.DoDropoff:enter(vehicle, game)
     local trip_index_to_remove = nil
     
     local current_pos = vehicle.grid_anchor
-    local active_map = game.maps[game.active_map_key]
+    local active_map = game.maps[vehicle.operational_map_key]
     if not active_map then return end
     
     local is_abstracted_mode = (game.active_map_key ~= "city")
@@ -244,11 +246,7 @@ function States.DoDropoff:enter(vehicle, game)
         local destination_road_tile = nil
 
         -- Determine which grid to use for finding the destination
-        if leg.vehicleType == "bike" then
-            destination_road_tile = active_map:findNearestRoadTile(leg.end_plot)
-        else -- For trucks and future vehicles, use the city-scale finder
-            destination_road_tile = active_map:findNearestRoadTile(leg.end_plot)
-        end
+        destination_road_tile = active_map:findNearestRoadTile(leg.end_plot)
 
         local at_destination = false
         if is_abstracted_mode then
@@ -341,12 +339,12 @@ function States.GoToNetworkEntry:enter(vehicle, game, params)
 
     print(string.format("DEBUG: %s %d finding path to nearest '%s' entry.", vehicle.type, vehicle.id, network_type))
 
-    -- In a real implementation, this would use a function like:
-    -- vehicle.path = PathfindingService.findPathToNearestTileOfType(vehicle, network_type, game)
-    -- For now, we will use the depot as a stand-in for the "highway entrance".
-    vehicle.path = PathfindingService.findPathToDepot(vehicle, game)
+    -- THE FIX: Get a path from the depot to a random highway tile on the city map.
+    -- This forces the truck to travel across the city before changing to the regional map.
+    vehicle.path = PathfindingService.findPathToRandomHighway(vehicle, game)
     
-    if not vehicle.path then
+    if not vehicle.path or #vehicle.path == 0 then
+        print("ERROR: GoToNetworkEntry failed to find a path to the highway.")
         vehicle:changeState(States.Stuck, game)
         return
     end
@@ -373,31 +371,57 @@ States.TravelingOnNetwork.name = "Traveling on Network"
 function States.TravelingOnNetwork:enter(vehicle, game, params)
     params = params or {}
     local destination_map_key = params.destination_map or "region"
-    local destination_plot = params.destination_plot or vehicle.cargo[1].legs[#vehicle.cargo[1].legs].end_plot
+    local final_destination_plot = params.destination_plot or vehicle.cargo[1].legs[#vehicle.cargo[1].legs].end_plot
 
     print(string.format("DEBUG: %s %d entering '%s' network. Destination map: %s", 
           vehicle.type, vehicle.id, params.network_type or "unknown", destination_map_key))
+    
+    -- Translate the vehicle's grid anchor from city-local to region-global coordinates
+    local city_offset = game.maps.region.main_city_offset
+    if city_offset then
+        vehicle.grid_anchor.x = vehicle.grid_anchor.x + city_offset.x
+        vehicle.grid_anchor.y = vehicle.grid_anchor.y + city_offset.y
+    end
 
-    -- THE MAP SWITCH
+    -- Switch the operational map and recalculate pixel position
     vehicle.operational_map_key = destination_map_key
     vehicle:recalculatePixelPosition(game)
 
-    -- Pathfind on the new network. This requires a way to find the "entry point" to the destination.
-    -- For now, we'll create a placeholder destination on the region map.
-    -- A real implementation would look up the region coordinates for the destination city.
-    local destination_on_network = { x = 150, y = 650 } -- Placeholder
+    -- Find the destination city's depot on the regional map
+    local destination_on_network = nil
+    local destination_city_data = nil
+    for _, city_data in ipairs(game.maps.region.cities_data) do
+        if city_data.center_x ~= game.maps.region.main_city_offset.x + (game.C.MAP.CITY_GRID_WIDTH / 2) then
+             destination_city_data = city_data
+             -- THE FIX: Find the road tile nearest the depot, not just the center.
+             local depot_plot = {
+                 x = city_data.center_x,
+                 y = city_data.center_y
+             }
+             destination_on_network = game.maps.region:findNearestRoadTile(depot_plot)
+             break
+        end
+    end
 
-    local PathfindingService = require("services.PathfindingService")
-    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, destination_on_network, game)
-
-    if not vehicle.path then
-        print(string.format("ERROR: Could not find path on '%s' map!", destination_map_key))
+    if not destination_on_network then
+        print("ERROR: Could not find destination city for plot!", final_destination_plot.x, final_destination_plot.y)
         vehicle:changeState(States.Stuck, game)
         return
     end
 
-    -- Store the final destination plot for when we exit the network
-    vehicle.final_destination_plot = destination_plot
+    -- Pathfind on the regional map
+    local PathfindingService = require("services.PathfindingService")
+    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, destination_on_network, game)
+
+    if not vehicle.path then
+        print("ERROR: Could not find regional path to city entrance!")
+        vehicle:changeState(States.Stuck, game)
+        return
+    end
+
+    -- Store data needed for the return trip to the city map
+    vehicle.final_destination_plot = final_destination_plot
+    vehicle.destination_city_data = destination_city_data
 end
 
 function States.TravelingOnNetwork:update(dt, vehicle, game)
@@ -416,24 +440,63 @@ States.ExitingNetwork = State:new()
 States.ExitingNetwork.name = "Exiting Network"
 function States.ExitingNetwork:enter(vehicle, game)
     print(string.format("DEBUG: %s %d is exiting network, returning to city logic.", vehicle.type, vehicle.id))
-
-    -- SWITCH BACK to the city map for final delivery.
-    vehicle.operational_map_key = "city"
-    vehicle:recalculatePixelPosition(game)
     
-    local PathfindingService = require("services.PathfindingService")
+    local final_plot = vehicle.final_destination_plot
+    local dest_city_data = vehicle.destination_city_data
     
-    -- Use the stored final destination to find the path.
-    local final_plot = vehicle.final_destination_plot or vehicle.cargo[1].legs[#vehicle.cargo[1].legs].end_plot
-    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, final_plot, game)
-
-    if not vehicle.path then
+    if not final_plot or not dest_city_data then
+        print("ERROR: Exiting network but final_destination_plot or city_data is nil!")
         vehicle:changeState(States.Stuck, game)
         return
     end
 
-    -- Clear the stored destination
+    -- THE FIX: We must generate and use a temporary, local grid for the destination city.
+    local temp_city_map = require("models.Map"):new(game.C)
+    local city_w = game.C.MAP.CITY_GRID_WIDTH
+    local city_h = game.C.MAP.CITY_GRID_HEIGHT
+    local city_offset_x = dest_city_data.center_x - (city_w / 2)
+    local city_offset_y = dest_city_data.center_y - (city_h / 2)
+
+    -- Populate the temporary map with the destination city's grid data from the region
+    for y=1, city_h do
+        for x=1, city_w do
+            local reg_x, reg_y = x + city_offset_x, y + city_offset_y
+            if game.maps.region.grid[reg_y] and game.maps.region.grid[reg_y][reg_x] then
+                temp_city_map.grid[y][x] = game.maps.region.grid[reg_y][reg_x]
+            else
+                temp_city_map.grid[y][x] = {type = "grass"}
+            end
+        end
+    end
+    
+    -- Translate the vehicle's grid_anchor from regional coordinates back to local city coordinates.
+    vehicle.grid_anchor.x = vehicle.grid_anchor.x - city_offset_x
+    vehicle.grid_anchor.y = vehicle.grid_anchor.y - city_offset_y
+
+    -- Switch the operational map and recalculate the vehicle's pixel position on the local grid.
+    vehicle.operational_map_key = "city" 
+    vehicle:recalculatePixelPosition(game)
+    
+    -- Translate the final destination plot to local coordinates.
+    local local_final_plot = {
+        x = final_plot.x - city_offset_x,
+        y = final_plot.y - city_offset_y
+    }
+    
+    -- Now, pathfind on the newly created local city map.
+    local PathfindingService = require("services.PathfindingService")
+    print(string.format("DEBUG: Finding final path on new local map to (%d, %d)", local_final_plot.x, local_final_plot.y))
+    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, local_final_plot, game)
+
+    if not vehicle.path then
+        print("ERROR: Could not find path from depot area to final destination on local map.")
+        vehicle:changeState(States.Stuck, game)
+        return
+    end
+
+    -- Clear the stored destination data.
     vehicle.final_destination_plot = nil
+    vehicle.destination_city_data = nil
 end
 
 function States.ExitingNetwork:update(dt, vehicle, game)

@@ -289,15 +289,36 @@ function Vehicle:shouldUseAbstractedSimulation(game)
 end
 
 function Vehicle:drawDebug(game)
-    local CoordinateSystem = require("utils.CoordinateSystem")
-    local coord_system = CoordinateSystem.new(game.C)
-    local screen_x, screen_y = coord_system:worldToScreen(self.px, self.py, game.camera)
+    -- This function is called from within the camera's transformed view.
+    -- All coordinates are relative to the vehicle's world pixel position (self.px, self.py).
+    local screen_x, screen_y = self.px, self.py
 
-    local line_h = 15
+    -- Draw the vehicle's current path
+    if self.path and #self.path > 0 then
+        love.graphics.setColor(0, 0, 1, 0.7) -- Blue for path
+        love.graphics.setLineWidth(2 / game.camera.scale)
+        local pixel_path = {}
+        table.insert(pixel_path, self.px)
+        table.insert(pixel_path, self.py)
+        for _, node in ipairs(self.path) do
+            local px, py = game.maps[self.operational_map_key]:getPixelCoords(node.x, node.y)
+            table.insert(pixel_path, px)
+            table.insert(pixel_path, py)
+        end
+        love.graphics.line(pixel_path)
+        love.graphics.setLineWidth(1)
+    end
+
+    -- THE FIX: All drawing operations for the debug box must be scaled by the camera zoom.
+    local scale = 1 / game.camera.scale
+    local line_h = 15 * scale
+    local menu_x = screen_x + (20 * scale)
+    local menu_y = screen_y - (20 * scale)
+
     local state_name = self.state and self.state.name or "N/A"
     local path_count = self.path and #self.path or 0
     local target_text = "None"
-    if self.path and self.path[1] then
+    if self.path and #self.path > 0 then
         target_text = string.format("(%d, %d)", self.path[1].x, self.path[1].y)
     end
     local debug_lines = {
@@ -309,18 +330,19 @@ function Vehicle:drawDebug(game)
         string.format("Pos: %d, %d", math.floor(self.px), math.floor(self.py))
     }
     
-    local menu_x = screen_x + 20
-    local menu_y = screen_y - 20
-    
     love.graphics.setColor(0, 0, 0, 0.7)
-    love.graphics.rectangle("fill", menu_x - 5, menu_y - 5, 200, #debug_lines * line_h + 10)
+    love.graphics.rectangle("fill", menu_x - (5*scale), menu_y - (5*scale), (200*scale), #debug_lines * line_h + (10*scale))
     
     local old_font = love.graphics.getFont()
     love.graphics.setFont(game.fonts.ui_small)
-    
     love.graphics.setColor(0, 1, 0)
+
     for i, line in ipairs(debug_lines) do
-        love.graphics.print(line, menu_x, menu_y + (i-1) * line_h)
+        love.graphics.push()
+        love.graphics.translate(menu_x, menu_y + (i-1) * line_h)
+        love.graphics.scale(scale, scale)
+        love.graphics.print(line, 0, 0)
+        love.graphics.pop()
     end
     
     love.graphics.setFont(old_font)

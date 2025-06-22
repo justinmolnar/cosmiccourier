@@ -10,7 +10,6 @@ local RingRoad = require("models.generators.ringroad")
 local HighwayMerger = require("models.generators.highway_merger")
 local ConnectingRoads = require("models.generators.connecting_roads")
 
--- NEW: Add a deep copy function to fix the table reference bug
 function MapGenerationService._deepCopyParams(params)
     if not params then return {} end
     
@@ -36,7 +35,7 @@ function MapGenerationService.generateMap(map)
     map.grid = MapGenerationService._createGrid(city_w, city_h, "grass")
 
     -- Generate the initial city in the center of this grid
-    MapGenerationService.generateCityAt(map.grid, math.floor(city_w / 2), math.floor(city_h / 2), C_MAP, params, map)
+    MapGenerationService.generateCityAt(map, map.grid, math.floor(city_w / 2), math.floor(city_h / 2), C_MAP, params)
 
     -- Extract building plots from the newly generated city grid
     map.building_plots = map:getPlotsFromGrid(map.grid)
@@ -48,125 +47,6 @@ function MapGenerationService.generateMap(map)
     print("MapGenerationService: Generation complete. Found " .. #map.building_plots .. " valid building plots.")
 end
 
-function MapGenerationService.generateCityAt(target_grid, center_x, center_y, city_config, params)
-    print(string.format("--- BEGIN CITY GENERATION AT (%d, %d) ---", center_x, center_y))
-
-    local city_w = city_config.CITY_GRID_WIDTH
-    local city_h = city_config.CITY_GRID_HEIGHT
-
-    local temp_grid = MapGenerationService._createGrid(city_w, city_h, "grass")
-
-    local temp_downtown_district = {
-        x = math.floor(city_w / 2) - math.floor(city_config.DOWNTOWN_GRID_WIDTH / 2),
-        y = math.floor(city_h / 2) - math.floor(city_config.DOWNTOWN_GRID_HEIGHT / 2),
-        w = city_config.DOWNTOWN_GRID_WIDTH,
-        h = city_config.DOWNTOWN_GRID_HEIGHT
-    }
-    
-    -- FIX: Create a fresh copy of params for each city generation to prevent 
-    -- the shared reference bug that was causing the second city to be empty
-    local city_params = MapGenerationService._deepCopyParams(params)
-    
-    Downtown.generateDowntownModule(temp_grid, temp_downtown_district, "downtown_road", "downtown_plot", city_params)
-    
-    local all_districts = Districts.generateAll(temp_grid, city_w, city_h, temp_downtown_district, city_params)
-
-    local highway_paths = MapGenerationService._generateHighways(all_districts, city_w, city_h, temp_downtown_district, city_params)
-    
-    local highway_points = MapGenerationService._extractHighwayPoints(highway_paths.ring_road, highway_paths.highways)
-    local connections = ConnectingRoads.generateConnections(temp_grid, all_districts, highway_points, city_w, city_h, temp_downtown_district, city_params)
-
-    MapGenerationService._drawAllRoadsToGrid(temp_grid, highway_paths.ring_road, highway_paths.highways, connections, city_params, city_config)
-    ConnectingRoads.drawConnections(temp_grid, connections, city_params)
-
-    -- DEBUG: Count non-grass tiles in temp grid BEFORE stamping
-    local non_grass_count = 0
-    local tile_types = {}
-    for y = 1, city_h do
-        for x = 1, city_w do
-            local tile_type = temp_grid[y][x].type
-            if tile_type ~= "grass" then
-                non_grass_count = non_grass_count + 1
-                tile_types[tile_type] = (tile_types[tile_type] or 0) + 1
-            end
-        end
-    end
-    print(string.format("DEBUG: Temp grid has %d non-grass tiles before stamping:", non_grass_count))
-    for tile_type, count in pairs(tile_types) do
-        print(string.format("  %s: %d", tile_type, count))
-    end
-
-    local target_start_x = center_x - math.floor(city_w / 2)
-    local target_start_y = center_y - math.floor(city_h / 2)
-    
-    print(string.format("DEBUG: Stamping city from temp grid to target grid"))
-    print(string.format("  Target region bounds: (%d,%d) to (%d,%d)", 
-          target_start_x, target_start_y, target_start_x + city_w, target_start_y + city_h))
-    print(string.format("  Target grid size: %dx%d", #target_grid[1], #target_grid))
-
-    -- DEBUG: Check if target coordinates are in bounds
-    local region_w = #target_grid[1]
-    local region_h = #target_grid
-    local out_of_bounds = false
-    
-    if target_start_x < 1 or target_start_y < 1 or 
-       target_start_x + city_w > region_w or target_start_y + city_h > region_h then
-        out_of_bounds = true
-        print(string.format("ERROR: City bounds extend outside region! Region is %dx%d", region_w, region_h))
-    end
-
-    local stamped_count = 0
-    local stamped_types = {}
-    
-    for y = 1, city_h do
-        for x = 1, city_w do
-            local source_tile = temp_grid[y][x]
-            if source_tile.type ~= "grass" then
-                local target_x = target_start_x + x - 1  -- FIX: Off-by-one error?
-                local target_y = target_start_y + y - 1  -- FIX: Off-by-one error?
-                
-                if target_y >= 1 and target_y <= region_h and 
-                   target_x >= 1 and target_x <= region_w then
-                    target_grid[target_y][target_x] = source_tile
-                    stamped_count = stamped_count + 1
-                    stamped_types[source_tile.type] = (stamped_types[source_tile.type] or 0) + 1
-                else
-                    -- DEBUG: Track out of bounds attempts
-                    if not out_of_bounds then
-                        print(string.format("WARNING: Trying to stamp at (%d,%d) which is out of bounds", target_x, target_y))
-                        out_of_bounds = true
-                    end
-                end
-            end
-        end
-    end
-    
-    print(string.format("DEBUG: Successfully stamped %d tiles:", stamped_count))
-    for tile_type, count in pairs(stamped_types) do
-        print(string.format("  %s: %d", tile_type, count))
-    end
-    
-    -- DEBUG: Verify the tiles actually got stamped by sampling the target grid
-    local verification_count = 0
-    local verify_start_x = math.max(1, target_start_x)
-    local verify_start_y = math.max(1, target_start_y)
-    local verify_end_x = math.min(region_w, target_start_x + city_w - 1)
-    local verify_end_y = math.min(region_h, target_start_y + city_h - 1)
-    
-    for y = verify_start_y, verify_end_y do
-        for x = verify_start_x, verify_end_x do
-            if target_grid[y] and target_grid[y][x] and target_grid[y][x].type ~= "grass" then
-                verification_count = verification_count + 1
-            end
-        end
-    end
-    
-    print(string.format("DEBUG: Verification found %d non-grass tiles in target region", verification_count))
-    
-    print(string.format("--- END CITY GENERATION AT (%d, %d). Stamped %d/%d tiles. ---", 
-          center_x, center_y, stamped_count, non_grass_count))
-end
-
 function MapGenerationService.generateRegion(region_map)
     local C_MAP = region_map.C.MAP
     local REGION_W = C_MAP.REGION_GRID_WIDTH
@@ -176,29 +56,27 @@ function MapGenerationService.generateRegion(region_map)
     local params = region_map.debug_params or {}
 
     region_map.grid = MapGenerationService._createGrid(REGION_W, REGION_H, "grass")
+    region_map.cities_data = {} -- Initialize the cities data table
 
     MapGenerationService._generateRivers(region_map.grid)
     MapGenerationService._generateMountains(region_map.grid)
 
     -- Generate cities and collect their LOCAL data
-    local local_cities_data = {}
-    
     -- MAIN CITY
     local main_city_center_x = REGION_W / 2
     local main_city_center_y = REGION_H / 2
-    local main_city_data = MapGenerationService.generateCityAt(region_map.grid, main_city_center_x, main_city_center_y, C_MAP, MapGenerationService._deepCopyParams(params))
-    table.insert(local_cities_data, main_city_data)
+    local main_city_data = MapGenerationService.generateCityAt(region_map, region_map.grid, main_city_center_x, main_city_center_y, C_MAP, MapGenerationService._deepCopyParams(params))
+    table.insert(region_map.cities_data, main_city_data)
     
     -- SECOND CITY
     local second_city_x = CITY_W / 2 + 20
     local second_city_y = REGION_H - CITY_H / 2 - 20
-    local second_city_data = MapGenerationService.generateCityAt(region_map.grid, second_city_x, second_city_y, C_MAP, MapGenerationService._deepCopyParams(params))
-    table.insert(local_cities_data, second_city_data)
+    local second_city_data = MapGenerationService.generateCityAt(region_map, region_map.grid, second_city_x, second_city_y, C_MAP, MapGenerationService._deepCopyParams(params))
+    table.insert(region_map.cities_data, second_city_data)
 
     -- THE FIX: Translate all local city data into global region coordinates
-    local regional_cities_data = {}
     local all_districts_in_region = {}
-    for _, city in ipairs(local_cities_data) do
+    for city_index, city in ipairs(region_map.cities_data) do
         local city_offset_x = city.center_x - (CITY_W / 2)
         local city_offset_y = city.center_y - (CITY_H / 2)
         
@@ -217,19 +95,16 @@ function MapGenerationService.generateRegion(region_map)
                 y = point.y + city_offset_y
             })
         end
-
-        table.insert(regional_cities_data, {
-            center_x = city.center_x,
-            center_y = city.center_y,
-            ring_road = regional_ring_road,
-            districts = city.districts -- These are now also in region coordinates
-        })
+        
+        -- Update the stored city data with translated points
+        region_map.cities_data[city_index].ring_road = regional_ring_road
+        region_map.cities_data[city_index].districts = city.districts
     end
 
     -- Generate REGIONAL highways using the correctly translated data
     print("--- BEGIN REGIONAL HIGHWAY GENERATION ---")
     local regional_ns_highways = HighwayNS.generatePaths(REGION_W, REGION_H, all_districts_in_region, params)
-    local regional_ew_highways = HighwayEW.generatePaths(REGION_W, REGION_H, all_districts_in_region, regional_cities_data, params)
+    local regional_ew_highways = HighwayEW.generatePaths(REGION_W, REGION_H, all_districts_in_region, region_map.cities_data, params)
     
     local all_regional_highways = {}
     for _, path in ipairs(regional_ns_highways) do table.insert(all_regional_highways, path) end
@@ -273,7 +148,7 @@ function MapGenerationService.generateRegion(region_map)
     print("Region generation complete!")
 end
 
-function MapGenerationService.generateCityAt(target_grid, center_x, center_y, city_config, params)
+function MapGenerationService.generateCityAt(map, target_grid, center_x, center_y, city_config, params)
     print(string.format("--- BEGIN CITY GENERATION AT (%d, %d) ---", center_x, center_y))
 
     local city_w = city_config.CITY_GRID_WIDTH
@@ -312,7 +187,7 @@ function MapGenerationService.generateCityAt(target_grid, center_x, center_y, ci
     MapGenerationService._drawAllRoadsToGrid(temp_grid, ring_road_curve, {}, connections, city_params, city_config)
     ConnectingRoads.drawConnections(temp_grid, connections, city_params)
 
-    -- Stamping logic remains the same...
+    -- Stamping logic
     local stamped_count = 0
     local target_start_x = center_x - math.floor(city_w / 2)
     local target_start_y = center_y - math.floor(city_h / 2)
@@ -337,14 +212,43 @@ function MapGenerationService.generateCityAt(target_grid, center_x, center_y, ci
     end
     
     print(string.format("--- END CITY GENERATION AT (%d, %d). Stamped %d tiles. ---", center_x, center_y, stamped_count))
+    
+    -- Calculate and return the generated data
+    local building_plots = map:getPlotsFromGrid(temp_grid)
 
-    -- Return the generated data for use by the regional generator
     return {
         districts = all_districts,
         ring_road = ring_road_curve,
         center_x = center_x,
-        center_y = center_y
+        center_y = center_y,
+        building_plots = building_plots
     }
+end
+
+function MapGenerationService.getPlotInAnotherCity(game, origin_city_index)
+    local region_map = game.maps.region
+    if not region_map or not region_map.cities_data or #region_map.cities_data < 2 then
+        return nil -- Not enough cities to find "another" one
+    end
+
+    local possible_destinations = {}
+    for i, city_data in ipairs(region_map.cities_data) do
+        if i ~= origin_city_index then
+            table.insert(possible_destinations, city_data)
+        end
+    end
+
+    if #possible_destinations == 0 then
+        return nil -- Should not happen if there are >= 2 cities
+    end
+
+    local destination_city = possible_destinations[love.math.random(1, #possible_destinations)]
+    
+    if destination_city.building_plots and #destination_city.building_plots > 0 then
+        return destination_city.building_plots[love.math.random(1, #destination_city.building_plots)]
+    end
+
+    return nil
 end
 
 -- HELPER AND UTILITY FUNCTIONS (moved from Map.lua)

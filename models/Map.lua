@@ -351,4 +351,21 @@ function Map:isPlotInDowntown(plot)
     return plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max
 end
 
+function Map:getCityDataForPlot(plot)
+    if not self.cities_data then return nil end
+
+    for _, city_data in ipairs(self.cities_data) do
+        local city_w = self.C.MAP.CITY_GRID_WIDTH
+        local city_h = self.C.MAP.CITY_GRID_HEIGHT
+        local city_x_min = city_data.center_x - (city_w / 2)
+        local city_y_min = city_data.center_y - (city_h / 2)
+        
+        if plot.x >= city_x_min and plot.x < city_x_min + city_w and
+           plot.y >= city_y_min and plot.y < city_y_min + city_h then
+            return city_data
+        end
+    end
+    return nil
+end
+
 return Map

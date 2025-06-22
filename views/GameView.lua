@@ -45,18 +45,17 @@ function GameView:draw()
         self:drawVehiclesAtCityScale(Game)
     end
 
-    -- Draw trip path visualization (only for city/downtown view)
-    if (current_scale == C_MAP.SCALES.CITY or current_scale == C_MAP.SCALES.DOWNTOWN) 
-       and ui_manager.hovered_trip_index then
+    -- Draw trip path visualization
+    if ui_manager.hovered_trip_index then
         self:drawTripPathVisualization(Game, ui_manager)
+    end
+    
+    -- THE FIX: Move debug drawing inside the camera transform
+    if Game.debug_mode then
+        self:drawDebugInfo(Game)
     end
 
     love.graphics.pop()
-    
-    -- Debug drawing (only for detailed views)
-    if Game.debug_mode and current_scale ~= C_MAP.SCALES.REGION then
-        self:drawDebugInfo(Game)
-    end
     
     love.graphics.setScissor()
 end
@@ -64,8 +63,6 @@ end
 function GameView:drawRegionalElements(game)
     -- Draw regional-scale elements (cities, major roads, etc.)
     -- For now, this is mostly handled by the region map itself
-    
-    -- Could add city markers, major highway indicators, etc.
 end
 
 function GameView:drawCityElements(game)
@@ -109,20 +106,7 @@ function GameView:drawVehiclesAtCityScale(game)
     -- At city/downtown scale, draw all vehicles
     for _, vehicle in ipairs(game.entities.vehicles) do
         if vehicle.visible then
-            local current_scale = Game.state.current_map_scale
-            local should_draw = false
-            
-            -- Trucks render at all zoom levels
-            if vehicle.type == "truck" then
-                should_draw = true
-            -- Bikes only render at downtown and city scales
-            elseif vehicle.type == "bike" and (current_scale == Game.C.MAP.SCALES.DOWNTOWN or current_scale == Game.C.MAP.SCALES.CITY) then
-                should_draw = true
-            end
-            
-            if should_draw then
-                vehicle:draw(Game)
-            end
+            vehicle:draw(Game)
         end
     end
 end
@@ -133,37 +117,72 @@ function GameView:drawTripPathVisualization(game, ui_manager)
     local active_map = game.maps[game.active_map_key]
     
     local trip = game.entities.trips.pending[ui_manager.hovered_trip_index]
-    if trip and trip.legs[trip.current_leg] then
-        local leg = trip.legs[trip.current_leg]
-        local path_grid = active_map.grid
-        local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1) and 
-                          active_map:findNearestRoadTile(game.entities.depot_plot) or 
-                          active_map:findNearestRoadTile(leg.start_plot)
-        local end_node = active_map:findNearestRoadTile(leg.end_plot)
-        
-        if start_node and end_node and path_grid then
-            local costs = leg.vehicleType == "bike" and Bike.PROPERTIES.pathfinding_costs or Truck.PROPERTIES.pathfinding_costs
-            local path = game.pathfinder.findPath(path_grid, start_node, end_node, costs, active_map)
-            
-            if path then
-                local pixel_path = {}
-                for _, node in ipairs(path) do
-                    local px, py = active_map:getPixelCoords(node.x, node.y)
-                    table.insert(pixel_path, px)
-                    table.insert(pixel_path, py)
-                end
-                
-                local hover_color = game.C.MAP.COLORS.HOVER
-                love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.7)
-                love.graphics.setLineWidth(3 / game.camera.scale)
-                love.graphics.line(pixel_path)
-                love.graphics.setLineWidth(1)
-                
-                local circle_radius = 5 / game.camera.scale
-                love.graphics.setColor(hover_color)
-                love.graphics.circle("fill", pixel_path[1], pixel_path[2], circle_radius)
-                love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], circle_radius)
+    if not trip or not trip.legs[trip.current_leg] then return end
+
+    -- THE FIX: New logic block for drawing paths on the REGIONAL map
+    if game.active_map_key == "region" and trip.is_long_distance then
+        local region_map = game.maps.region
+        local origin_city_data = region_map.cities_data[1] -- Assuming origin is city 1
+        local destination_city_data = nil
+
+        -- Find the destination city by matching the plot
+        for _, city_data in ipairs(region_map.cities_data) do
+            if city_data.center_x ~= origin_city_data.center_x then
+                destination_city_data = city_data
+                break
             end
+        end
+
+        if origin_city_data and destination_city_data then
+            -- Get start and end points (depots) in regional pixel coordinates
+            local start_px, start_py = region_map:getPixelCoords(origin_city_data.center_x, origin_city_data.center_y)
+            local end_px, end_py = region_map:getPixelCoords(destination_city_data.center_x, destination_city_data.center_y)
+            
+            local hover_color = game.C.MAP.COLORS.HOVER
+            love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.7)
+            love.graphics.setLineWidth(5 / game.camera.scale)
+            love.graphics.line(start_px, start_py, end_px, end_py)
+            love.graphics.setLineWidth(1)
+            
+            local circle_radius = 8 / game.camera.scale
+            love.graphics.circle("fill", start_px, start_py, circle_radius)
+            love.graphics.circle("fill", end_px, end_py, circle_radius)
+        end
+        return -- Stop here for regional view
+    end
+        
+    -- Existing logic for drawing paths on the CITY map
+    if trip.is_long_distance and trip.current_leg > 1 then return end
+        
+    local leg = trip.legs[trip.current_leg]
+    local path_grid = active_map.grid
+    local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1) and 
+                        active_map:findNearestRoadTile(game.entities.depot_plot) or 
+                        active_map:findNearestRoadTile(leg.start_plot)
+    local end_node = active_map:findNearestRoadTile(leg.end_plot)
+    
+    if start_node and end_node and path_grid then
+        local costs = leg.vehicleType == "bike" and Bike.PROPERTIES.pathfinding_costs or Truck.PROPERTIES.pathfinding_costs
+        local path = game.pathfinder.findPath(path_grid, start_node, end_node, costs, active_map)
+        
+        if path then
+            local pixel_path = {}
+            for _, node in ipairs(path) do
+                local px, py = active_map:getPixelCoords(node.x, node.y)
+                table.insert(pixel_path, px)
+                table.insert(pixel_path, py)
+            end
+            
+            local hover_color = game.C.MAP.COLORS.HOVER
+            love.graphics.setColor(hover_color[1], hover_color[2], hover_color[3], 0.7)
+            love.graphics.setLineWidth(3 / game.camera.scale)
+            love.graphics.line(pixel_path)
+            love.graphics.setLineWidth(1)
+            
+            local circle_radius = 5 / game.camera.scale
+            love.graphics.setColor(hover_color)
+            love.graphics.circle("fill", pixel_path[1], pixel_path[2], circle_radius)
+            love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], circle_radius)
         end
     end
 end
