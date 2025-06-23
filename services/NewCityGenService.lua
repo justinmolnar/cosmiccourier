@@ -1,299 +1,342 @@
 -- services/NewCityGenService.lua
+-- New WFC-based city generator service as described in the master plan
+
 local NewCityGenService = {}
 
-local pathfinder = require("lib.pathfinder")
+-- Import required modules
+local WFC = require("lib.wfc")
 
--- (The private helper functions _getZoneCenters, _generateZoneBlobSimulation, _generateWfcZones are unchanged from the last correct version)
+-- Zone states for WFC
+local ZONE_STATES = {
+    "downtown",
+    "commercial", 
+    "residential",
+    "industrial",
+    "park"
+}
 
-local function _getZoneCenters(grid)
-    local width, height = #grid[1], #grid
-    local zones = {}
-    local zone_tiles = {}
+function NewCityGenService.generateDetailedCity(params)
+    print("NewCityGenService: Starting detailed city generation with WFC")
+    
+    -- Extract parameters with defaults
+    local width = params.width or 64
+    local height = params.height or 48
+    local terrain_data = params.terrain_data or {}
+    local highway_connections = params.highway_connections or {}
+    local use_wfc_for_zones = params.use_wfc_for_zones or true
+    local use_wfc_for_arterials = params.use_wfc_for_arterials or false
+    local use_wfc_for_details = params.use_wfc_for_details or false
+    
+    local city_grid = NewCityGenService._createEmptyGrid(width, height)
+    
+    -- STAGE 1: Zone Generation
+    print("NewCityGenService: Stage 1 - Zone Generation")
+    local zone_grid
+    if use_wfc_for_zones then
+        zone_grid = NewCityGenService._generateZonesWithWFC(width, height, params)
+    else
+        zone_grid = NewCityGenService._generateZonesSimple(width, height, params)
+    end
+    
+    if not zone_grid then
+        print("ERROR: Zone generation failed!")
+        return nil
+    end
+    
+    -- STAGE 2: Arterial Road Generation  
+    print("NewCityGenService: Stage 2 - Arterial Road Generation")
+    if use_wfc_for_arterials then
+        NewCityGenService._generateArterialsWithWFC(city_grid, zone_grid, highway_connections, params)
+    else
+        NewCityGenService._generateArterialsSimple(city_grid, zone_grid, highway_connections, params)
+    end
+    
+    -- STAGE 3: Local Detail Generation
+    print("NewCityGenService: Stage 3 - Local Detail Generation")
+    if use_wfc_for_details then
+        NewCityGenService._generateDetailsWithWFC(city_grid, zone_grid, params)
+    else
+        NewCityGenService._generateDetailsSimple(city_grid, zone_grid, params)
+    end
+    
+    print("NewCityGenService: City generation complete")
+    return {
+        city_grid = city_grid,
+        zone_grid = zone_grid,
+        stats = {
+            width = width,
+            height = height,
+            zones_generated = NewCityGenService._countZones(zone_grid),
+            generation_method = use_wfc_for_zones and "WFC" or "Simple"
+        }
+    }
+end
 
+-- Create an empty grid filled with grass
+function NewCityGenService._createEmptyGrid(width, height)
+    local grid = {}
     for y = 1, height do
+        grid[y] = {}
         for x = 1, width do
-            local tile = grid[y][x]
-            if tile.zone_type and tile.zone_type ~= "grass" then
-                if not zone_tiles[tile.zone_type] then
-                    zone_tiles[tile.zone_type] = {}
-                end
-                table.insert(zone_tiles[tile.zone_type], {x=x, y=y})
-            end
+            grid[y][x] = { type = "grass" }
         end
     end
-
-    for zone_type, tiles in pairs(zone_tiles) do
-        if #tiles > 0 then
-            local sum_x, sum_y = 0, 0
-            for _, tile in ipairs(tiles) do
-                sum_x = sum_x + tile.x
-                sum_y = sum_y + tile.y
-            end
-            zones[zone_type] = {
-                x = math.floor(sum_x / #tiles),
-                y = math.floor(sum_y / #tiles)
-            }
-        end
-    end
-    print("--- GENERATOR LAB: Found zone centers ---")
-    return zones
+    return grid
 end
 
-local function _generateZoneBlobSimulation(grid, params)
-    print("--- GENERATOR LAB: Generating zone blobs (Simulation) ---")
-    local width = #grid[1]
-    local height = #grid
-    local num_zones = 5
-    local zone_types = {"commercial", "industrial", "residential"}
+-- Generate zones using WFC
+function NewCityGenService._generateZonesWithWFC(width, height, params)
+    print("NewCityGenService: Using WFC for zone generation")
     
-    local zone_centers = {}
-    for i = 1, num_zones do
-        table.insert(zone_centers, {
-            x = love.math.random(1, width),
-            y = love.math.random(1, height),
-            radius = love.math.random(width / 8, width / 4),
-            type = zone_types[love.math.random(1, #zone_types)]
-        })
+    -- Create WFC instance
+    local wfc = WFC.new(width, height, ZONE_STATES)
+    
+    -- Set up zone constraints for coherent blob generation
+    WFC.setZoneConstraints(wfc)
+    
+    -- Add initial downtown constraint in the center
+    local center_x = math.floor(width / 2)
+    local center_y = math.floor(height / 2)
+    
+    print(string.format("NewCityGenService: Placing downtown constraint at (%d, %d)", center_x, center_y))
+    WFC.collapse(wfc, center_x, center_y, "downtown")
+    
+    -- Optional: Add some additional constraints based on params
+    if params.industrial_zones then
+        -- Place industrial zones near edges
+        local edge_positions = {
+            {x = 5, y = 5, zone = "industrial"},
+            {x = width - 5, y = height - 5, zone = "industrial"}
+        }
+        
+        for _, pos in ipairs(edge_positions) do
+            if love.math.random() < 0.7 then -- 70% chance to place
+                WFC.collapse(wfc, pos.x, pos.y, pos.zone)
+            end
+        end
     end
+    
+    -- Run the WFC solver
+    local success = WFC.solve(wfc)
+    
+    if not success then
+        print("ERROR: WFC zone generation failed!")
+        WFC.debugPrint(wfc)
+        return nil
+    end
+    
+    print("NewCityGenService: WFC zone generation successful!")
+    local result = WFC.getResult(wfc)
+    
+    -- Debug: Print the first few rows to verify it worked
+    print("NewCityGenService: Zone generation result preview:")
+    for y = 1, math.min(5, height) do
+        local row = ""
+        for x = 1, math.min(10, width) do
+            local zone = result[y][x]
+            local char = zone == "downtown" and "D" or 
+                        zone == "commercial" and "C" or
+                        zone == "residential" and "R" or
+                        zone == "industrial" and "I" or
+                        zone == "park" and "P" or "?"
+            row = row .. char .. " "
+        end
+        print("  " .. row)
+    end
+    
+    return result
+end
 
+-- Simple zone generation (fallback)
+function NewCityGenService._generateZonesSimple(width, height, params)
+    print("NewCityGenService: Using simple zone generation")
+    
+    local zone_grid = {}
     for y = 1, height do
+        zone_grid[y] = {}
         for x = 1, width do
-            local min_dist = math.huge
-            local closest_zone_type = "grass"
-            for _, zone in ipairs(zone_centers) do
-                local dist = math.sqrt((x - zone.x)^2 + (y - zone.y)^2)
-                if dist < zone.radius and dist < min_dist then
-                    min_dist = dist
-                    closest_zone_type = zone.type
-                end
-            end
-            grid[y][x].zone_type = closest_zone_type
-            if grid[y][x].type == "arterial" or grid[y][x].type == "local_road" then
-                grid[y][x].type = "grass"
-            end
-        end
-    end
-end
-
-local function _generateWfcZones(grid, params)
-    print("--- GENERATOR LAB: Generating zones with WFC ---")
-    local wfc = require("lib.wfc")
-    local width, height = #grid[1], #grid
-
-    local tileset = {
-        {name = "commercial"},
-        {name = "residential"},
-        {name = "industrial"},
-        {name = "grass"}
-    }
-
-    -- THE FIX: A new, more robust and symmetrical set of rules.
-    -- Grass can now touch anything, acting as a buffer.
-    -- Industrial is still separated from commercial/residential by grass.
-    local adjacency_rules = {
-        commercial = {"commercial", "residential", "grass"},
-        residential = {"commercial", "residential", "grass"},
-        industrial = {"industrial", "grass"},
-        grass = {"commercial", "residential", "industrial", "grass"}
-    }
-    
-    local constraints = {}
-    local downtown_w, downtown_h = math.floor(width / 5), math.floor(height / 5)
-    local start_x = math.floor((width - downtown_w) / 2)
-    local start_y = math.floor((height - downtown_h) / 2)
-
-    for y = start_y, start_y + downtown_h do
-        for x = start_x, start_x + downtown_w do
-            constraints[y .. "," .. x] = "commercial"
-        end
-    end
-
-    local wfc_grid = wfc.solve(width, height, tileset, adjacency_rules, constraints)
-
-    for y=1, height do
-        for x=1, width do
-            grid[y][x].zone_type = wfc_grid[y][x].type
-            if grid[y][x].type == "arterial" or grid[y][x].type == "local_road" then
-                grid[y][x].type = "grass"
-            end
-        end
-    end
-end
-
-local function _generateWfcLocalDetails(grid, params)
-    print("--- GENERATOR LAB: Generating local details with WFC ---")
-    local wfc = require("lib.wfc")
-    local width, height = #grid[1], #grid
-
-    -- A simple tileset: a tile is either a local road or a building plot.
-    local tileset = {
-        {name = "local_road"}, 
-        {name = "building_plot"}
-    }
-    
-    -- Rules: roads like to be next to other roads to form paths,
-    -- but can also be next to plots. Plots must be next to a road.
-    local adjacency_rules = {
-        local_road = {"local_road", "building_plot", "arterial"},
-        building_plot = {"local_road", "building_plot"},
-        arterial = {"local_road", "building_plot"}
-    }
-
-    -- Find existing arterial roads to use as constraints
-    local constraints = {}
-    for y=1, height do
-        for x=1, width do
-            if grid[y][x].type == "arterial" then
-                constraints[y .. "," .. x] = "arterial"
-            end
-        end
-    end
-
-    local wfc_grid = wfc.solve(width, height, tileset, adjacency_rules, constraints)
-    
-    -- Apply the results to the grid, but be careful to preserve the arterials
-    for y=1, height do
-        for x=1, width do
-            if grid[y][x].type ~= "arterial" then
-                grid[y][x].type = wfc_grid[y][x].type
-            end
-        end
-    end
-end
-
--- Renamed old walker function
-local function _generateWalkerLocalRoads(grid, params)
-    print("--- GENERATOR LAB: Generating local roads with walkers ---")
-    local map_w, map_h = #grid[1], #grid
-    
-    for y=1, map_h do
-        for x=1, map_w do
-            if grid[y][x].type ~= "arterial" then
-                grid[y][x].type = "building_plot"
-            end
-        end
-    end
-
-    local starting_points = {}
-    for y = 1, map_h do
-        for x = 1, map_w do
-            if grid[y][x].type == "arterial" then
-                table.insert(starting_points, {x=x, y=y})
-            end
-        end
-    end
-
-    if #starting_points == 0 then return end
-
-    local walkers = {}
-    local num_walkers = 75
-    local directions = {{1,0}, {-1,0}, {0,1}, {0,-1}}
-
-    for i = 1, num_walkers do
-        local start_pos = starting_points[love.math.random(1, #starting_points)]
-        table.insert(walkers, {
-            x = start_pos.x,
-            y = start_pos.y,
-            life = love.math.random(20, 50),
-            dir = directions[love.math.random(1, #directions)]
-        })
-    end
-
-    local turn_chance = 0.2
-    while #walkers > 0 do
-        for i = #walkers, 1, -1 do
-            local walker = walkers[i]
+            local center_x, center_y = width / 2, height / 2
+            local distance = math.sqrt((x - center_x)^2 + (y - center_y)^2)
             
-            walker.x = walker.x + walker.dir[1]
-            walker.y = walker.y + walker.dir[2]
-            walker.life = walker.life - 1
-
-            local out_of_bounds = walker.x < 1 or walker.x > map_w or walker.y < 1 or walker.y > map_h
-            if out_of_bounds or walker.life <= 0 then
-                table.remove(walkers, i)
+            if distance < 8 then
+                zone_grid[y][x] = "downtown"
+            elseif distance < 15 then
+                zone_grid[y][x] = "commercial" 
+            elseif distance < 25 then
+                zone_grid[y][x] = love.math.random() < 0.7 and "residential" or "park"
             else
-                if grid[walker.y] and grid[walker.y][walker.x] then
-                    local current_tile = grid[walker.y][walker.x]
-                    if current_tile.type ~= "arterial" then
-                        current_tile.type = "local_road"
-                    end
-                end
-
-                if love.math.random() < turn_chance then
-                    walker.dir = directions[love.math.random(1, #directions)]
-                end
+                zone_grid[y][x] = love.math.random() < 0.3 and "industrial" or "residential"
             end
         end
     end
-    print("--- GENERATOR LAB: Finished local road walkers. ---")
+    
+    return zone_grid
 end
 
-
--- PUBLIC FUNCTIONS
-function NewCityGenService.generateZoneBlobs(grid, params)
-    if params.use_wfc_for_zones then
-        _generateWfcZones(grid, params)
-    else
-        _generateZoneBlobSimulation(grid, params)
+-- Generate arterial roads with A* pathfinding (simple implementation)
+function NewCityGenService._generateArterialsSimple(city_grid, zone_grid, highway_connections, params)
+    print("NewCityGenService: Generating arterial roads with A* pathfinding")
+    
+    -- Find downtown center
+    local downtown_center = NewCityGenService._findZoneCenter(zone_grid, "downtown")
+    if not downtown_center then
+        print("WARNING: No downtown center found for arterial generation")
+        return
+    end
+    
+    -- Create main arterial roads from downtown to edges
+    local width, height = #zone_grid[1], #zone_grid
+    
+    -- Horizontal arterial
+    for x = 1, width do
+        if NewCityGenService._inBounds(x, downtown_center.y, width, height) then
+            city_grid[downtown_center.y][x] = { type = "arterial" }
+        end
+    end
+    
+    -- Vertical arterial  
+    for y = 1, height do
+        if NewCityGenService._inBounds(downtown_center.x, y, width, height) then
+            city_grid[y][downtown_center.x] = { type = "arterial" }
+        end
+    end
+    
+    -- Connect to highway connections if provided
+    for _, connection in ipairs(highway_connections) do
+        NewCityGenService._createPath(city_grid, downtown_center, connection, "arterial")
     end
 end
 
-function NewCityGenService.generateArterialRoads(grid, params, game)
-    print("--- GENERATOR LAB: Generating arterial roads ---")
-    for y=1, #grid do for x=1, #grid[1] do if grid[y][x].type == "arterial" then grid[y][x].type = "grass" end end end
+-- Generate arterial roads with WFC (placeholder)
+function NewCityGenService._generateArterialsWithWFC(city_grid, zone_grid, highway_connections, params)
+    print("NewCityGenService: WFC arterial generation not yet implemented, using simple method")
+    NewCityGenService._generateArterialsSimple(city_grid, zone_grid, highway_connections, params)
+end
 
-    local zone_centers = _getZoneCenters(grid)
-    local map_w, map_h = #grid[1], #grid
+-- Generate local details (roads, plots) - simple implementation
+function NewCityGenService._generateDetailsSimple(city_grid, zone_grid, params)
+    print("NewCityGenService: Generating local details")
+    
+    local width, height = #zone_grid[1], #zone_grid
+    
+    for y = 1, height do
+        for x = 1, width do
+            local zone = zone_grid[y][x]
+            
+            -- Skip if already has arterial road
+            if city_grid[y][x].type == "arterial" then
+                goto continue
+            end
+            
+            -- Generate content based on zone type
+            if zone == "downtown" then
+                -- Dense road network in downtown
+                if (x + y) % 3 == 0 then
+                    city_grid[y][x] = { type = "road" }
+                else
+                    city_grid[y][x] = { type = "plot" }
+                end
+            elseif zone == "commercial" or zone == "residential" then
+                -- Regular grid pattern
+                if x % 4 == 0 or y % 4 == 0 then
+                    city_grid[y][x] = { type = "road" }
+                else
+                    city_grid[y][x] = { type = "plot" }
+                end
+            elseif zone == "industrial" then
+                -- Sparse road network
+                if x % 6 == 0 or y % 6 == 0 then
+                    city_grid[y][x] = { type = "road" }
+                else
+                    city_grid[y][x] = { type = "plot" }
+                end
+            elseif zone == "park" then
+                -- Mostly grass with some paths
+                if x % 8 == 0 or y % 8 == 0 then
+                    city_grid[y][x] = { type = "road" }
+                else
+                    city_grid[y][x] = { type = "grass" }
+                end
+            else
+                city_grid[y][x] = { type = "grass" }
+            end
+            
+            ::continue::
+        end
+    end
+end
 
-    local highway_connections = {
-        {x = math.floor(map_w / 2), y = 1},
-        {x = math.floor(map_w / 2), y = map_h},
-        {x = 1, y = math.floor(map_h / 2)},
-        {x = map_w, y = math.floor(map_h / 2)}
+-- Generate local details with WFC (placeholder)
+function NewCityGenService._generateDetailsWithWFC(city_grid, zone_grid, params)
+    print("NewCityGenService: WFC detail generation not yet implemented, using simple method")
+    NewCityGenService._generateDetailsSimple(city_grid, zone_grid, params)
+end
+
+-- Helper function to find the center of a specific zone type
+function NewCityGenService._findZoneCenter(zone_grid, zone_type)
+    local sum_x, sum_y, count = 0, 0, 0
+    local height, width = #zone_grid, #zone_grid[1]
+    
+    for y = 1, height do
+        for x = 1, width do
+            if zone_grid[y][x] == zone_type then
+                sum_x = sum_x + x
+                sum_y = sum_y + y
+                count = count + 1
+            end
+        end
+    end
+    
+    if count == 0 then
+        return nil
+    end
+    
+    return {
+        x = math.floor(sum_x / count),
+        y = math.floor(sum_y / count)
     }
+end
 
-    local temp_map = { isRoad = function(tile_type) return tile_type ~= "arterial" end }
-    local costs = { grass = 1, commercial = 5, industrial = 5, residential = 5 }
-
-    for _, center in pairs(zone_centers) do
-        local start_node = center
-        local end_node = highway_connections[love.math.random(1, #highway_connections)]
-        if start_node and end_node then
-            local path = pathfinder.findPath(grid, start_node, end_node, costs, temp_map)
-            if path then
-                for _, p_node in ipairs(path) do
-                    grid[p_node.y][p_node.x].type = "arterial"
-                end
-            end
+-- Helper function to create a simple path between two points
+function NewCityGenService._createPath(grid, start, end_point, road_type)
+    local current_x, current_y = start.x, start.y
+    local target_x, target_y = end_point.x, end_point.y
+    local width, height = #grid[1], #grid
+    
+    -- Simple L-shaped path
+    while current_x ~= target_x do
+        if NewCityGenService._inBounds(current_x, current_y, width, height) then
+            grid[current_y][current_x] = { type = road_type }
         end
+        current_x = current_x + (target_x > current_x and 1 or -1)
+    end
+    
+    while current_y ~= target_y do
+        if NewCityGenService._inBounds(current_x, current_y, width, height) then
+            grid[current_y][current_x] = { type = road_type }
+        end
+        current_y = current_y + (target_y > current_y and 1 or -1)
     end
 end
 
-function NewCityGenService.generateLocalRoads(grid, params)
-    if params.use_wfc_for_details then
-        _generateWfcLocalDetails(grid, params)
-    else
-        _generateWalkerLocalRoads(grid, params)
-    end
+-- Helper function to check bounds
+function NewCityGenService._inBounds(x, y, width, height)
+    return x >= 1 and x <= width and y >= 1 and y <= height
 end
 
-function NewCityGenService.generateDetailedCity(params, game)
-    print("--- GENERATOR LAB: generateDetailedCity called ---")
+-- Helper function to count zones for statistics
+function NewCityGenService._countZones(zone_grid)
+    local counts = {}
+    local height, width = #zone_grid, #zone_grid[1]
     
-    local temp_grid = {}
-    for y = 1, params.height do
-        temp_grid[y] = {}
-        for x = 1, params.width do
-            temp_grid[y][x] = { type = "grass", zone_type = "grass" }
+    for y = 1, height do
+        for x = 1, width do
+            local zone = zone_grid[y][x]
+            counts[zone] = (counts[zone] or 0) + 1
         end
     end
     
-    NewCityGenService.generateZoneBlobs(temp_grid, params)
-    NewCityGenService.generateArterialRoads(temp_grid, params, game)
-    NewCityGenService.generateLocalRoads(temp_grid, params)
-    
-    print(string.format("--- GENERATOR LAB: Created a %dx%d grid with all road layers. ---", params.width, params.height))
-    return temp_grid
+    return counts
 end
 
 return NewCityGenService

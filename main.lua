@@ -165,6 +165,80 @@ end
 
 function love.keypressed(key)
     Game.input_controller:keypressed(key)
+    
+    -- WFC Testing Controls
+    if key == "w" then
+        print("=== Testing WFC (Small Grid) ===")
+        
+        local NewCityGenService = require("services.NewCityGenService")
+        
+        local wfc_params = {
+            width = 32,  -- Small for fast testing
+            height = 24,
+            use_wfc_for_zones = true,
+            use_wfc_for_arterials = false,
+            use_wfc_for_details = false,
+            industrial_zones = true
+        }
+        
+        local result = NewCityGenService.generateDetailedCity(wfc_params)
+        
+        if result and result.city_grid then
+            Game.lab_grid = result.city_grid
+            Game.lab_zone_grid = result.zone_grid
+            print("WFC SUCCESS! Grid:", #result.city_grid, "x", #result.city_grid[1])
+            if result.stats and result.stats.zones_generated then
+                print("Zone counts:")
+                for zone, count in pairs(result.stats.zones_generated) do
+                    print("  " .. zone .. ": " .. count)
+                end
+            end
+        else
+            print("WFC FAILED!")
+        end
+    end
+    
+    -- Large grid test
+    if key == "e" then
+        print("=== Testing WFC (Large Grid) ===")
+        
+        local NewCityGenService = require("services.NewCityGenService")
+        
+        local wfc_params = {
+            width = 64,  -- Larger grid
+            height = 48,
+            use_wfc_for_zones = true,
+            use_wfc_for_arterials = false,
+            use_wfc_for_details = false,
+            industrial_zones = true
+        }
+        
+        local result = NewCityGenService.generateDetailedCity(wfc_params)
+        
+        if result and result.city_grid then
+            Game.lab_grid = result.city_grid
+            Game.lab_zone_grid = result.zone_grid
+            print("Large WFC SUCCESS!")
+        else
+            print("Large WFC FAILED!")
+        end
+    end
+    
+    -- Clear test
+    if key == "c" then
+        Game.lab_grid = nil
+        Game.lab_zone_grid = nil
+        print("=== Cleared lab grid ===")
+    end
+    
+    -- Print controls
+    if key == "h" then
+        print("=== WFC Test Controls ===")
+        print("W - Generate small WFC grid (32x24)")
+        print("E - Generate large WFC grid (64x48)") 
+        print("C - Clear lab grid")
+        print("H - Show this help")
+    end
 end
 
 function love.mousewheelmoved(x, y)
