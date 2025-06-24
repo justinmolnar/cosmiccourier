@@ -184,8 +184,21 @@ end
 
 -- Generate arterial roads with WFC (placeholder)
 function NewCityGenService._generateArterialsWithWFC(city_grid, zone_grid, highway_connections, params)
-    print("NewCityGenService: WFC arterial generation not yet implemented, using simple method")
-    NewCityGenService._generateArterialsSimple(city_grid, zone_grid, highway_connections, params)
+    print("NewCityGenService: Generating arterials with WFC pathfinding system")
+    
+    -- Import the arterial road service
+    local ArterialRoadService = require("services.ArterialRoadService")
+    
+    -- Set up arterial generation parameters
+    local arterial_params = {
+        num_arterials = params.num_arterials or 3,
+        min_edge_distance = params.min_edge_distance or 15
+    }
+    
+    -- Use the new arterial road service
+    ArterialRoadService.generateArterialRoads(city_grid, zone_grid, arterial_params)
+    
+    print("NewCityGenService: WFC arterial generation complete")
 end
 
 -- Generate local details (roads, plots) - simple implementation
@@ -312,6 +325,41 @@ function NewCityGenService._countZones(zone_grid)
     end
     
     return counts
+end
+
+function NewCityGenService.generateArterialsOnly(city_grid, zone_grid, params)
+    print("NewCityGenService: Generating arterials only")
+    
+    if not city_grid or not zone_grid then
+        print("ERROR: Missing grids for arterial generation")
+        return false
+    end
+    
+    -- First, clear any existing arterial roads
+    print("NewCityGenService: Clearing existing arterial roads")
+    local width, height = #city_grid[1], #city_grid
+    for y = 1, height do
+        for x = 1, width do
+            if city_grid[y][x].type == "arterial" then
+                city_grid[y][x].type = "grass"
+            end
+        end
+    end
+    
+    -- Import the arterial road service
+    local ArterialRoadService = require("services.ArterialRoadService")
+    
+    -- Set up arterial generation parameters
+    local arterial_params = {
+        num_arterials = params.num_arterials or 3,
+        min_edge_distance = params.min_edge_distance or 15
+    }
+    
+    -- Generate arterials using pathfinding
+    ArterialRoadService.generateArterialRoads(city_grid, zone_grid, arterial_params)
+    
+    print("NewCityGenService: Arterials-only generation complete")
+    return true
 end
 
 return NewCityGenService

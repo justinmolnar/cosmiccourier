@@ -224,6 +224,36 @@ function love.keypressed(key)
         end
     end
     
+    -- Arterial road generation test
+    if key == "r" then
+        print("=== Testing Arterial Road Generation ===")
+        
+        if Game.lab_grid and Game.lab_zone_grid then
+            local NewCityGenService = require("services.NewCityGenService")
+            
+            -- Parameters for arterial generation
+            local arterial_params = {
+                num_arterials = 4,        -- Number of arterial roads
+                min_edge_distance = 15    -- Minimum distance between entry/exit points
+            }
+            
+            local success = NewCityGenService.generateArterialsOnly(
+                Game.lab_grid, 
+                Game.lab_zone_grid, 
+                arterial_params
+            )
+            
+            if success then
+                print("Arterial road generation SUCCESS!")
+                print("Generated arterial roads that snake around districts")
+            else
+                print("Arterial road generation FAILED!")
+            end
+        else
+            print("ERROR: No lab grid available. Press 'W' or 'E' first to generate zones.")
+        end
+    end
+    
     -- Clear test
     if key == "c" then
         Game.lab_grid = nil
@@ -236,6 +266,7 @@ function love.keypressed(key)
         print("=== WFC Test Controls ===")
         print("W - Generate small WFC grid (32x24)")
         print("E - Generate large WFC grid (64x48)") 
+        print("R - Generate arterial roads (requires existing zones)")
         print("C - Clear lab grid")
         print("H - Show this help")
     end

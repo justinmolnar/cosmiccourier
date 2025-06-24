@@ -251,7 +251,7 @@ function GameView:getTileColor(tile_type)
     if tile_type == "road" then
         return C_MAP.COLORS.ROAD
     elseif tile_type == "arterial" then
-        return {0.6, 0.6, 0.6} -- Lighter gray for arterials
+        return {0.1, 0.1, 0.1} -- Lighter gray for arterials
     elseif tile_type == "plot" then
         return C_MAP.COLORS.PLOT
     elseif tile_type == "grass" then
