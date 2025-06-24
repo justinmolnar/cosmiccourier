@@ -4,15 +4,23 @@
 local NewCityGenService = {}
 
 -- Import required modules
-local WFC = require("lib.wfc")
+local WFCZoningService = require("services.WFCZoningService") -- Use our custom zoning service instead
 
--- Zone states for WFC
+-- Zone states for WFC - UPDATED with all new zones
 local ZONE_STATES = {
-    "downtown",
-    "commercial", 
-    "residential",
-    "industrial",
-    "park"
+    "commercial",
+    "residential_north", 
+    "residential_south",
+    "industrial_heavy",
+    "industrial_light",
+    "university",
+    "medical", 
+    "entertainment",
+    "waterfront",
+    "warehouse",
+    "tech",
+    "park_central",
+    "park_nature"
 }
 
 function NewCityGenService.generateDetailedCity(params)
@@ -84,67 +92,34 @@ function NewCityGenService._createEmptyGrid(width, height)
     return grid
 end
 
--- Generate zones using WFC
+-- FIXED: Generate zones using our custom WFCZoningService instead of generic WFC
 function NewCityGenService._generateZonesWithWFC(width, height, params)
-    print("NewCityGenService: Using WFC for zone generation")
+    print("NewCityGenService: Using custom WFCZoningService for zone generation")
     
-    -- Create WFC instance
-    local wfc = WFC.new(width, height, ZONE_STATES)
-    
-    -- Set up zone constraints for coherent blob generation
-    WFC.setZoneConstraints(wfc)
-    
-    -- Add initial downtown constraint in the center
+    -- Calculate downtown center
     local center_x = math.floor(width / 2)
     local center_y = math.floor(height / 2)
     
-    print(string.format("NewCityGenService: Placing downtown constraint at (%d, %d)", center_x, center_y))
-    WFC.collapse(wfc, center_x, center_y, "downtown")
+    print(string.format("NewCityGenService: Placing downtown at (%d, %d)", center_x, center_y))
     
-    -- Optional: Add some additional constraints based on params
-    if params.industrial_zones then
-        -- Place industrial zones near edges
-        local edge_positions = {
-            {x = 5, y = 5, zone = "industrial"},
-            {x = width - 5, y = height - 5, zone = "industrial"}
-        }
-        
-        for _, pos in ipairs(edge_positions) do
-            if love.math.random() < 0.7 then -- 70% chance to place
-                WFC.collapse(wfc, pos.x, pos.y, pos.zone)
-            end
-        end
-    end
+    -- Use our custom WFC zoning service that creates proper districts
+    local zone_grid = WFCZoningService.generateCoherentZones(width, height, center_x, center_y)
     
-    -- Run the WFC solver
-    local success = WFC.solve(wfc)
-    
-    if not success then
-        print("ERROR: WFC zone generation failed!")
-        WFC.debugPrint(wfc)
+    if not zone_grid then
+        print("ERROR: WFCZoningService failed to generate zones!")
         return nil
     end
     
-    print("NewCityGenService: WFC zone generation successful!")
-    local result = WFC.getResult(wfc)
+    print("NewCityGenService: Custom WFC zone generation successful!")
     
-    -- Debug: Print the first few rows to verify it worked
-    print("NewCityGenService: Zone generation result preview:")
-    for y = 1, math.min(5, height) do
-        local row = ""
-        for x = 1, math.min(10, width) do
-            local zone = result[y][x]
-            local char = zone == "downtown" and "D" or 
-                        zone == "commercial" and "C" or
-                        zone == "residential" and "R" or
-                        zone == "industrial" and "I" or
-                        zone == "park" and "P" or "?"
-            row = row .. char .. " "
-        end
-        print("  " .. row)
+    -- Debug: Print zone statistics
+    local stats, total = WFCZoningService.getZoneStats(zone_grid)
+    print("NewCityGenService: Zone distribution:")
+    for zone_name, zone_stats in pairs(stats) do
+        print(string.format("  %s: %d cells (%d%%)", zone_name, zone_stats.count, zone_stats.percentage))
     end
     
-    return result
+    return zone_grid
 end
 
 -- Simple zone generation (fallback)

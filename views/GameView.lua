@@ -235,8 +235,7 @@ function GameView:drawZoneOverlay(offset_x, offset_y, tile_size)
     love.graphics.setFont(Game.fonts.ui_small)
     love.graphics.print("Zones:", legend_x, legend_y)
     
-    local zones = {"downtown", "commercial", "residential", "industrial", "park"}
-    for i, zone in ipairs(zones) do
+local zones = {"downtown", "commercial", "residential_north", "residential_south", "industrial_heavy", "industrial_light", "university", "medical", "entertainment", "waterfront", "warehouse", "tech", "park_central", "park_nature"}    for i, zone in ipairs(zones) do
         local color = self:getZoneColor(zone)
         love.graphics.setColor(color[1], color[2], color[3])
         love.graphics.rectangle("fill", legend_x, legend_y + 20 + (i-1)*20, 15, 15)
@@ -263,18 +262,35 @@ function GameView:getTileColor(tile_type)
 end
 
 
--- BONUS: Helper function for zone colors
 function GameView:getZoneColor(zone_type)
     if zone_type == "downtown" then
         return {1, 1, 0} -- Yellow for downtown
     elseif zone_type == "commercial" then
         return {0, 0, 1} -- Blue for commercial
-    elseif zone_type == "residential" then
-        return {0, 1, 0} -- Green for residential
-    elseif zone_type == "industrial" then
-        return {1, 0, 0} -- Red for industrial
-    elseif zone_type == "park" then
-        return {0, 0.8, 0.2} -- Dark green for parks
+    elseif zone_type == "residential_north" then
+        return {0, 1, 0} -- Green for residential north
+    elseif zone_type == "residential_south" then
+        return {0, 0.7, 0} -- Dark green for residential south
+    elseif zone_type == "industrial_heavy" then
+        return {1, 0, 0} -- Red for heavy industrial
+    elseif zone_type == "industrial_light" then
+        return {0.8, 0.2, 0.2} -- Light red for light industrial
+    elseif zone_type == "university" then
+        return {0.6, 0, 0.8} -- Purple for university
+    elseif zone_type == "medical" then
+        return {1, 0.5, 0.8} -- Pink for medical
+    elseif zone_type == "entertainment" then
+        return {1, 0.5, 0} -- Orange for entertainment
+    elseif zone_type == "waterfront" then
+        return {0, 0.8, 0.8} -- Cyan for waterfront
+    elseif zone_type == "warehouse" then
+        return {0.5, 0.3, 0.1} -- Brown for warehouse
+    elseif zone_type == "tech" then
+        return {0.3, 0.3, 0.8} -- Dark blue for tech
+    elseif zone_type == "park_central" then
+        return {0.2, 0.8, 0.3} -- Light green for central park
+    elseif zone_type == "park_nature" then
+        return {0.1, 0.6, 0.1} -- Dark green for nature park
     else
         return {0.5, 0.5, 0.5} -- Gray for unknown
     end
