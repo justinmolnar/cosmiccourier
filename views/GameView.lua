@@ -183,18 +183,18 @@ function GameView:drawLabGrid()
         end
     end
     
-    -- Draw zone overlay
-    if Game.lab_zone_grid then
+    -- MODIFIED: Conditionally draw zone overlay
+    if Game.show_districts and Game.lab_zone_grid then
         self:drawZoneOverlay(offset_x, offset_y, tile_size)
     end
     
     -- Draw title and info
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(Game.fonts.ui)
-    love.graphics.print("WFC Lab Grid - Press 'C' to clear, 'W'/'E' to regenerate", offset_x, offset_y - 35)
+    love.graphics.print("WFC Lab Grid - Press 'T' to toggle zones, 'C' to clear, 'W'/'E'/'R' to generate", offset_x, offset_y - 35)
     love.graphics.setFont(Game.fonts.ui_small)
-    love.graphics.print(string.format("Grid: %dx%d | Tile: %dpx | Zones: see colored overlay", 
-                       grid_w, grid_h, tile_size), offset_x, offset_y - 20)
+    love.graphics.print(string.format("Grid: %dx%d | Tile: %dpx | Zones: %s", 
+                       grid_w, grid_h, tile_size, Game.show_districts and "Visible" or "Hidden"), offset_x, offset_y - 20)
     
     love.graphics.setColor(1, 1, 1)
 end

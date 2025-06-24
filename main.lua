@@ -60,7 +60,8 @@ function love.load()
         game_controller = nil,
         input_controller = nil,
         game_view = nil,
-        ui_view = nil
+        ui_view = nil,
+        show_districts = true -- NEW: Flag to control zone visibility
     }
     
     -- Try to load saved game
@@ -261,6 +262,12 @@ function love.keypressed(key)
         print("=== Cleared lab grid ===")
     end
     
+    -- MODIFIED: Add toggle for district visibility
+    if key == "t" then
+        Game.show_districts = not Game.show_districts
+        print("=== Toggled district visibility to: " .. tostring(Game.show_districts) .. " ===")
+    end
+    
     -- Print controls
     if key == "h" then
         print("=== WFC Test Controls ===")
@@ -268,6 +275,7 @@ function love.keypressed(key)
         print("E - Generate large WFC grid (64x48)") 
         print("R - Generate arterial roads (requires existing zones)")
         print("C - Clear lab grid")
+        print("T - Toggle district zone visibility")
         print("H - Show this help")
     end
 end
