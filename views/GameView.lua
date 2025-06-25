@@ -188,10 +188,32 @@ function GameView:drawLabGrid()
         self:drawZoneOverlay(offset_x, offset_y, tile_size)
     end
     
+    -- NEW: Draw the smooth highway overlay
+    if Game.smooth_highway_overlay_paths and #Game.smooth_highway_overlay_paths > 0 then
+        love.graphics.setLineWidth(5) -- Thicker pink lines like the screenshot
+        love.graphics.setColor(1, 0.5, 0.7, 0.8) -- Pinkish color with some transparency
+
+        for _, spline_path in ipairs(Game.smooth_highway_overlay_paths) do
+            local pixel_path = {}
+            if #spline_path > 1 then
+                for _, node in ipairs(spline_path) do
+                    -- Convert grid coordinates from the path to pixel coordinates for drawing
+                    local px = offset_x + (node.x - 1) * tile_size + (tile_size / 2)
+                    local py = offset_y + (node.y - 1) * tile_size + (tile_size / 2)
+                    table.insert(pixel_path, px)
+                    table.insert(pixel_path, py)
+                end
+                love.graphics.line(pixel_path)
+            end
+        end
+
+        love.graphics.setLineWidth(1) -- Reset line width
+    end
+    
     -- Draw title and info
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(Game.fonts.ui)
-    love.graphics.print("WFC Lab Grid - Press 'T' to toggle zones, 'C' to clear, 'W'/'E'/'R' to generate", offset_x, offset_y - 35)
+    love.graphics.print("WFC Lab Grid - Press 'T' to toggle zones, 'C' to clear, 'W'/'E'/'R'/'Y' to generate", offset_x, offset_y - 35)
     love.graphics.setFont(Game.fonts.ui_small)
     love.graphics.print(string.format("Grid: %dx%d | Tile: %dpx | Zones: %s", 
                        grid_w, grid_h, tile_size, Game.show_districts and "Visible" or "Hidden"), offset_x, offset_y - 20)

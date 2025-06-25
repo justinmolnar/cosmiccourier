@@ -332,7 +332,7 @@ function NewCityGenService.generateArterialsOnly(city_grid, zone_grid, params)
     
     if not city_grid or not zone_grid then
         print("ERROR: Missing grids for arterial generation")
-        return false
+        return false, nil
     end
     
     -- First, clear any existing arterial roads
@@ -355,11 +355,11 @@ function NewCityGenService.generateArterialsOnly(city_grid, zone_grid, params)
         min_edge_distance = params.min_edge_distance or 15
     }
     
-    -- Generate arterials using pathfinding
-    ArterialRoadService.generateArterialRoads(city_grid, zone_grid, arterial_params)
+    -- Generate arterials using pathfinding and get the paths back
+    local generated_paths = ArterialRoadService.generateArterialRoads(city_grid, zone_grid, arterial_params)
     
     print("NewCityGenService: Arterials-only generation complete")
-    return true
+    return true, generated_paths -- MODIFIED: Return the paths
 end
 
 return NewCityGenService

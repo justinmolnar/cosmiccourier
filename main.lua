@@ -42,12 +42,11 @@ function love.load()
         EventBus = require("core.event_bus"),
         state = nil,
         time = require("core.time"):new(),
-        -- MODIFIED: From 'map' to 'maps' to hold multiple map instances
         maps = {
             city = require("models.Map"):new(C),
-            region = require("models.Map"):new(C) -- Add a map for the region view
+            region = require("models.Map"):new(C)
         },
-        active_map_key = "city", -- The key of the map currently being viewed/simulated
+        active_map_key = "city",
         entities = require("models.EntityManager"):new(),
         autodispatcher = require("models.AutoDispatcher"):new(C),
         event_spawner = require("models.EventSpawner"):new(C),
@@ -61,16 +60,17 @@ function love.load()
         input_controller = nil,
         game_view = nil,
         ui_view = nil,
-        show_districts = true -- NEW: Flag to control zone visibility
+        show_districts = true,
+        -- NEW: Storing paths from R and Y keys separately
+        arterial_control_paths = {},
+        smooth_highway_overlay_paths = {}
     }
     
-    -- Try to load saved game
     local SaveService = require("services.SaveService")
     local save_data = SaveService.loadGame()
     
     Game.state = require("models.GameState"):new(C, Game)
     
-    -- Apply save data if available
     if save_data then
         ErrorService.withErrorHandling(function()
             SaveService.applySaveData(Game.state, save_data)
@@ -88,14 +88,12 @@ function love.load()
     Game.game_view = GameView:new(Game)
     Game.ui_view = UIView:new(Game)
 
-    -- MODIFIED: Generate the REGION map on startup now
     ErrorService.withErrorHandling(function()
         Game.maps.region:generateRegion()
     end, "Region Map Generation")
     
     Game.entities:init(Game)
     
-    -- Font loading with error handling
     ErrorService.withErrorHandling(function()
         local uiFont = love.graphics.newFont(C.UI.FONT_PATH_MAIN, C.UI.FONT_SIZE_UI)
         local uiFontSmall = love.graphics.newFont(C.UI.FONT_PATH_MAIN, C.UI.FONT_SIZE_UI_SMALL)
@@ -116,10 +114,8 @@ function love.load()
         love.graphics.setFont(Game.fonts.ui)
     end, "Font Loading")
     
-    -- MODIFIED: Set the initial scale on the city map
     Game.maps.city:setScale(C.MAP.SCALES.DOWNTOWN)
     
-    -- Set up auto-save timer
     local auto_save_interval = GameConfig.get("ui", "auto_save_interval")
     if auto_save_interval > 0 then
         Game.auto_save_timer = auto_save_interval
@@ -131,7 +127,6 @@ end
 function love.update(dt)
     Game.game_controller:update(dt)
     
-    -- Handle auto-save
     if Game.auto_save_timer then
         Game.auto_save_timer = Game.auto_save_timer - dt
         if Game.auto_save_timer <= 0 then
@@ -140,7 +135,6 @@ function love.update(dt)
                 SaveService.saveGame(Game.state, "autosave.json")
             end, "Auto Save")
             
-            -- Reset timer
             Game.auto_save_timer = Game.config.get("ui", "auto_save_interval")
         end
     end
@@ -150,7 +144,6 @@ function love.draw()
     Game.ui_view:draw()
     Game.game_view:draw()
 
-    -- NEW: Draw the Lab Grid on top of the game world, but under the UI
     if Game.debug_lab_grid then
         Game.game_view:drawLabGrid()
     end
@@ -158,7 +151,6 @@ function love.draw()
     Game.zoom_controls:draw(Game)
     Game.ui_manager.modal_manager:draw(Game)
     
-    -- Draw debug menu on top of everything
     if Game.input_controller:isDebugMenuVisible() then
         Game.input_controller:getDebugMenuView():draw()
     end
@@ -168,113 +160,87 @@ function love.keypressed(key)
     Game.input_controller:keypressed(key)
     
     -- WFC Testing Controls
-    if key == "w" then
-        print("=== Testing WFC (Small Grid) ===")
-        
+    if key == "w" or key == "e" then
+        print("=== Testing WFC Grid Generation ===")
         local NewCityGenService = require("services.NewCityGenService")
-        
         local wfc_params = {
-            width = 32,  -- Small for fast testing
-            height = 24,
+            width = (key == "w") and 32 or 64,
+            height = (key == "w") and 24 or 48,
             use_wfc_for_zones = true,
-            use_wfc_for_arterials = false,
-            use_wfc_for_details = false,
-            industrial_zones = true
         }
-        
         local result = NewCityGenService.generateDetailedCity(wfc_params)
-        
         if result and result.city_grid then
             Game.lab_grid = result.city_grid
             Game.lab_zone_grid = result.zone_grid
-            print("WFC SUCCESS! Grid:", #result.city_grid, "x", #result.city_grid[1])
-            if result.stats and result.stats.zones_generated then
-                print("Zone counts:")
-                for zone, count in pairs(result.stats.zones_generated) do
-                    print("  " .. zone .. ": " .. count)
-                end
-            end
+            print("WFC SUCCESS!")
         else
             print("WFC FAILED!")
         end
     end
     
-    -- Large grid test
-    if key == "e" then
-        print("=== Testing WFC (Large Grid) ===")
-        
-        local NewCityGenService = require("services.NewCityGenService")
-        
-        local wfc_params = {
-            width = 64,  -- Larger grid
-            height = 48,
-            use_wfc_for_zones = true,
-            use_wfc_for_arterials = false,
-            use_wfc_for_details = false,
-            industrial_zones = true
-        }
-        
-        local result = NewCityGenService.generateDetailedCity(wfc_params)
-        
-        if result and result.city_grid then
-            Game.lab_grid = result.city_grid
-            Game.lab_zone_grid = result.zone_grid
-            print("Large WFC SUCCESS!")
-        else
-            print("Large WFC FAILED!")
-        end
-    end
-    
     -- Arterial road generation test
     if key == "r" then
-        print("=== Testing Arterial Road Generation ===")
-        
+        print("=== Generating and SAVING Arterial Roads ===")
         if Game.lab_grid and Game.lab_zone_grid then
             local NewCityGenService = require("services.NewCityGenService")
+            local arterial_params = { num_arterials = 4, min_edge_distance = 15 }
             
-            -- Parameters for arterial generation
-            local arterial_params = {
-                num_arterials = 4,        -- Number of arterial roads
-                min_edge_distance = 15    -- Minimum distance between entry/exit points
-            }
-            
-            local success = NewCityGenService.generateArterialsOnly(
-                Game.lab_grid, 
-                Game.lab_zone_grid, 
-                arterial_params
-            )
+            -- This function now returns the paths it generated
+            local success, generated_paths = NewCityGenService.generateArterialsOnly(Game.lab_grid, Game.lab_zone_grid, arterial_params)
             
             if success then
-                print("Arterial road generation SUCCESS!")
-                print("Generated arterial roads that snake around districts")
+                -- Save the control points for the 'Y' key to use
+                Game.arterial_control_paths = generated_paths
+                print("Arterial road generation SUCCESS! Saved " .. #Game.arterial_control_paths .. " paths.")
             else
                 print("Arterial road generation FAILED!")
             end
         else
-            print("ERROR: No lab grid available. Press 'W' or 'E' first to generate zones.")
+            print("ERROR: No lab grid available. Press 'W' or 'E' first.")
         end
+    end
+
+    -- Smooth overlay visualization key
+    if key == "y" then
+        print("=== Visualizing Smoothed Overlay from 'R' key data ===")
+        if not Game.arterial_control_paths or #Game.arterial_control_paths == 0 then
+            print("ERROR: No arterial paths found. Press 'R' to generate them first.")
+            return
+        end
+
+        local MapGenerationService = require("services.MapGenerationService")
+        Game.smooth_highway_overlay_paths = {} -- Clear previous overlay
+
+        for _, control_points in ipairs(Game.arterial_control_paths) do
+            -- The spline function gracefully handles paths with too few points
+            local spline_path = MapGenerationService._generateSplinePoints(control_points, 10)
+            if #spline_path > 1 then
+                table.insert(Game.smooth_highway_overlay_paths, spline_path)
+            end
+        end
+        print("Generated " .. #Game.smooth_highway_overlay_paths .. " smooth overlays from saved arterial paths.")
     end
     
     -- Clear test
     if key == "c" then
         Game.lab_grid = nil
         Game.lab_zone_grid = nil
-        print("=== Cleared lab grid ===")
+        Game.arterial_control_paths = {} -- Clear saved R-key paths
+        Game.smooth_highway_overlay_paths = {} -- Clear Y-key overlay
+        print("=== Cleared lab grid and all overlays ===")
     end
     
-    -- MODIFIED: Add toggle for district visibility
     if key == "t" then
         Game.show_districts = not Game.show_districts
         print("=== Toggled district visibility to: " .. tostring(Game.show_districts) .. " ===")
     end
     
-    -- Print controls
     if key == "h" then
         print("=== WFC Test Controls ===")
-        print("W - Generate small WFC grid (32x24)")
-        print("E - Generate large WFC grid (64x48)") 
-        print("R - Generate arterial roads (requires existing zones)")
-        print("C - Clear lab grid")
+        print("W/E - Generate WFC city grid") 
+        print("R - Generate grid-based arterials (and save their paths)")
+        print("Y - Draw smooth overlay of the roads generated by 'R'")
+        print("C - Clear lab grid and all overlays")
         print("T - Toggle district zone visibility")
         print("H - Show this help")
     end
@@ -299,21 +265,18 @@ end
 function love.quit()
     Game.error_service.logInfo("Main", "Game shutting down...")
     
-    -- Save game state
     local SaveService = require("services.SaveService")
     Game.error_service.withErrorHandling(function()
         SaveService.saveGame(Game.state, "lastsave.json")
         Game.error_service.logInfo("Main", "Game state saved on exit")
     end, "Exit Save")
     
-    -- Save configuration
     Game.error_service.withErrorHandling(function()
         Game.config.saveUserConfig()
     end, "Config Save")
     
-    -- Save error logs
     Game.error_service.saveLogsToFile()
     
     Game.error_service.logInfo("Main", "Shutdown complete")
-    return false -- Allow quit
+    return false
 end

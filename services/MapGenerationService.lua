@@ -298,19 +298,110 @@ function MapGenerationService._drawAllRoadsToGrid(grid, ring_road_curve, merged_
 end
 
 function MapGenerationService._generateSplinePoints(points, num_segments)
-    local curve_points = {}
-    if #points < 4 then return points end
+    if not points or #points == 0 then return {} end
+    if #points == 1 then return {points[1]} end
+    if #points == 2 then return {points[1], points[2]} end
     
-    for i = 2, #points - 2 do
-        local p0, p1, p2, p3 = points[i-1], points[i], points[i+1], points[i+2]
-        for t = 0, 1, 1/num_segments do
-            local x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t * t + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t * t * t)
-            local y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t * t + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t * t * t)
-            table.insert(curve_points, {x = math.floor(x), y = math.floor(y)})
+    -- FIXED: For paths with only 3 points, just return them (no spline needed)
+    if #points == 3 then
+        return points
+    end
+    
+    local curve_points = {}
+    num_segments = math.max(1, num_segments or 10)
+    
+    -- FIXED: Pre-filter points to remove too-close duplicates (causes spline chaos)
+    local filtered_points = {points[1]}
+    local min_distance = 2.0 -- Minimum distance between control points
+    
+    for i = 2, #points do
+        local last_point = filtered_points[#filtered_points]
+        local current_point = points[i]
+        local distance = math.sqrt((current_point.x - last_point.x)^2 + (current_point.y - last_point.y)^2)
+        
+        if distance >= min_distance then
+            table.insert(filtered_points, current_point)
         end
     end
     
-    return curve_points
+    -- Ensure we always include the last point
+    if #filtered_points > 1 then
+        local last_filtered = filtered_points[#filtered_points]
+        local actual_last = points[#points]
+        if last_filtered.x ~= actual_last.x or last_filtered.y ~= actual_last.y then
+            table.insert(filtered_points, actual_last)
+        end
+    end
+    
+    print(string.format("Spline: Filtered %d points down to %d points", #points, #filtered_points))
+    
+    -- If we don't have enough points after filtering, just return what we have
+    if #filtered_points < 4 then
+        return filtered_points
+    end
+    
+    -- FIXED: Use the filtered points for spline generation
+    points = filtered_points
+    
+    -- Add the first point
+    table.insert(curve_points, points[1])
+    
+    -- FIXED: Catmull-Rom spline with proper bounds checking and smoother interpolation
+    for i = 2, #points - 2 do
+        local p0, p1, p2, p3 = points[i-1], points[i], points[i+1], points[i+2]
+        
+        -- FIXED: Adaptive segment count based on distance between points
+        local segment_distance = math.sqrt((p2.x - p1.x)^2 + (p2.y - p1.y)^2)
+        local adaptive_segments = math.max(3, math.min(num_segments, math.floor(segment_distance / 4)))
+        
+        for t_step = 0, adaptive_segments - 1 do
+            local t = t_step / adaptive_segments
+            
+            -- FIXED: Cleaner Catmull-Rom formula with bounds checking
+            local t2 = t * t
+            local t3 = t2 * t
+            
+            -- Catmull-Rom basis functions
+            local b0 = -0.5 * t3 + t2 - 0.5 * t
+            local b1 = 1.5 * t3 - 2.5 * t2 + 1
+            local b2 = -1.5 * t3 + 2 * t2 + 0.5 * t
+            local b3 = 0.5 * t3 - 0.5 * t2
+            
+            local x = b0 * p0.x + b1 * p1.x + b2 * p2.x + b3 * p3.x
+            local y = b0 * p0.y + b1 * p1.y + b2 * p2.y + b3 * p3.y
+            
+            -- FIXED: Bounds checking to prevent crazy values
+            if x >= -1000 and x <= 10000 and y >= -1000 and y <= 10000 then
+                table.insert(curve_points, {x = math.floor(x + 0.5), y = math.floor(y + 0.5)})
+            else
+                print(string.format("Spline: Rejected out-of-bounds point (%f, %f)", x, y))
+            end
+        end
+    end
+    
+    -- Add the last point
+    table.insert(curve_points, points[#points])
+    
+    -- FIXED: Post-process to remove duplicate consecutive points and weird outliers
+    local cleaned_points = {curve_points[1]}
+    for i = 2, #curve_points do
+        local last_point = cleaned_points[#cleaned_points]
+        local current_point = curve_points[i]
+        
+        -- Skip duplicate points
+        if current_point.x ~= last_point.x or current_point.y ~= last_point.y then
+            -- FIXED: Skip points that create crazy jumps (outlier detection)
+            local distance = math.sqrt((current_point.x - last_point.x)^2 + (current_point.y - last_point.y)^2)
+            if distance <= 50 then -- Max reasonable distance between consecutive spline points
+                table.insert(cleaned_points, current_point)
+            else
+                print(string.format("Spline: Rejected outlier point with distance %f", distance))
+            end
+        end
+    end
+    
+    print(string.format("Spline: Generated %d curve points from %d control points", #cleaned_points, #points))
+    return cleaned_points
 end
 
 function MapGenerationService._drawThickLineColored(grid, x1, y1, x2, y2, road_type, thickness)
