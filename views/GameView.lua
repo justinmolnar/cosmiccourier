@@ -211,7 +211,7 @@ function GameView:drawLabGrid()
 
     -- Draw arterial control paths as thick lines ON grid cells
     if Game.arterial_control_paths and #Game.arterial_control_paths > 0 then
-        love.graphics.setLineWidth(math.max(3, math.floor(tile_size / 3)))
+        love.graphics.setLineWidth(math.max(3, math.floor(tile_size / 1)))
         love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
         
         for _, path in ipairs(Game.arterial_control_paths) do
