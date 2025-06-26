@@ -115,105 +115,114 @@ function GameView:draw()
     love.graphics.setScissor()
 end
 
--- UPDATED: Better lab grid drawing that uses full available space
 function GameView:drawLabGrid()
     local Game = self.Game
     
+    -- Check if we have the final WFC result to draw
+    if Game.wfc_final_grid and Game.wfc_road_data then
+        self:drawFinalWfcCity()
+        return
+    end
+
+    -- Fallback to drawing the intermediate steps if the final grid doesn't exist yet
     if not Game.lab_grid then return end
-    
     local grid = Game.lab_grid
     if not grid or #grid == 0 or not grid[1] then return end
     
     local grid_h, grid_w = #grid, #grid[1]
-    
-    -- Use full available space (minus sidebar)
     local screen_w, screen_h = love.graphics.getDimensions()
     local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
-    local available_w = screen_w - sidebar_w
-    local available_h = screen_h
+    local available_w, available_h = screen_w - sidebar_w, screen_h
     
-    -- Calculate tile size to fit nicely
-    local tile_size_w = math.floor(available_w * 0.9 / grid_w)  -- Use 90% of width
-    local tile_size_h = math.floor(available_h * 0.9 / grid_h)  -- Use 90% of height
-    local tile_size = math.min(tile_size_w, tile_size_h, 25)   -- Cap at 25 pixels
-    tile_size = math.max(tile_size, 6)  -- Minimum 6 pixels
+    local tile_size_w = math.floor(available_w * 0.9 / grid_w)
+    local tile_size_h = math.floor(available_h * 0.9 / grid_h)
+    local tile_size = math.max(6, math.min(tile_size_w, tile_size_h, 25))
     
-    -- Center the grid
-    local total_grid_w = grid_w * tile_size
-    local total_grid_h = grid_h * tile_size
-    local offset_x = (available_w - total_grid_w) / 2
-    local offset_y = (available_h - total_grid_h) / 2
+    local total_grid_w, total_grid_h = grid_w * tile_size, grid_h * tile_size
+    local offset_x, offset_y = (available_w - total_grid_w) / 2, (available_h - total_grid_h) / 2
     
-    -- Draw background
     love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
     love.graphics.rectangle("fill", offset_x - 10, offset_y - 40, total_grid_w + 20, total_grid_h + 50)
     
-    -- Draw tiles
     for y = 1, grid_h do
         for x = 1, grid_w do
             if grid[y] and grid[y][x] and grid[y][x].type then
-                local tile = grid[y][x]
-                local color = self:getTileColor(tile.type)
-                
-                love.graphics.setColor(color[1], color[2], color[3])
-                love.graphics.rectangle("fill", 
-                    offset_x + (x-1) * tile_size, 
-                    offset_y + (y-1) * tile_size, 
-                    tile_size, 
-                    tile_size)
-                
-                -- Thin border for clarity (only if tiles are big enough)
-                if tile_size > 8 then
-                    love.graphics.setColor(0.2, 0.2, 0.2)
-                    love.graphics.rectangle("line", 
-                        offset_x + (x-1) * tile_size, 
-                        offset_y + (y-1) * tile_size, 
-                        tile_size, 
-                        tile_size)
-                end
+                local color = self:getTileColor(grid[y][x].type)
+                love.graphics.setColor(color)
+                love.graphics.rectangle("fill", offset_x + (x-1)*tile_size, offset_y + (y-1)*tile_size, tile_size, tile_size)
             end
         end
     end
     
-    -- MODIFIED: Conditionally draw zone overlay
     if Game.show_districts and Game.lab_zone_grid then
         self:drawZoneOverlay(offset_x, offset_y, tile_size)
     end
     
-    -- NEW: Draw the smooth highway overlay
     if Game.smooth_highway_overlay_paths and #Game.smooth_highway_overlay_paths > 0 then
-        love.graphics.setLineWidth(5) -- Thicker pink lines like the screenshot
-        love.graphics.setColor(1, 0.5, 0.7, 0.8) -- Pinkish color with some transparency
-
+        love.graphics.setLineWidth(5)
+        love.graphics.setColor(1, 0.5, 0.7, 0.8)
         for _, spline_path in ipairs(Game.smooth_highway_overlay_paths) do
             local pixel_path = {}
             if #spline_path > 1 then
                 for _, node in ipairs(spline_path) do
-                    -- Convert grid coordinates from the path to pixel coordinates for drawing
-                    local px = offset_x + (node.x - 1) * tile_size + (tile_size / 2)
-                    local py = offset_y + (node.y - 1) * tile_size + (tile_size / 2)
-                    table.insert(pixel_path, px)
-                    table.insert(pixel_path, py)
+                    table.insert(pixel_path, offset_x + (node.x - 1) * tile_size + (tile_size / 2))
+                    table.insert(pixel_path, offset_y + (node.y - 1) * tile_size + (tile_size / 2))
                 end
                 love.graphics.line(pixel_path)
             end
         end
-
-        love.graphics.setLineWidth(1) -- Reset line width
+        love.graphics.setLineWidth(1)
     end
-    
-    -- Draw title and info
+
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(Game.fonts.ui)
-    love.graphics.print("WFC Lab Grid - Press 'T' to toggle zones, 'C' to clear, 'W'/'E'/'R'/'Y' to generate", offset_x, offset_y - 35)
-    love.graphics.setFont(Game.fonts.ui_small)
-    love.graphics.print(string.format("Grid: %dx%d | Tile: %dpx | Zones: %s", 
-                       grid_w, grid_h, tile_size, Game.show_districts and "Visible" or "Hidden"), offset_x, offset_y - 20)
-    
-    love.graphics.setColor(1, 1, 1)
+    love.graphics.print("WFC Lab Grid - Press 'U' to generate final city", offset_x, offset_y - 35)
 end
 
+function GameView:drawFinalWfcCity()
+    local Game = self.Game
+    local grid = Game.wfc_final_grid
+    local roads = Game.wfc_road_data
+    if not grid or not roads then return end
 
+    local grid_h, grid_w = #grid, #grid[1]
+    local screen_w, screen_h = love.graphics.getDimensions()
+    local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
+    local available_w, available_h = screen_w - sidebar_w, screen_h
+
+    local tile_size_w = math.floor(available_w * 0.9 / grid_w)
+    local tile_size_h = math.floor(available_h * 0.9 / grid_h)
+    local tile_size = math.max(4, math.min(tile_size_w, tile_size_h, 25))
+    
+    local total_grid_w, total_grid_h = grid_w * tile_size, grid_h * tile_size
+    local offset_x, offset_y = (available_w - total_grid_w) / 2, (available_h - total_grid_h) / 2
+    
+    -- Draw the zoned blocks
+    for y = 1, grid_h do
+        for x = 1, grid_w do
+            local cell = grid[y][x]
+            if cell and cell.zone then
+                local color = self:getZoneColor(cell.zone)
+                love.graphics.setColor(color)
+                love.graphics.rectangle("fill", offset_x + (x-1)*tile_size, offset_y + (y-1)*tile_size, tile_size, tile_size)
+            end
+        end
+    end
+
+    -- Draw the roads on top
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.9) -- Slightly darker, more visible roads
+    love.graphics.setLineWidth(math.max(1, math.floor(tile_size / 5)))
+    
+    for _, road in ipairs(roads) do
+        -- CORRECTED road drawing logic to align with grid lines
+        local x1 = offset_x + road.x1 * tile_size
+        local y1 = offset_y + road.y1 * tile_size
+        local x2 = offset_x + road.x2 * tile_size
+        local y2 = offset_y + road.y2 * tile_size
+        love.graphics.line(x1, y1, x2, y2)
+    end
+    love.graphics.setLineWidth(1)
+end
 
 -- FIXED: Update zone overlay to use the same positioning
 function GameView:drawZoneOverlay(offset_x, offset_y, tile_size)

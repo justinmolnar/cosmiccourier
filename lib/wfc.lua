@@ -1,419 +1,215 @@
 -- lib/wfc.lua
--- Complete Wave Function Collapse implementation
--- This is a full replacement of the corrupted WFC solver
+-- Final, corrected, and robust Wave Function Collapse implementation.
 
 local WFC = {}
 
--- Create a new WFC instance
-function WFC.new(width, height, states, constraints)
+-- Constructor for a new WFC solver instance
+function WFC.new(width, height, states, adjacency_rules)
     local instance = {
         width = width,
         height = height,
-        states = states or {"A", "B", "C"},
-        constraints = constraints or {},
+        states = states or {},
+        adjacency_rules = adjacency_rules or {},
         
-        -- Grid of possible states for each cell
-        -- Each cell contains a table of possible states
-        possibilities = {},
+        -- The core data grid: 2D array where each cell is a table
+        -- of booleans representing possible states. e.g., grid[y][x][state_id] = true
+        grid = {},
         
-        -- Grid of final collapsed states
-        collapsed = {},
+        -- Helper for entropy calculation
+        entropy_grid = {},
         
-        -- Track which cells have been collapsed
-        is_collapsed = {},
-        
-        -- Constraint rules - which states can be adjacent
-        adjacency_rules = {},
-        
-        -- Random seed for consistent results during debugging
-        seed = nil
+        -- Store weights for weighted random selection
+        weights = {}
     }
     
-    -- Initialize the grids
-    WFC._initializeGrids(instance)
-    
-    -- Set up default adjacency rules if none provided
-    if not constraints or #constraints == 0 then
-        WFC._createDefaultConstraints(instance)
-    else
-        instance.adjacency_rules = constraints
-    end
-    
+    WFC._initialize(instance)
     return instance
 end
 
--- Initialize all grids to their starting state
-function WFC._initializeGrids(wfc)
+-- Initializes all the internal grids to their default states
+function WFC._initialize(wfc)
+    local num_states = #wfc.states
     for y = 1, wfc.height do
-        wfc.possibilities[y] = {}
-        wfc.collapsed[y] = {}
-        wfc.is_collapsed[y] = {}
-        
+        wfc.grid[y] = {}
+        wfc.entropy_grid[y] = {}
+        wfc.weights[y] = {}
+
         for x = 1, wfc.width do
-            -- Start with all states possible
-            wfc.possibilities[y][x] = {}
-            for _, state in ipairs(wfc.states) do
-                wfc.possibilities[y][x][state] = true
+            wfc.grid[y][x] = {}
+            wfc.weights[y][x] = {}
+            for _, state_id in ipairs(wfc.states) do
+                wfc.grid[y][x][state_id] = true -- All states are initially possible
+                wfc.weights[y][x][state_id] = 1.0 -- Default weight
             end
-            
-            wfc.collapsed[y][x] = nil
-            wfc.is_collapsed[y][x] = false
+            wfc.entropy_grid[y][x] = num_states
         end
     end
 end
 
--- Create default constraints where any state can be adjacent to any other
-function WFC._createDefaultConstraints(wfc)
-    wfc.adjacency_rules = {}
-    for _, state in ipairs(wfc.states) do
-        wfc.adjacency_rules[state] = {}
-        for _, other_state in ipairs(wfc.states) do
-            wfc.adjacency_rules[state][other_state] = true
-        end
-    end
+-- Sets the weight for a specific state (tile ID) in a specific cell
+function WFC.setWeight(wfc, x, y, state_id, weight)
+    if not wfc.weights[y] or not wfc.weights[y][x] then return end
+    wfc.weights[y][x][state_id] = weight
 end
 
--- Set a constraint that stateA can be adjacent to stateB
-function WFC.addConstraint(wfc, stateA, stateB, bidirectional)
-    if not wfc.adjacency_rules[stateA] then
-        wfc.adjacency_rules[stateA] = {}
-    end
-    wfc.adjacency_rules[stateA][stateB] = true
-    
-    if bidirectional ~= false then
-        if not wfc.adjacency_rules[stateB] then
-            wfc.adjacency_rules[stateB] = {}
-        end
-        wfc.adjacency_rules[stateB][stateA] = true
-    end
-end
-
--- Set specific constraints for zone generation
-function WFC.setZoneConstraints(wfc)
-    -- Clear existing rules
-    wfc.adjacency_rules = {}
-    
-    -- Downtown can be adjacent to commercial and itself
-    WFC.addConstraint(wfc, "downtown", "downtown", true)
-    WFC.addConstraint(wfc, "downtown", "commercial", true)
-    
-    -- Commercial can be adjacent to downtown, itself, and residential
-    WFC.addConstraint(wfc, "commercial", "commercial", true)
-    WFC.addConstraint(wfc, "commercial", "residential", true)
-    
-    -- Residential can be adjacent to commercial, itself, and park
-    WFC.addConstraint(wfc, "residential", "residential", true)
-    WFC.addConstraint(wfc, "residential", "park", true)
-    
-    -- Industrial can be adjacent to itself and commercial (but not residential)
-    WFC.addConstraint(wfc, "industrial", "industrial", true)
-    WFC.addConstraint(wfc, "industrial", "commercial", true)
-    
-    -- Parks can be adjacent to residential and other parks
-    WFC.addConstraint(wfc, "park", "park", true)
-end
-
--- Force a cell to a specific state (useful for initial constraints)
-function WFC.collapse(wfc, x, y, state)
-    if not WFC._inBounds(wfc, x, y) then
-        return false
-    end
-    
-    -- Set this cell to the specific state
-    wfc.collapsed[y][x] = state
-    wfc.is_collapsed[y][x] = true
-    
-    -- Clear all possibilities except the chosen state
-    wfc.possibilities[y][x] = {}
-    wfc.possibilities[y][x][state] = true
-    
-    -- Propagate constraints to neighbors
-    WFC._propagateFrom(wfc, x, y)
-    
-    return true
-end
-
--- Get the entropy (number of possible states) for a cell
-function WFC._getEntropy(wfc, x, y)
-    if not WFC._inBounds(wfc, x, y) or wfc.is_collapsed[y][x] then
-        return 0
-    end
-    
-    local count = 0
-    for state, possible in pairs(wfc.possibilities[y][x]) do
-        if possible then
-            count = count + 1
-        end
-    end
-    return count
-end
-
--- Find the cell with the lowest entropy (most constrained)
+-- Finds the uncollapsed cell with the fewest possible states
 function WFC._findLowestEntropyCell(wfc)
     local min_entropy = math.huge
     local candidates = {}
     
     for y = 1, wfc.height do
         for x = 1, wfc.width do
-            if not wfc.is_collapsed[y][x] then
-                local entropy = WFC._getEntropy(wfc, x, y)
-                
-                if entropy == 0 then
-                    -- Contradiction found - no valid states possible
-                    return nil, nil, 0
-                elseif entropy < min_entropy then
-                    min_entropy = entropy
-                    candidates = {{x = x, y = y}}
-                elseif entropy == min_entropy then
-                    table.insert(candidates, {x = x, y = y})
+            if wfc.entropy_grid[y][x] > 1 then
+                local e = wfc.entropy_grid[y][x]
+                if e < min_entropy then
+                    min_entropy = e
+                    candidates = {{x=x, y=y}}
+                elseif e == min_entropy then
+                    table.insert(candidates, {x=x, y=y})
                 end
             end
         end
     end
     
-    if #candidates == 0 then
-        return nil, nil, -1 -- All cells collapsed
-    end
-    
-    -- Randomly choose among cells with equal entropy
-    local chosen = candidates[love.math.random(1, #candidates)]
-    return chosen.x, chosen.y, min_entropy
+    if #candidates == 0 then return nil end -- All cells are collapsed or have only one option left.
+    return candidates[love.math.random(1, #candidates)]
 end
 
--- Choose a random valid state for a cell
-function WFC._chooseRandomState(wfc, x, y)
-    local valid_states = {}
+-- The main solver function
+function WFC.solve(wfc)
+    local total_cells = wfc.width * wfc.height
     
-    for state, possible in pairs(wfc.possibilities[y][x]) do
-        if possible then
-            table.insert(valid_states, state)
-        end
-    end
-    
-    if #valid_states == 0 then
-        return nil
-    end
-    
-    return valid_states[love.math.random(1, #valid_states)]
-end
-
--- Check if coordinates are within bounds
-function WFC._inBounds(wfc, x, y)
-    return x >= 1 and x <= wfc.width and y >= 1 and y <= wfc.height
-end
-
--- Get the neighbors of a cell
-function WFC._getNeighbors(wfc, x, y)
-    local neighbors = {}
-    local directions = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}} -- up, right, down, left
-    
-    for _, dir in ipairs(directions) do
-        local nx, ny = x + dir[1], y + dir[2]
-        if WFC._inBounds(wfc, nx, ny) then
-            table.insert(neighbors, {x = nx, y = ny})
-        end
-    end
-    
-    return neighbors
-end
-
--- Propagate constraints from a cell to its neighbors
-function WFC._propagateFrom(wfc, x, y)
-    local changed_cells = {}
-    local to_process = {{x = x, y = y}}
-    
-    while #to_process > 0 do
-        local current = table.remove(to_process, 1)
-        local cx, cy = current.x, current.y
+    for i = 1, total_cells do
+        local cell_pos = WFC._findLowestEntropyCell(wfc)
         
-        -- Skip if already processed in this wave
-        local key = cx .. "," .. cy
-        if changed_cells[key] then
-            goto continue
-        end
-        changed_cells[key] = true
-        
-        local neighbors = WFC._getNeighbors(wfc, cx, cy)
-        
-        for _, neighbor in ipairs(neighbors) do
-            local nx, ny = neighbor.x, neighbor.y
-            
-            if not wfc.is_collapsed[ny][nx] then
-                local original_possibilities = {}
-                for state, possible in pairs(wfc.possibilities[ny][nx]) do
-                    original_possibilities[state] = possible
-                end
-                
-                -- Update this neighbor's possibilities based on current cell
-                WFC._updateCellConstraints(wfc, nx, ny)
-                
-                -- Check if possibilities changed
-                local changed = false
-                for state, possible in pairs(wfc.possibilities[ny][nx]) do
-                    if original_possibilities[state] ~= possible then
-                        changed = true
-                        break
+        if not cell_pos then
+            -- No more cells with entropy > 1, check for contradictions
+            for y = 1, wfc.height do
+                for x = 1, wfc.width do
+                    if wfc.entropy_grid[y][x] == 0 then
+                        print(string.format("WFC CONTRADICTION at (%d, %d). Cannot solve.", x, y))
+                        return false -- Failure due to contradiction
                     end
-                end
-                
-                -- If this neighbor changed, add it to the processing queue
-                if changed then
-                    table.insert(to_process, {x = nx, y = ny})
                 end
             end
+            print("WFC: Successfully collapsed all cells.")
+            return true -- Success
         end
+
+        -- Collapse the chosen cell
+        local x, y = cell_pos.x, cell_pos.y
+        local possibilities = wfc.grid[y][x]
         
-        ::continue::
+        local valid_options = {}
+        local total_weight = 0
+        for state, is_possible in pairs(possibilities) do
+            if is_possible then
+                local weight = wfc.weights[y][x][state] or 1
+                table.insert(valid_options, {state=state, weight=weight})
+                total_weight = total_weight + weight
+            end
+        end
+
+        if #valid_options == 0 then
+            print(string.format("WFC CONTRADICTION during collapse at (%d, %d).", x, y))
+            return false
+        end
+
+        local rand_val = love.math.random() * total_weight
+        local chosen_state = valid_options[#valid_options].state -- Fallback
+        local current_weight = 0
+        for _, item in ipairs(valid_options) do
+            current_weight = current_weight + item.weight
+            if rand_val <= current_weight then
+                chosen_state = item.state
+                break
+            end
+        end
+
+        -- Set the chosen state and propagate
+        for state, _ in pairs(wfc.grid[y][x]) do
+            wfc.grid[y][x][state] = (state == chosen_state)
+        end
+        wfc.entropy_grid[y][x] = 1
+        WFC._propagate(wfc, x, y)
     end
+    
+    print("WFC: Solver loop finished.")
+    return true
 end
 
--- Update a cell's possibilities based on its neighbors
-function WFC._updateCellConstraints(wfc, x, y)
-    if wfc.is_collapsed[y][x] then
-        return
-    end
-    
-    local neighbors = WFC._getNeighbors(wfc, x, y)
-    local new_possibilities = {}
-    
-    -- For each possible state of this cell
-    for state, _ in pairs(wfc.possibilities[y][x]) do
-        if wfc.possibilities[y][x][state] then
-            local state_valid = true
-            
-            -- Check if this state is compatible with all neighbors
-            for _, neighbor in ipairs(neighbors) do
-                local nx, ny = neighbor.x, neighbor.y
-                
-                if wfc.is_collapsed[ny][nx] then
-                    -- Neighbor is collapsed to a specific state
-                    local neighbor_state = wfc.collapsed[ny][nx]
-                    if not WFC._statesCompatible(wfc, state, neighbor_state) then
-                        state_valid = false
-                        break
+-- Spreads constraints from a recently collapsed cell
+function WFC._propagate(wfc, startX, startY)
+    local stack = {{x=startX, y=startY}}
+
+    while #stack > 0 do
+        local pos = table.remove(stack, 1)
+
+        local directions = {{0,-1,"N","S"}, {0,1,"S","N"}, {-1,0,"W","E"}, {1,0,"E","W"}}
+        for _, dir_info in ipairs(directions) do
+            local dx, dy, dir_from, dir_to = dir_info[1], dir_info[2], dir_info[3], dir_info[4]
+            local nx, ny = pos.x + dx, pos.y + dy
+
+            if nx >= 1 and nx <= wfc.width and ny >= 1 and ny <= wfc.height then
+                if wfc.entropy_grid[ny][nx] > 1 then
+                    
+                    -- Get all valid states for the current cell
+                    local valid_states_from = {}
+                    for state, is_possible in pairs(wfc.grid[pos.y][pos.x]) do
+                        if is_possible then table.insert(valid_states_from, state) end
                     end
-                else
-                    -- Neighbor has multiple possibilities
-                    -- Check if our state is compatible with at least one neighbor possibility
-                    local compatible_with_neighbor = false
-                    for neighbor_state, neighbor_possible in pairs(wfc.possibilities[ny][nx]) do
-                        if neighbor_possible and WFC._statesCompatible(wfc, state, neighbor_state) then
-                            compatible_with_neighbor = true
-                            break
+
+                    -- Find all states the neighbor is allowed to be
+                    local allowed_for_neighbor = {}
+                    for _, state_from in ipairs(valid_states_from) do
+                        if wfc.adjacency_rules[state_from] and wfc.adjacency_rules[state_from][dir_from] then
+                            for state_to, _ in pairs(wfc.adjacency_rules[state_from][dir_from]) do
+                                allowed_for_neighbor[state_to] = true
+                            end
                         end
                     end
                     
-                    if not compatible_with_neighbor then
-                        state_valid = false
-                        break
+                    -- Remove possibilities from neighbor
+                    local changed = false
+                    for state, is_possible in pairs(wfc.grid[ny][nx]) do
+                        if is_possible and not allowed_for_neighbor[state] then
+                            wfc.grid[ny][nx][state] = false
+                            changed = true
+                        end
+                    end
+                    
+                    if changed then
+                        local new_entropy = 0
+                        for _, is_possible in pairs(wfc.grid[ny][nx]) do
+                            if is_possible then new_entropy = new_entropy + 1 end
+                        end
+                        wfc.entropy_grid[ny][nx] = new_entropy
+                        table.insert(stack, {x=nx, y=ny})
                     end
                 end
             end
-            
-            new_possibilities[state] = state_valid
-        else
-            new_possibilities[state] = false
         end
     end
-    
-    wfc.possibilities[y][x] = new_possibilities
 end
 
--- Check if two states can be adjacent
-function WFC._statesCompatible(wfc, stateA, stateB)
-    if not wfc.adjacency_rules[stateA] then
-        return false
-    end
-    return wfc.adjacency_rules[stateA][stateB] == true
-end
-
--- Main solve function
-function WFC.solve(wfc)
-    local iterations = 0
-    local max_iterations = wfc.width * wfc.height * 10
-    
-    while iterations < max_iterations do
-        iterations = iterations + 1
-        
-        -- Find cell with lowest entropy
-        local x, y, entropy = WFC._findLowestEntropyCell(wfc)
-        
-        if entropy == -1 then
-            -- All cells are collapsed - success!
-            print("WFC: Successfully completed in " .. iterations .. " iterations")
-            return true
-        elseif entropy == 0 then
-            -- Contradiction - failure
-            print("WFC: Contradiction found at iteration " .. iterations)
-            return false
-        end
-        
-        -- Choose a random state for this cell
-        local chosen_state = WFC._chooseRandomState(wfc, x, y)
-        if not chosen_state then
-            print("WFC: No valid state found for cell (" .. x .. ", " .. y .. ")")
-            return false
-        end
-        
-        -- Collapse the cell
-        wfc.collapsed[y][x] = chosen_state
-        wfc.is_collapsed[y][x] = true
-        wfc.possibilities[y][x] = {}
-        wfc.possibilities[y][x][chosen_state] = true
-        
-        -- Propagate constraints
-        WFC._propagateFrom(wfc, x, y)
-        
-        -- Check for contradictions after propagation
-        local contradiction = false
-        for check_y = 1, wfc.height do
-            for check_x = 1, wfc.width do
-                if not wfc.is_collapsed[check_y][check_x] and WFC._getEntropy(wfc, check_x, check_y) == 0 then
-                    contradiction = true
-                    break
-                end
-            end
-            if contradiction then break end
-        end
-        
-        if contradiction then
-            print("WFC: Contradiction after propagation at iteration " .. iterations)
-            return false
-        end
-    end
-    
-    print("WFC: Reached maximum iterations (" .. max_iterations .. ")")
-    return false
-end
-
--- Get the final result grid
+-- Returns the final grid of collapsed state IDs
 function WFC.getResult(wfc)
     local result = {}
     for y = 1, wfc.height do
         result[y] = {}
         for x = 1, wfc.width do
-            result[y][x] = wfc.collapsed[y][x] or "unknown"
+            local possibilities = {}
+            for state, is_possible in pairs(wfc.grid[y][x]) do
+                if is_possible then table.insert(possibilities, state) end
+            end
+            if #possibilities == 1 then
+                result[y][x] = possibilities[1]
+            else
+                result[y][x] = nil -- Unsolved or contradiction
+            end
         end
     end
     return result
-end
-
--- Debug function to print current state
-function WFC.debugPrint(wfc)
-    print("WFC Grid State:")
-    for y = 1, wfc.height do
-        local row = ""
-        for x = 1, wfc.width do
-            if wfc.is_collapsed[y][x] then
-                local state = wfc.collapsed[y][x]
-                row = row .. (state and string.sub(state, 1, 1) or "?") .. " "
-            else
-                local entropy = WFC._getEntropy(wfc, x, y)
-                row = row .. entropy .. " "
-            end
-        end
-        print(row)
-    end
 end
 
 return WFC

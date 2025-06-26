@@ -11,22 +11,17 @@ end
 function WfcLabController:getHandledKeys()
     return {
         ["w"] = true, ["e"] = true, ["r"] = true, ["y"] = true,
-        ["c"] = true, ["t"] = true, ["h"] = true
+        ["c"] = true, ["t"] = true, ["h"] = true, ["u"] = true
     }
 end
 
 function WfcLabController:keypressed(key)
     local Game = self.game
 
-    -- WFC Testing Controls
     if key == "w" or key == "e" then
         print("=== Testing WFC Grid Generation ===")
         local NewCityGenService = require("services.NewCityGenService")
-        local wfc_params = {
-            width = (key == "w") and 32 or 64,
-            height = (key == "w") and 24 or 48,
-            use_wfc_for_zones = true,
-        }
+        local wfc_params = { width = (key == "w") and 32 or 64, height = (key == "w") and 24 or 48, use_wfc_for_zones = true }
         local result = NewCityGenService.generateDetailedCity(wfc_params)
         if result and result.city_grid then
             Game.lab_grid = result.city_grid
@@ -37,18 +32,13 @@ function WfcLabController:keypressed(key)
         end
     end
     
-    -- Arterial road generation test
     if key == "r" then
         print("=== Generating and SAVING Arterial Roads ===")
         if Game.lab_grid and Game.lab_zone_grid then
             local NewCityGenService = require("services.NewCityGenService")
             local arterial_params = { num_arterials = 4, min_edge_distance = 15 }
-            
-            -- This function now returns the paths it generated
             local success, generated_paths = NewCityGenService.generateArterialsOnly(Game.lab_grid, Game.lab_zone_grid, arterial_params)
-            
             if success then
-                -- Save the control points for the 'Y' key to use
                 Game.arterial_control_paths = generated_paths
                 print("Arterial road generation SUCCESS! Saved " .. #Game.arterial_control_paths .. " paths.")
             else
@@ -59,42 +49,52 @@ function WfcLabController:keypressed(key)
         end
     end
 
-    -- Smooth overlay visualization key
     if key == "y" then
         print("=== Visualizing Smoothed Overlay from 'R' key data ===")
         if not Game.arterial_control_paths or #Game.arterial_control_paths == 0 then
             print("ERROR: No arterial paths found. Press 'R' to generate them first.")
             return
         end
-
-        Game.smooth_highway_overlay_paths = {} -- Clear previous overlay
-
+        Game.smooth_highway_overlay_paths = {}
         for _, control_points in ipairs(Game.arterial_control_paths) do
             local smooth_path = WfcLabController._smoothPathForOverlay(control_points)
-            if #smooth_path > 1 then
-                table.insert(Game.smooth_highway_overlay_paths, smooth_path)
-            end
+            if #smooth_path > 1 then table.insert(Game.smooth_highway_overlay_paths, smooth_path) end
         end
-        
-        -- Merge paths that run beside each other
-        print("Before merging: " .. #Game.smooth_highway_overlay_paths .. " paths")
-        Game.smooth_highway_overlay_paths = WfcLabController._mergeParallelPaths(Game.smooth_highway_overlay_paths)
-        print("After merging: " .. #Game.smooth_highway_overlay_paths .. " paths")
-        
-        -- Simplify paths to reduce jaggedness
-        for i = 1, #Game.smooth_highway_overlay_paths do
-            Game.smooth_highway_overlay_paths[i] = WfcLabController._simplifyPath(Game.smooth_highway_overlay_paths[i])
+        print("Generated " .. #Game.smooth_highway_overlay_paths .. " smooth overlays.")
+    end
+
+    if key == "u" then
+        print("=== Triggering High-Fidelity WFC Block Pass (Phase 4) ===")
+        if not Game.lab_grid or not Game.lab_zone_grid or not Game.arterial_control_paths then
+            print("ERROR: Missing necessary data. Please press 'E', then 'R' before pressing 'U'.")
+            return
         end
-        
-        print("Generated " .. #Game.smooth_highway_overlay_paths .. " smooth overlays from saved arterial paths.")
+        local WfcBlockService = require("services.WfcBlockService")
+        local wfc_params = {
+            width = #Game.lab_grid[1],
+            height = #Game.lab_grid,
+            zone_grid = Game.lab_zone_grid,
+            arterial_paths = Game.arterial_control_paths
+        }
+        local result = WfcBlockService.generateBlocks(wfc_params)
+        if result then
+            print("Phase 4 SUCCESS: WFC solver finished. Storing final grid for rendering.")
+            Game.wfc_final_grid = result.grid
+            Game.wfc_road_data = result.roads
+            -- Clear old overlays to see the new result clearly
+            Game.smooth_highway_overlay_paths = {}
+        else
+            print("Phase 4 FAILED: Could not solve the WFC grid.")
+        end
     end
     
-    -- Clear test
     if key == "c" then
         Game.lab_grid = nil
         Game.lab_zone_grid = nil
-        Game.arterial_control_paths = {} -- Clear saved R-key paths
-        Game.smooth_highway_overlay_paths = {} -- Clear Y-key overlay
+        Game.arterial_control_paths = {} 
+        Game.smooth_highway_overlay_paths = {}
+        Game.wfc_final_grid = nil
+        Game.wfc_road_data = nil
         print("=== Cleared lab grid and all overlays ===")
     end
     
@@ -105,9 +105,9 @@ function WfcLabController:keypressed(key)
     
     if key == "h" then
         print("=== WFC Test Controls ===")
-        print("W/E - Generate WFC city grid") 
-        print("R - Generate grid-based arterials (and save their paths)")
-        print("Y - Draw smooth overlay of the roads generated by 'R'")
+        print("E - Generate coarse zones") 
+        print("R - Generate grid-based arterials on top of zones")
+        print("U - Run high-fidelity WFC pass to generate final city")
         print("C - Clear lab grid and all overlays")
         print("T - Toggle district zone visibility")
         print("H - Show this help")
