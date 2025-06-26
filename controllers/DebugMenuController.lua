@@ -11,8 +11,8 @@ function DebugMenuController:new(game)
     instance.visible = false
     instance.x = 100
     instance.y = 50
-    instance.w = 450  -- Made wider for toggles
-    instance.h = 700  -- Made taller
+    instance.w = 450
+    instance.h = 700
     instance.dragging = false
     instance.drag_offset_x = 0
     instance.drag_offset_y = 0
@@ -21,59 +21,19 @@ function DebugMenuController:new(game)
     instance.dragging_scrollbar = false
     instance.scrollbar_drag_start_y = 0
     instance.scroll_y_at_drag_start = 0
-    instance.text_input_active = nil -- Which parameter is being edited
-    instance.text_input_value = "" -- Current text being typed
+    instance.text_input_active = nil
+    instance.text_input_value = ""
     
-    -- ADDED TAB DATA
     instance.tabs = { "Generation", "Gameplay", "Stats" }
     instance.active_tab = "Generation"
     instance.hovered_tab = nil
     
-    -- Debug parameters that can be tweaked
-    instance.params = {
-        -- Component Toggles (EXISTING)
-        generate_downtown = true,
-        generate_districts = true,
-        generate_highways = true,
-        generate_ringroad = true,
-        generate_connections = true,
-        
-        -- Highway Generation
-        highway_merge_distance = 50,
-        highway_merge_strength = 0.8,
-        highway_parallel_merge_distance = 80,
-        highway_curve_distance = 50,
-        highway_step_size = 30,
-        highway_buffer = 35,
-        num_ns_highways = 2,
-        num_ew_highways = 2,
-        
-        -- Ring Road Generation
-        ring_min_angle = 45, -- degrees
-        ring_min_arc_distance = 30,
-        ring_edge_threshold = 0.1, -- percentage of map
-        ring_center_distance_threshold = 0.15, -- percentage of map
-        
-        -- District Generation
-        num_districts = 10,
-        district_min_size = 40,
-        district_max_size = 80,
-        district_placement_attempts = 500,
-        downtown_roads = 40,
-        district_roads_min = 15,
-        district_roads_max = 30,
-        
-        -- Connecting Roads
-        walker_connection_distance = 25,
-        walker_split_chance = 0.05,
-        walker_turn_chance = 0.15,
-        walker_max_active = 3,
-        walker_death_rules_enabled = true,
-        
-        -- Path Smoothing
-        smoothing_max_angle = 126, -- degrees
-        smoothing_enabled = true,
-    }
+    -- Load default parameters from the constants file
+    instance.params = {}
+    for k, v in pairs(game.C.MAP_GEN) do
+        -- Converting to lowercase for the debug menu's internal use
+        instance.params[string.lower(k)] = v
+    end
     
     -- Button definitions
     instance.buttons = {
@@ -863,50 +823,10 @@ function DebugMenuController:drawTestPath(game)
 end
 
 function DebugMenuController:resetParameters()
-    self.params = {
-        -- Component Toggles
-        generate_downtown = true,
-        generate_districts = true,
-        generate_highways = true,
-        generate_ringroad = true,
-        generate_connections = true,
-        
-        -- Highway Generation
-        highway_merge_distance = 50,
-        highway_merge_strength = 0.8,
-        highway_parallel_merge_distance = 80,
-        highway_curve_distance = 50,
-        highway_step_size = 30,
-        highway_buffer = 35,
-        num_ns_highways = 2,
-        num_ew_highways = 2,
-        
-        -- Ring Road Generation
-        ring_min_angle = 45,
-        ring_min_arc_distance = 30,
-        ring_edge_threshold = 0.1,
-        ring_center_distance_threshold = 0.15,
-        
-        -- District Generation
-        num_districts = 10,
-        district_min_size = 40,
-        district_max_size = 80,
-        district_placement_attempts = 500,
-        downtown_roads = 40,
-        district_roads_min = 15,
-        district_roads_max = 30,
-        
-        -- Connecting Roads
-        walker_connection_distance = 25,
-        walker_split_chance = 0.05,
-        walker_turn_chance = 0.15,
-        walker_max_active = 3,
-        walker_death_rules_enabled = true,
-        
-        -- Path Smoothing
-        smoothing_max_angle = 126,
-        smoothing_enabled = true,
-    }
+    self.params = {}
+    for k, v in pairs(self.game.C.MAP_GEN) do
+        self.params[string.lower(k)] = v
+    end
 end
 
 return DebugMenuController

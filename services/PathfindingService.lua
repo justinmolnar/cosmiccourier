@@ -7,7 +7,6 @@ function PathfindingService.findVehiclePath(vehicle, start_plot, end_plot, game)
         return nil
     end
     
-    -- Use the vehicle's operational map, not a hard-coded one.
     local map = game.maps[vehicle.operational_map_key]
     if not map then
         print(string.format("ERROR: PathfindingService - Could not find operational map '%s' for vehicle %d", vehicle.operational_map_key, vehicle.id))
@@ -31,13 +30,13 @@ function PathfindingService.findVehiclePath(vehicle, start_plot, end_plot, game)
         return {}
     end
     
-    local costs = vehicle.properties.pathfinding_costs
-    if not costs then
-        print(string.format("ERROR: PathfindingService - No pathfinding costs for %s %d", vehicle.type, vehicle.id))
-        return nil
+    -- This no longer needs to know about vehicle types, it just asks the vehicle for its costs!
+    local function get_cost_for_node(node_x, node_y)
+        local tile = path_grid[node_y][node_x]
+        return vehicle:getMovementCostFor(tile.type)
     end
     
-    local path = game.pathfinder.findPath(path_grid, start_node, end_node, costs, map)
+    local path = game.pathfinder.findPath(path_grid, start_node, end_node, get_cost_for_node, map)
     
     if not path then
         print(string.format("ERROR: PathfindingService - No path found for %s %d", vehicle.type, vehicle.id))

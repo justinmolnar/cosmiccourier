@@ -18,21 +18,19 @@ function GameView:draw()
     local ui_manager = Game.ui_manager
     local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
     local screen_w, screen_h = love.graphics.getDimensions()
+    local DrawingUtils = require("utils.DrawingUtils")
 
     local active_map = Game.maps[Game.active_map_key]
     if not active_map then return end 
 
     love.graphics.setScissor(sidebar_w, 0, screen_w - sidebar_w, screen_h)
 
-    -- FIXED: Handle lab grid drawing differently - don't apply camera transforms
     if Game.lab_grid then
-        -- Draw lab grid in screen space (no camera transforms)
         love.graphics.push()
-        love.graphics.translate(sidebar_w, 0) -- Just offset by sidebar
+        love.graphics.translate(sidebar_w, 0)
         self:drawLabGrid()
         love.graphics.pop()
     else
-        -- Normal game rendering with camera transforms
         love.graphics.push()
 
         local game_world_w = screen_w - sidebar_w
@@ -42,38 +40,25 @@ function GameView:draw()
         
         active_map:draw()
 
-        -- Draw city-specific content (depot, clients, etc.)
         if Game.active_map_key == "city" then
             if Game.entities.depot_plot then
                 local depot_px, depot_py = active_map:getPixelCoords(Game.entities.depot_plot.x, Game.entities.depot_plot.y)
-                love.graphics.setFont(Game.fonts.emoji)
-                love.graphics.push()
-                love.graphics.translate(depot_px, depot_py)
-                love.graphics.scale(1 / Game.camera.scale, 1 / Game.camera.scale)
-                love.graphics.print("🏢", -14, -14)
-                love.graphics.pop()
+                DrawingUtils.drawWorldIcon(Game, "🏢", depot_px, depot_py)
             end
 
             for _, client in ipairs(Game.entities.clients) do
-                love.graphics.setFont(Game.fonts.emoji)
-                love.graphics.push()
-                love.graphics.translate(client.px, client.py)
-                love.graphics.scale(1 / Game.camera.scale, 1 / Game.camera.scale)
-                love.graphics.print("🏠", -14, -14)
-                love.graphics.pop()
+                DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
             end
             
             Game.event_spawner:draw(Game)
         end
 
-        -- Draw vehicles
         for _, vehicle in ipairs(Game.entities.vehicles) do
             if vehicle.visible then
                 vehicle:draw(Game)
             end
         end
 
-        -- Draw trip path visualization
         if Game.active_map_key == "city" and ui_manager.hovered_trip_index then
             local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
             if trip and trip.legs[trip.current_leg] then
@@ -82,8 +67,19 @@ function GameView:draw()
                 local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1) and active_map:findNearestRoadTile(Game.entities.depot_plot) or active_map:findNearestRoadTile(leg.start_plot)
                 local end_node = active_map:findNearestRoadTile(leg.end_plot)
                 if start_node and end_node and path_grid then
-                    local costs = leg.vehicleType == "bike" and Bike.PROPERTIES.pathfinding_costs or Truck.PROPERTIES.pathfinding_costs
-                    local path = Game.pathfinder.findPath(path_grid, start_node, end_node, costs, active_map)
+                    -- THE FIX: Reference the new, centralized vehicle properties in the constants file
+                    local required_vehicle_properties = (leg.vehicleType == "bike") and Game.C.VEHICLES.BIKE or Game.C.VEHICLES.TRUCK
+                    
+                    local cost_function = function(x, y)
+                        local tile = path_grid[y] and path_grid[y][x]
+                        if tile then
+                            return required_vehicle_properties.pathfinding_costs[tile.type] or 9999
+                        end
+                        return 9999
+                    end
+
+                    local path = Game.pathfinder.findPath(path_grid, start_node, end_node, cost_function, active_map)
+                    
                     if path then
                         local pixel_path = {}
                         for _, node in ipairs(path) do
@@ -105,16 +101,15 @@ function GameView:draw()
             end
         end
 
-        love.graphics.pop()
-        
-        -- Debug drawing
-        if Game.debug_mode and Game.active_map_key == "city" then
+        if Game.debug_mode then
             for _, vehicle in ipairs(Game.entities.vehicles) do
                 if vehicle.visible then
                     vehicle:drawDebug(Game)
                 end
             end
         end
+
+        love.graphics.pop()
     end
     
     love.graphics.setScissor()

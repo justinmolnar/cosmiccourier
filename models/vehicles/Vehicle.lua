@@ -2,19 +2,6 @@
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
-function Vehicle:drawIconAt(game, px, py, icon)
-    love.graphics.setFont(game.fonts.emoji)
-    love.graphics.setColor(0, 0, 0) -- Black
-
-    love.graphics.push()
-    love.graphics.translate(px, py)
-    love.graphics.scale(1 / game.camera.scale, 1 / game.camera.scale)
-    love.graphics.print(icon, -14, -14) -- Center the emoji
-    love.graphics.pop()
-
-    love.graphics.setFont(game.fonts.ui) -- Switch back to default UI font
-end
-
 function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_map_key)
     local States = require("models.vehicles.vehicle_states")
     
@@ -43,6 +30,22 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
     instance.visible = true
 
     return instance
+end
+
+function Vehicle:getMovementCostFor(tileType)
+    -- Default behavior: return a high cost for unknown tiles
+    return self.properties.pathfinding_costs[tileType] or 9999
+end
+
+function Vehicle:getIcon()
+    -- Default behavior: return a generic icon
+    return "❓"
+end
+
+function Vehicle:canTravelTo(destination)
+    -- Default behavior: all vehicles can travel anywhere.
+    -- This could be overridden later for vehicles with range limits, etc.
+    return true
 end
 
 function Vehicle:recalculatePixelPosition(game)
@@ -355,32 +358,28 @@ function Vehicle:draw(game)
 
     local draw_px, draw_py
     local active_map_key = game.active_map_key
+    local DrawingUtils = require("utils.DrawingUtils")
 
     if self.operational_map_key == active_map_key then
-        -- The vehicle lives on the map we're currently viewing. Draw it at its native position.
         draw_px, draw_py = self.px, self.py
     else
-        -- We are viewing a vehicle on a different map (e.g., a city truck on the region map).
         if self.operational_map_key == "city" and active_map_key == "region" then
             draw_px, draw_py = self:_getRegionDrawPosition(game)
         else
-            -- Placeholder for future cases (e.g., drawing a region-based train on a city map)
-            -- For now, we just use its default position to avoid errors.
             draw_px, draw_py = self.px, self.py
         end
     end
 
-    -- Draw selection circle
     if self == game.entities.selected_vehicle then
-        love.graphics.setColor(1, 1, 0)
+        love.graphics.setColor(1, 1, 0, 0.8)
         local radius = 16 / game.camera.scale
         love.graphics.setLineWidth(2 / game.camera.scale)
         love.graphics.circle("line", draw_px, draw_py, radius)
         love.graphics.setLineWidth(1)
     end
     
-    -- Draw the vehicle's icon at the correct, calculated position
-    self:drawIconAt(game, draw_px, draw_py, self.type == "bike" and "🚲" or "🚚")
+    -- Use the new utility function
+    DrawingUtils.drawWorldIcon(game, self:getIcon(), draw_px, draw_py)
 end
 
 return Vehicle

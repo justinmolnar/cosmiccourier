@@ -11,7 +11,8 @@ function VehiclesPanelView.draw(game, ui_manager)
         for _, trip in ipairs(v.cargo) do if trip.is_in_transit then in_transit_count = in_transit_count + 1 end end
         local cap = string.format("%d/%d", #v.cargo + #v.trip_queue, state.upgrades.vehicle_capacity)
         local transit_info = in_transit_count > 0 and string.format(" (%d moving)", in_transit_count) or ""
-        local text = string.format("%s %d | %s | %s%s", v.type, v.id, v.state.name, cap, transit_info)
+        -- Here we call the new getIcon() method
+        local text = string.format("%s %s %d | %s | %s%s", v:getIcon(), v.type, v.id, v.state.name, cap, transit_info)
         love.graphics.setColor(1,1,1)
         love.graphics.print(text, l.x + 5, l.y + 5)
     end

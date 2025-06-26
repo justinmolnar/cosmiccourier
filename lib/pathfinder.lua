@@ -36,10 +36,8 @@ local function heuristic(a, b)
 end
 
 function Pathfinder.findPath(grid, startNode, endNode, costs, map)
-    -- This new block will prevent the error from ever happening again.
-    -- If costs are not provided, it will stop and tell you exactly why.
     if not costs then
-        error("FATAL: Pathfinder.findPath was called without a 'costs' table. This is a required argument. Please check the function call.", 0)
+        error("FATAL: Pathfinder.findPath was called without a 'costs' function or table. This is a required argument. Please check the function call.", 0)
         return nil
     end
     if not map then
@@ -75,10 +73,11 @@ function Pathfinder.findPath(grid, startNode, endNode, costs, map)
 
         openSet[current.y .. ',' .. current.x] = nil
 
-        -- FIX: Pass the map object to the neighbor finding function
         for _, neighbor in ipairs(getNeighbors(current, grid, grid_width, grid_height, map)) do
-            -- This is the line that was causing the crash.
-            local move_cost = costs[grid[neighbor.y][neighbor.x].type] or 1
+            -- THE FIX: The 'costs' variable is now a function. We must call it
+            -- to get the movement cost for the specific vehicle.
+            local move_cost = costs(neighbor.x, neighbor.y)
+            
             local tentative_gScore = gScore[current.y .. ',' .. current.x] + move_cost
             local neighborKey = neighbor.y .. ',' .. neighbor.x
             

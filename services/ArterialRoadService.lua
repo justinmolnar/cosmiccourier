@@ -3,25 +3,21 @@
 
 local ArterialRoadService = {}
 
--- Make this compatible with your existing WFC system
-ArterialRoadService.generateArterialsWFC = function(city_grid, zone_grid, params)
-    return ArterialRoadService.generateArterialRoads(city_grid, zone_grid, params)
-end
-
 -- Import pathfinding
 local Pathfinder = require("lib.pathfinder")
 
-function ArterialRoadService.generateArterialRoads(city_grid, zone_grid, params)
-    print("ArterialRoadService: Starting arterial road generation")
-    
-    local generated_paths = {} -- NEW: To store the paths we create
-
-    local width, height = #city_grid[1], #city_grid
+-- NEW: Private function containing the core generation logic
+function ArterialRoadService._calculateArterialPaths(zone_grid, params)
+    local all_paths = {}
+    local width, height = #zone_grid[1], #zone_grid
     local num_arterials = params.num_arterials or 4
     local min_distance_between_points = params.min_edge_distance or 15
+    local cost_grid = ArterialRoadService._createCostGrid(zone_grid, width, height)
+    local all_boundary_points = ArterialRoadService._findDistrictBoundaryPoints(zone_grid, width, height)
+    local quadrant_coverage = { ["top-left"]=0, ["top-right"]=0, ["bottom-left"]=0, ["bottom-right"]=0 }
 
     -- Node Constraint Setup
-    local downtown_node = nil
+    local downtown_node, largest_district_node, largest_district_info
     local downtown_bounds = ArterialRoadService._findZoneBounds(zone_grid, "downtown")
     if downtown_bounds then
         downtown_node = {
@@ -29,24 +25,14 @@ function ArterialRoadService.generateArterialRoads(city_grid, zone_grid, params)
             y = love.math.random(downtown_bounds.min_y, downtown_bounds.max_y)
         }
     end
-
-    local largest_district_node, largest_district_info = nil, nil
     largest_district_info = ArterialRoadService._findLargestDistrict(zone_grid, width, height)
     if largest_district_info then
         largest_district_node = largest_district_info.center
     end
 
-    -- MODIFIED: Use a coverage-based system to ensure roads are spread out
-    local quadrant_coverage = { ["top-left"]=0, ["top-right"]=0, ["bottom-left"]=0, ["bottom-right"]=0 }
-    
-    local cost_grid = ArterialRoadService._createCostGrid(zone_grid, width, height)
-    local all_boundary_points = ArterialRoadService._findDistrictBoundaryPoints(zone_grid, width, height)
-
     for i = 1, num_arterials do
-        print(string.format("ArterialRoadService: Generating road #%d/%d", i, num_arterials))
         local final_path, entry_point, exit_point
 
-        -- Find the least serviced quadrants to start the road from
         local start_quad_candidates = ArterialRoadService._findLeastServicedQuadrants(quadrant_coverage)
         local start_quad = start_quad_candidates[love.math.random(#start_quad_candidates)]
         local exit_quad = ArterialRoadService._findBestOpposingQuadrant(start_quad)
@@ -54,18 +40,16 @@ function ArterialRoadService.generateArterialRoads(city_grid, zone_grid, params)
         local entry_edges = ArterialRoadService._getEdgesForQuadrant(start_quad)
         local exit_edges = ArterialRoadService._getEdgesForQuadrant(exit_quad)
         
-        -- Apply constraints to the first two roads
-        local constraint_node, constraint_name, specialized_cost_grid = nil, nil, nil
+        local constraint_node, specialized_cost_grid = nil, nil
         if i == 1 and downtown_node then
-            constraint_node = downtown_node; constraint_name = "DOWNTOWN"
+            constraint_node = downtown_node
             specialized_cost_grid = ArterialRoadService._createSpecializedCostGrid(cost_grid, zone_grid, {zone_name = "downtown", cost = 2})
         elseif i == 2 and largest_district_node then
-            constraint_node = largest_district_node; constraint_name = "LARGEST DISTRICT"
+            constraint_node = largest_district_node
             specialized_cost_grid = ArterialRoadService._createSpecializedCostGrid(cost_grid, zone_grid, {tiles = largest_district_info.tiles, cost = 2})
         end
 
         if constraint_node then
-            print("ArterialRoadService: Applying " .. constraint_name .. " constraint to road #" .. i)
             entry_point = ArterialRoadService._getRandomEdgePoint(width, height, "entry", nil, nil, zone_grid, entry_edges, all_boundary_points)
             if entry_point then
                 local path1 = ArterialRoadService._findArterialPath(specialized_cost_grid, entry_point, constraint_node, width, height)
@@ -83,7 +67,6 @@ function ArterialRoadService.generateArterialRoads(city_grid, zone_grid, params)
                 end
             end
         else
-            -- Regular Road
             entry_point = ArterialRoadService._getRandomEdgePoint(width, height, "entry", nil, nil, zone_grid, entry_edges, all_boundary_points)
             exit_point = ArterialRoadService._getRandomEdgePoint(width, height, "exit", entry_point, min_distance_between_points, zone_grid, exit_edges, all_boundary_points)
             if entry_point and exit_point then
@@ -92,29 +75,44 @@ function ArterialRoadService.generateArterialRoads(city_grid, zone_grid, params)
         end
 
         if final_path then
-            -- Update coverage map now that points are chosen
             quadrant_coverage[start_quad] = quadrant_coverage[start_quad] + 1
             quadrant_coverage[exit_quad] = quadrant_coverage[exit_quad] + 1
-            print(string.format("ArterialRoadService: Updated coverage - %s: %d, %s: %d", start_quad, quadrant_coverage[start_quad], exit_quad, quadrant_coverage[exit_quad]))
-
+            
             local smoothed_path = ArterialRoadService._smoothPath(final_path)
-            ArterialRoadService._drawArterialToGrid(city_grid, smoothed_path)
+            table.insert(all_paths, smoothed_path)
             ArterialRoadService._updateCostGridWithNewRoad(cost_grid, smoothed_path)
-            
-            table.insert(generated_paths, smoothed_path) -- NEW: Save the generated path
-            
-            print(string.format("ArterialRoadService: Successfully created arterial with %d nodes", #smoothed_path))
-        else
-            print("ArterialRoadService: Failed to find path for arterial road #" .. i)
         end
     end
+    return all_paths
+end
 
+-- PUBLIC FUNCTION: Generates roads and draws them to the grid
+function ArterialRoadService.generateArterialRoads(city_grid, zone_grid, params)
+    print("ArterialRoadService: Starting arterial road generation")
+    local generated_paths = ArterialRoadService._calculateArterialPaths(zone_grid, params)
+    
+    for _, path in ipairs(generated_paths) do
+        ArterialRoadService._drawArterialToGrid(city_grid, path)
+    end
+    
     print("ArterialRoadService: Arterial road generation complete")
-    return generated_paths -- NEW: Return all the paths
+    return generated_paths
+end
+
+-- PUBLIC FUNCTION: Only returns the calculated control points
+function ArterialRoadService.getArterialControlPoints(zone_grid, params)
+    print("ArterialRoadService: Getting arterial road control points")
+    local generated_paths = ArterialRoadService._calculateArterialPaths(zone_grid, params)
+    print("ArterialRoadService: Arterial control point calculation complete")
+    return generated_paths
 end
 
 
--- NEW FUNCTION: Find the quadrant(s) with the fewest road endpoints
+-- Make this compatible with your existing WFC system
+ArterialRoadService.generateArterialsWFC = function(city_grid, zone_grid, params)
+    return ArterialRoadService.generateArterialRoads(city_grid, zone_grid, params)
+end
+
 function ArterialRoadService._findLeastServicedQuadrants(coverage)
     local min_val = math.huge
     for _, count in pairs(coverage) do
@@ -128,7 +126,6 @@ function ArterialRoadService._findLeastServicedQuadrants(coverage)
     return candidates
 end
 
--- NEW FUNCTION: Find the best opposing quadrant for a given quadrant
 function ArterialRoadService._findBestOpposingQuadrant(start_quad)
     local opposites = {
         ["top-left"] = "bottom-right", ["top-right"] = "bottom-left",
@@ -137,7 +134,6 @@ function ArterialRoadService._findBestOpposingQuadrant(start_quad)
     return opposites[start_quad]
 end
 
--- Get the edge names for a given quadrant
 function ArterialRoadService._getEdgesForQuadrant(quadrant)
     if quadrant == "top-left" then return {"top", "left"}
     elseif quadrant == "top-right" then return {"top", "right"}
@@ -297,99 +293,6 @@ function ArterialRoadService._drawLine(grid,x1,y1,x2,y2,road_type)
         if x==x2 and y==y2 then break end;local e2=2*err
         if e2>-dy then err=err-dy;x=x+sx end;if e2<dx then err=err+dx;y=y+sy end
     end
-end
-
-function ArterialRoadService.getArterialControlPoints(zone_grid, params)
-    print("ArterialRoadService: Getting arterial road control points")
-
-    local width, height = #zone_grid[1], #zone_grid
-    local num_arterials = params.num_arterials or 4
-    local min_distance_between_points = params.min_edge_distance or 15
-    local all_paths = {} -- To store the generated paths
-
-    -- Node Constraint Setup (same as generateArterialRoads)
-    local downtown_node = nil
-    local downtown_bounds = ArterialRoadService._findZoneBounds(zone_grid, "downtown")
-    if downtown_bounds then
-        downtown_node = {
-            x = love.math.random(downtown_bounds.min_x, downtown_bounds.max_x),
-            y = love.math.random(downtown_bounds.min_y, downtown_bounds.max_y)
-        }
-    end
-
-    local largest_district_node, largest_district_info = nil, nil
-    largest_district_info = ArterialRoadService._findLargestDistrict(zone_grid, width, height)
-    if largest_district_info then
-        largest_district_node = largest_district_info.center
-    end
-
-    local quadrant_coverage = { ["top-left"]=0, ["top-right"]=0, ["bottom-left"]=0, ["bottom-right"]=0 }
-    
-    local cost_grid = ArterialRoadService._createCostGrid(zone_grid, width, height)
-    local all_boundary_points = ArterialRoadService._findDistrictBoundaryPoints(zone_grid, width, height)
-
-    for i = 1, num_arterials do
-        -- This part is identical to generateArterialRoads
-        local final_path, entry_point, exit_point
-
-        local start_quad_candidates = ArterialRoadService._findLeastServicedQuadrants(quadrant_coverage)
-        local start_quad = start_quad_candidates[love.math.random(#start_quad_candidates)]
-        local exit_quad = ArterialRoadService._findBestOpposingQuadrant(start_quad)
-        
-        local entry_edges = ArterialRoadService._getEdgesForQuadrant(start_quad)
-        local exit_edges = ArterialRoadService._getEdgesForQuadrant(exit_quad)
-        
-        local constraint_node, constraint_name, specialized_cost_grid = nil, nil, nil
-        if i == 1 and downtown_node then
-            constraint_node = downtown_node; constraint_name = "DOWNTOWN"
-            specialized_cost_grid = ArterialRoadService._createSpecializedCostGrid(cost_grid, zone_grid, {zone_name = "downtown", cost = 2})
-        elseif i == 2 and largest_district_node then
-            constraint_node = largest_district_node; constraint_name = "LARGEST DISTRICT"
-            specialized_cost_grid = ArterialRoadService._createSpecializedCostGrid(cost_grid, zone_grid, {tiles = largest_district_info.tiles, cost = 2})
-        end
-
-        if constraint_node then
-            entry_point = ArterialRoadService._getRandomEdgePoint(width, height, "entry", nil, nil, zone_grid, entry_edges, all_boundary_points)
-            if entry_point then
-                local path1 = ArterialRoadService._findArterialPath(specialized_cost_grid, entry_point, constraint_node, width, height)
-                if path1 then
-                    local incoming_direction = ArterialRoadService._getIncomingDirection(path1)
-                    exit_point = ArterialRoadService._findBestExitPoint(constraint_node, incoming_direction, all_boundary_points, entry_point, exit_edges)
-                    if exit_point then
-                        local temp_cost_grid = ArterialRoadService._cloneCostGrid(specialized_cost_grid)
-                        for _, node in ipairs(path1) do temp_cost_grid[node.y][node.x] = 9999 end
-                        local path2 = ArterialRoadService._findArterialPath(temp_cost_grid, constraint_node, exit_point, width, height)
-                        if path2 then
-                            table.remove(path2, 1); final_path = path1; for _, node in ipairs(path2) do table.insert(final_path, node) end
-                        end
-                    end
-                end
-            end
-        else
-            entry_point = ArterialRoadService._getRandomEdgePoint(width, height, "entry", nil, nil, zone_grid, entry_edges, all_boundary_points)
-            exit_point = ArterialRoadService._getRandomEdgePoint(width, height, "exit", entry_point, min_distance_between_points, zone_grid, exit_edges, all_boundary_points)
-            if entry_point and exit_point then
-                final_path = ArterialRoadService._findArterialPath(cost_grid, entry_point, exit_point, width, height)
-            end
-        end
-        
-        -- This is the part that differs
-        if final_path then
-            quadrant_coverage[start_quad] = quadrant_coverage[start_quad] + 1
-            quadrant_coverage[exit_quad] = quadrant_coverage[exit_quad] + 1
-            
-            local smoothed_path = ArterialRoadService._smoothPath(final_path)
-            table.insert(all_paths, smoothed_path) -- Add the control points to our list
-            
-            ArterialRoadService._updateCostGridWithNewRoad(cost_grid, smoothed_path)
-            print(string.format("ArterialRoadService: Successfully calculated arterial path with %d nodes", #smoothed_path))
-        else
-            print("ArterialRoadService: Failed to find path for arterial road #" .. i)
-        end
-    end
-
-    print("ArterialRoadService: Arterial control point calculation complete")
-    return all_paths
 end
 
 function ArterialRoadService.findPathBetweenPoints(zone_grid, start_point, end_point)

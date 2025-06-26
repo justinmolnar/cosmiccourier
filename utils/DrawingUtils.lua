@@ -10,6 +10,24 @@ function DrawingUtils.withFont(font, func, ...)
     return result
 end
 
+function DrawingUtils.drawWorldIcon(game, icon, px, py)
+    local g = love.graphics
+    
+    g.push()
+    g.translate(px, py)
+    g.scale(1 / game.camera.scale, 1 / game.camera.scale)
+    
+    -- Draw icon with a slight black outline/shadow for better visibility
+    g.setFont(game.fonts.emoji)
+    g.setColor(0, 0, 0, 0.6)
+    g.print(icon, -13, -13) -- Offset for shadow
+    
+    g.setColor(1, 1, 1)
+    g.print(icon, -14, -14) -- Centered icon
+    
+    g.pop()
+end
+
 function DrawingUtils.setFontSafe(font)
     if font then
         love.graphics.setFont(font)

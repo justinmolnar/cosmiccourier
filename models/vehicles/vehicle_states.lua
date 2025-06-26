@@ -516,7 +516,8 @@ States.Stuck.name = "Stuck"
 function States.Stuck:enter(vehicle, game)
     -- When a vehicle gets stuck, remember what it was trying to do.
     vehicle.last_state_before_stuck = vehicle.state
-    vehicle.stuck_timer = 15 -- Wait 15 seconds before retrying
+    -- Use the new constant for the timer
+    vehicle.stuck_timer = game.C.GAMEPLAY.VEHICLE_STUCK_TIMER
     print(string.format("WARNING: %s %d is stuck, will retry pathfinding in %ds.", vehicle.type, vehicle.id, vehicle.stuck_timer))
 end
 

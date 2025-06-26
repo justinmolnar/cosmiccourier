@@ -5,24 +5,10 @@ local Truck = {}
 Truck.__index = Truck
 setmetatable(Truck, {__index = Vehicle}) -- Inherit from Vehicle
 
-Truck.PROPERTIES = {
-    cost = 1200,
-    cost_multiplier = 1,
-    speed = 10000,
-    pathfinding_costs = {
-        road = 10,
-        downtown_road = 20,
-        arterial = 5,
-        highway = 1,
-        highway_ring = 1,
-        highway_ns = 1,
-        highway_ew = 1,
-    }
-}
-
 function Truck:new(id, depot_plot, game)
     -- Create a basic vehicle instance using the parent's "new" function
-    local instance = Vehicle:new(id, depot_plot, game, "truck", Truck.PROPERTIES)
+    -- It now reads its properties directly from the constants file
+    local instance = Vehicle:new(id, depot_plot, game, "truck", game.C.VEHICLES.TRUCK)
     setmetatable(instance, Truck)
 
     -- A truck starts at the same depot as a bike. Its anchor should be the
@@ -43,5 +29,9 @@ end
 
 -- The recalculatePixelPosition and draw methods have been removed from this file.
 -- The correct methods will be inherited from Vehicle.lua.
+
+function Truck:getIcon()
+    return "🚚"
+end
 
 return Truck

@@ -81,6 +81,7 @@ local C = {
         CURRENT_MAP_SCALE       = 1,
         -- REMOVED: VEHICLE_CLICK_RADIUS (moved to UI)
         BASE_TILE_SIZE          = 16,
+        VEHICLE_STUCK_TIMER     = 15,
     },
 
     ZOOM = {
@@ -91,6 +92,82 @@ local C = {
         ZOOM_BUTTON_MARGIN       = 10,
         TRANSITION_DURATION      = 0.8,
         ZOOM_SCALE_FACTOR        = 3.0,
+    },
+
+    VEHICLES = {
+        BIKE = {
+            cost = 150,
+            cost_multiplier = 1.15,
+            speed = 80,
+            pathfinding_costs = {
+                road = 5,
+                downtown_road = 8,
+                arterial = 3,
+                highway = 500,
+                highway_ring = 500,
+                highway_ns = 500,
+                highway_ew = 500,
+            }
+        },
+        TRUCK = {
+            cost = 1200,
+            cost_multiplier = 1,
+            speed = 10000,
+            pathfinding_costs = {
+                road = 10,
+                downtown_road = 20,
+                arterial = 5,
+                highway = 1,
+                highway_ring = 1,
+                highway_ns = 1,
+                highway_ew = 1,
+            }
+        }
+    },
+
+    MAP_GEN = {
+        -- Component Toggles (EXISTING)
+        GENERATE_DOWNTOWN = true,
+        GENERATE_DISTRICTS = true,
+        GENERATE_HIGHWAYS = true,
+        GENERATE_RINGROAD = true,
+        GENERATE_CONNECTIONS = true,
+        
+        -- Highway Generation
+        HIGHWAY_MERGE_DISTANCE = 50,
+        HIGHWAY_MERGE_STRENGTH = 0.8,
+        HIGHWAY_PARALLEL_MERGE_DISTANCE = 80,
+        HIGHWAY_CURVE_DISTANCE = 50,
+        HIGHWAY_STEP_SIZE = 30,
+        HIGHWAY_BUFFER = 35,
+        NUM_NS_HIGHWAYS = 2,
+        NUM_EW_HIGHWAYS = 2,
+        
+        -- Ring Road Generation
+        RING_MIN_ANGLE = 45, -- degrees
+        RING_MIN_ARC_DISTANCE = 30,
+        RING_EDGE_THRESHOLD = 0.1, -- percentage of map
+        RING_CENTER_DISTANCE_THRESHOLD = 0.15, -- percentage of map
+        
+        -- District Generation
+        NUM_DISTRICTS = 10,
+        DISTRICT_MIN_SIZE = 40,
+        DISTRICT_MAX_SIZE = 80,
+        DISTRICT_PLACEMENT_ATTEMPTS = 500,
+        DOWNTOWN_ROADS = 40,
+        DISTRICT_ROADS_MIN = 15,
+        DISTRICT_ROADS_MAX = 30,
+        
+        -- Connecting Roads
+        WALKER_CONNECTION_DISTANCE = 25,
+        WALKER_SPLIT_CHANCE = 0.05,
+        WALKER_TURN_CHANCE = 0.15,
+        WALKER_MAX_ACTIVE = 3,
+        WALKER_DEATH_RULES_ENABLED = true,
+        
+        -- Path Smoothing
+        SMOOTHING_MAX_ANGLE = 126, -- degrees
+        SMOOTHING_ENABLED = true,
     },
 
     COSTS = {
