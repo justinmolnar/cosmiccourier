@@ -167,40 +167,30 @@ function GameView:drawLabGrid()
         end
     end
     
-    -- Draw street edges BETWEEN grid cells
+    -- *** SUPER SIMPLE ROAD DRAWING ***
     if Game.street_segments then
-        love.graphics.setColor(0.3, 0.3, 0.3, 1.0) -- Solid gray for streets
-        love.graphics.setLineWidth(math.max(2, tile_size / 12))
+        love.graphics.setColor(0.3, 0.3, 0.3, 1.0)
+        love.graphics.setLineWidth(math.max(2, tile_size * 0.15))
         
-        for _, edge in ipairs(Game.street_segments) do
-            if edge.type == "horizontal" then
-                -- Horizontal edge between grid cells
-                local x1 = offset_x + edge.x1 * tile_size
-                local x2 = offset_x + edge.x2 * tile_size
-                local y = offset_y + edge.y * tile_size
+        -- Just draw each segment as a simple line, nothing else
+        for _, segment in ipairs(Game.street_segments) do
+            if segment.type == "horizontal" then
+                local x1 = offset_x + segment.x1 * tile_size
+                local x2 = offset_x + segment.x2 * tile_size
+                local y = offset_y + segment.y * tile_size
                 love.graphics.line(x1, y, x2, y)
-            elseif edge.type == "vertical" then
-                -- Vertical edge between grid cells
-                local x = offset_x + edge.x * tile_size
-                local y1 = offset_y + edge.y1 * tile_size
-                local y2 = offset_y + edge.y2 * tile_size
+                
+            elseif segment.type == "vertical" then
+                local x = offset_x + segment.x * tile_size
+                local y1 = offset_y + segment.y1 * tile_size
+                local y2 = offset_y + segment.y2 * tile_size
                 love.graphics.line(x, y1, x, y2)
             end
         end
+        
         love.graphics.setLineWidth(1)
     end
-    
-    -- Draw street intersections as small squares (where edges meet)
-    if Game.street_intersections then
-        love.graphics.setColor(0.2, 0.2, 0.2, 1.0) -- Darker gray for intersections
-        local intersection_size = math.max(2, tile_size / 16)
-        
-        for _, intersection in ipairs(Game.street_intersections) do
-            local x = offset_x + intersection.x * tile_size - intersection_size/2
-            local y = offset_y + intersection.y * tile_size - intersection_size/2
-            love.graphics.rectangle("fill", x, y, intersection_size, intersection_size)
-        end
-    end
+    -- *** END SUPER SIMPLE ROAD DRAWING ***
     
     -- Draw arterial overlay paths if they exist
     if Game.smooth_highway_overlay_paths and #Game.smooth_highway_overlay_paths > 0 then
@@ -345,8 +335,8 @@ function GameView:drawLegend(legend_x, legend_y)
     
     local legend_items = {
         {type = "arterial", name = "Arterial (on grid)", color = {0.1, 0.1, 0.1}},
-        {type = "street", name = "Street (between grid)", color = {0.3, 0.3, 0.3}},
-        {type = "intersection", name = "Intersection", color = {0.2, 0.2, 0.2}},
+        {type = "street", name = "Street (between grid)", color = {0.8, 0.8, 0.8}}, -- Changed color to match
+        {type = "intersection", name = "Intersection", color = {0.8, 0.8, 0.8}}, -- Changed color to match
         {type = "plot", name = "Building Plot", color = {0.5, 0.5, 0.5}},
         {type = "zone", name = "Zone Color", color = {0.7, 0.7, 0.7}}
     }
@@ -356,11 +346,9 @@ function GameView:drawLegend(legend_x, legend_y)
         
         love.graphics.setColor(item.color[1], item.color[2], item.color[3])
         if item.type == "street" then
-            love.graphics.setLineWidth(3)
-            love.graphics.line(legend_x, y_pos + 8, legend_x + 15, y_pos + 8)
-            love.graphics.setLineWidth(1)
+            love.graphics.rectangle("fill", legend_x, y_pos + 4, 15, 8) -- Show as a filled rectangle
         elseif item.type == "intersection" then
-            love.graphics.rectangle("fill", legend_x + 6, y_pos + 6, 4, 4)
+            love.graphics.rectangle("fill", legend_x + 4, y_pos + 4, 8, 8) -- Show as a filled square
         else
             love.graphics.rectangle("fill", legend_x, y_pos, 15, 15)
         end
