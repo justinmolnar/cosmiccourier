@@ -22,19 +22,19 @@ local C = {
 
     MAP = {
     -- Downtown scale
-    DOWNTOWN_GRID_WIDTH  = 64,
-    DOWNTOWN_GRID_HEIGHT = 45,
+    DOWNTOWN_GRID_WIDTH  = 64, -- Changed from 64
+    DOWNTOWN_GRID_HEIGHT = 64, -- Changed from 45
     
     -- City scale (much larger area)
-    CITY_GRID_WIDTH      = 372,
-    CITY_GRID_HEIGHT     = 270,
+    CITY_GRID_WIDTH      = 200, -- Changed from 372
+    CITY_GRID_HEIGHT     = 200, -- Changed from 270
 
     -- Region scale (NEW)
     REGION_GRID_WIDTH    = 1024,
     REGION_GRID_HEIGHT   = 768,
     
     TILE_SIZE            = 2,
-    NUM_SECONDARY_ROADS  = 100, -- Increased from 40 to make downtown denser
+    NUM_SECONDARY_ROADS  = 100,
     
         COLORS = {
         GRASS           = {0.2, 0.6, 0.25},
@@ -44,7 +44,6 @@ local C = {
         HOVER           = {1, 1, 0},
         DOWNTOWN_PLOT   = {0.85, 0.85, 0.8},
         DOWNTOWN_ROAD   = {0.3, 0.3, 0.35},
-        -- ADD THESE LINES
         WATER           = {0.2, 0.3, 0.8},
         MOUNTAIN        = {0.5, 0.45, 0.4},
         DEBUG_NODE      = {0, 1, 0},

@@ -54,10 +54,10 @@ local ADJACENCY = {
     park_nature = { park_nature = 5, residential_south = 4, waterfront = 4 }
 }
 
-function WFCZoningService.generateCoherentZones(width, height, downtown_center_x, downtown_center_y)
+function WFCZoningService.generateCoherentZones(width, height, downtown_center_x, downtown_center_y, params)
+    params = params or {}
     print("WFC: Starting two-pass coherent zone generation")
     
-    -- PASS 1: Generate coarse zoning grid (1/4 resolution for better coherence)
     local coarse_width = math.max(4, math.floor(width / 4))
     local coarse_height = math.max(4, math.floor(height / 4))
     local coarse_downtown_x = math.max(1, math.min(coarse_width, math.floor(downtown_center_x / 4)))
@@ -66,13 +66,14 @@ function WFCZoningService.generateCoherentZones(width, height, downtown_center_x
     print("WFC: Pass 1 - Coarse grid:", coarse_width .. "x" .. coarse_height)
     local coarse_grid = WFCZoningService._generateCoarseZones(coarse_width, coarse_height, coarse_downtown_x, coarse_downtown_y)
     
-    -- PASS 2: Use coarse grid to constrain fine-detail WFC
     print("WFC: Pass 2 - Fine grid:", width .. "x" .. height)
     local fine_grid = WFCZoningService._generateConstrainedFineGrid(width, height, coarse_grid)
     
-    -- PASS 3: STAMP downtown square on top (ALWAYS THE SAME)
     print("WFC: Pass 3 - Stamping downtown square")
-    WFCZoningService._stampDowntownSquare(fine_grid, width, height, downtown_center_x, downtown_center_y)
+    -- Pass the downtown dimensions from params
+    local downtown_w = params.downtown_width or 64
+    local downtown_h = params.downtown_height or 64
+    WFCZoningService._stampDowntownSquare(fine_grid, width, height, downtown_center_x, downtown_center_y, downtown_w, downtown_h)
     
     return fine_grid
 end
@@ -91,13 +92,19 @@ function WFCZoningService._generateCoarseZones(width, height, downtown_x, downto
     -- GUARANTEED DISTRICT PLACEMENT: Force minimum sizes
     WFCZoningService._placeGuaranteedDistricts(grid, width, height, downtown_x, downtown_y)
     
+    -- THE FIX: Define seed categories with specific zone types
+    local SEED_CATEGORIES = {
+        residential = {"residential_north", "residential_south"},
+        commercial = {"commercial", "entertainment", "tech"},
+        industrial = {"industrial_heavy", "industrial_light", "warehouse"},
+        park = {"park_central", "park_nature"}
+    }
     
-    -- INCREASED: More additional seeds for even more variety
     local zone_seeds = {
-        { zone = "residential", count = math.max(2, math.floor(width * height / 25)) },
-        { zone = "commercial", count = math.max(2, math.floor(width * height / 35)) },
-        { zone = "industrial", count = math.max(1, math.floor(width * height / 45)) },
-        { zone = "park", count = math.max(2, math.floor(width * height / 30)) }
+        { category = "residential", count = math.max(2, math.floor(width * height / 25)) },
+        { category = "commercial", count = math.max(2, math.floor(width * height / 35)) },
+        { category = "industrial", count = math.max(1, math.floor(width * height / 45)) },
+        { category = "park", count = math.max(2, math.floor(width * height / 30)) }
     }
     
     for _, seed_info in ipairs(zone_seeds) do
@@ -108,10 +115,14 @@ function WFCZoningService._generateCoarseZones(width, height, downtown_x, downto
             local x = love.math.random(1, width)
             local y = love.math.random(1, height)
             
-            if not grid[y][x] and WFCZoningService._isValidSeedLocation(grid, x, y, seed_info.zone, width, height) then
-                grid[y][x] = seed_info.zone
+            -- RANDOMLY select a specific zone from the category
+            local possible_zones = SEED_CATEGORIES[seed_info.category]
+            local specific_zone_to_place = possible_zones[love.math.random(1, #possible_zones)]
+
+            if not grid[y][x] and WFCZoningService._isValidSeedLocation(grid, x, y, specific_zone_to_place, width, height) then
+                grid[y][x] = specific_zone_to_place
                 placed = placed + 1
-                print("WFC: Placed", seed_info.zone, "seed at", x, y)
+                print("WFC: Placed", specific_zone_to_place, "seed at", x, y)
             end
             attempts = attempts + 1
         end
@@ -625,16 +636,14 @@ function WFCZoningService._generateConstrainedFineGrid(width, height, coarse_gri
 end
 
 -- NEW: Stamp downtown square on top of everything (ALWAYS THE SAME)
-function WFCZoningService._stampDowntownSquare(grid, width, height, center_x, center_y)
-    -- BIGGER SIZE - 15x15 square
-    local side_length = 15
-    local half_side = 7 -- (15-1)/2
+function WFCZoningService._stampDowntownSquare(grid, width, height, center_x, center_y, downtown_w, downtown_h)
+    local half_w = math.floor(downtown_w / 2)
+    local half_h = math.floor(downtown_h / 2)
     
     local stamped_cells = 0
     
-    -- Stamp exact 15x15 square, overwriting whatever was there
-    for dy = -half_side, half_side do
-        for dx = -half_side, half_side do
+    for dy = -half_h, half_h do
+        for dx = -half_w, half_w do
             local x, y = center_x + dx, center_y + dy
             if x >= 1 and x <= width and y >= 1 and y <= height then
                 grid[y][x] = "downtown"
@@ -643,7 +652,7 @@ function WFCZoningService._stampDowntownSquare(grid, width, height, center_x, ce
         end
     end
     
-    print("WFC: Stamped IDENTICAL downtown square with", stamped_cells, "cells (15x15)")
+    print(string.format("WFC: Stamped downtown square with %d cells (%dx%d)", stamped_cells, downtown_w, downtown_h))
 end
 
 function WFCZoningService._getCompatibleZone(base_zone)

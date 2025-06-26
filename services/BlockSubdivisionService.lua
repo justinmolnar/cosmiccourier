@@ -6,69 +6,54 @@ local BlockSubdivisionService = {}
 function BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, params)
     print("=== BlockSubdivisionService.generateStreets START ===")
     
+    local C_MAP = require("data.constants").MAP
     local width, height = #city_grid[1], #city_grid
-    local min_block_size = params.min_block_size or 4
-    local max_block_size = params.max_block_size or 8
     
-    print("Grid size: " .. width .. "x" .. height)
-    print("Block size range: " .. min_block_size .. " to " .. max_block_size)
-    
-    -- Step 1: Identify all arterial regions
-    local regions = BlockSubdivisionService._findArterialRegions(city_grid, zone_grid, width, height)
-    
-    -- Step 2: Generate PROPER blocks for each region
+    -- STAGE 1: Define the Downtown District
+    local downtown_w = C_MAP.DOWNTOWN_GRID_WIDTH
+    local downtown_h = C_MAP.DOWNTOWN_GRID_HEIGHT
+    local downtown_district = {
+        x1 = math.floor(width / 2) - math.floor(downtown_w / 2),
+        y1 = math.floor(height / 2) - math.floor(downtown_h / 2),
+        x2 = math.floor(width / 2) + math.floor(downtown_w / 2),
+        y2 = math.floor(height / 2) + math.floor(downtown_h / 2)
+    }
+
     local all_blocks = {}
+
+    -- STAGE 2: THE FIX - Run the existing recursive algorithm on the downtown area first, with special parameters.
+    print("--- Subdividing Downtown District ---")
+    local downtown_blocks = {}
+    local DOWNTOWN_MAX_BLOCK_SIZE = 5 -- Force much smaller blocks for a dense grid
+    local DOWNTOWN_MIN_BLOCK_SIZE = 3
+    BlockSubdivisionService._recursiveSplitBlock(downtown_district, DOWNTOWN_MIN_BLOCK_SIZE, DOWNTOWN_MAX_BLOCK_SIZE, 0, downtown_blocks)
+    for _, block in ipairs(downtown_blocks) do
+        table.insert(all_blocks, block)
+    end
+    
+    -- STAGE 3: Run the algorithm on the rest of the city
+    print("--- Subdividing Outer Regions ---")
+    local regions = BlockSubdivisionService._findArterialRegions(city_grid, zone_grid, width, height, downtown_district)
     for region_idx, region in ipairs(regions) do
-        print("=== Processing region " .. region_idx .. " ===")
-        print("Region bounds: (" .. region.min_x .. "," .. region.min_y .. ") to (" .. region.max_x .. "," .. region.max_y .. ")")
-        
-        local region_blocks = BlockSubdivisionService._generateProperBlocks(region, min_block_size, max_block_size)
-        print("Generated " .. #region_blocks .. " blocks for region " .. region_idx)
-        
+        local region_blocks = BlockSubdivisionService._generateProperBlocks(region, params.min_block_size, params.max_block_size)
         for _, block in ipairs(region_blocks) do
             table.insert(all_blocks, block)
         end
     end
-    
-    print("=== ALL BLOCKS GENERATED ===")
-    for i, block in ipairs(all_blocks) do
-        print("Block " .. i .. ": (" .. block.x1 .. "," .. block.y1 .. ") to (" .. block.x2 .. "," .. block.y2 .. ")")
-    end
-    
-    -- Step 3: Convert blocks to street segments
+
+    -- STAGE 4: Convert all generated blocks (downtown + outer) into streets
     local street_segments = BlockSubdivisionService._convertBlocksToStreetSegments(all_blocks, width, height)
+    BlockSubdivisionService._drawStreetsToGrid(city_grid, street_segments, width, height)
     
-    print("=== STREET SEGMENTS GENERATED ===")
-    print("Total segments: " .. #street_segments)
-    for i, seg in ipairs(street_segments) do
-        if seg.type == "horizontal" then
-            print("Segment " .. i .. ": HORIZONTAL from x=" .. seg.x1 .. " to x=" .. seg.x2 .. " at y=" .. seg.y)
-        elseif seg.type == "vertical" then
-            print("Segment " .. i .. ": VERTICAL from y=" .. seg.y1 .. " to y=" .. seg.y2 .. " at x=" .. seg.x)
-        end
-    end
-    
-    -- Step 4: Find intersections
-    local intersections = BlockSubdivisionService._findEdgeIntersections(street_segments)
-    
-    print("=== INTERSECTIONS FOUND ===")
-    print("Total intersections: " .. #intersections)
-    for i, intersection in ipairs(intersections) do
-        print("Intersection " .. i .. ": (" .. intersection.x .. "," .. intersection.y .. ")")
-    end
-    
-    -- Step 5: Store results
+    -- STAGE 5: Finalize
     Game.street_segments = street_segments
-    Game.street_intersections = intersections
-    
-    -- Step 6: Fill city_grid with plots
-    BlockSubdivisionService._fillGridWithPlots(city_grid, zone_grid, width, height)
+    Game.street_intersections = BlockSubdivisionService._findEdgeIntersections(street_segments)
     
     print("=== BlockSubdivisionService.generateStreets COMPLETE ===")
     return true
 end
 
-function BlockSubdivisionService._findArterialRegions(city_grid, zone_grid, width, height)
+function BlockSubdivisionService._findArterialRegions(city_grid, zone_grid, width, height, downtown_district)
     print("Finding arterial regions...")
     local regions = {}
     local visited = {}
@@ -80,6 +65,13 @@ function BlockSubdivisionService._findArterialRegions(city_grid, zone_grid, widt
         end
     end
     
+    -- Pre-mark downtown as visited so it's ignored
+    for y = downtown_district.y1, downtown_district.y2 do
+        for x = downtown_district.x1, downtown_district.x2 do
+            visited[y][x] = true
+        end
+    end
+
     for y = 1, height do
         for x = 1, width do
             if not visited[y][x] and city_grid[y][x].type ~= "arterial" then
@@ -91,7 +83,7 @@ function BlockSubdivisionService._findArterialRegions(city_grid, zone_grid, widt
         end
     end
     
-    print("Found " .. #regions .. " arterial regions to subdivide")
+    print("Found " .. #regions .. " non-downtown regions to subdivide")
     return regions
 end
 
@@ -460,15 +452,40 @@ function BlockSubdivisionService._findEdgeIntersections(street_segments)
     return intersections
 end
 
+function BlockSubdivisionService._drawStreetsToGrid(city_grid, street_segments, width, height)
+    print("Drawing " .. #street_segments .. " street segments onto the main grid...")
+    for _, segment in ipairs(street_segments) do
+        if segment.type == "horizontal" then
+            for x = segment.x1, segment.x2 do
+                if x >= 1 and x <= width and segment.y >= 1 and segment.y <= height then
+                    if city_grid[segment.y][x].type ~= "arterial" then
+                        city_grid[segment.y][x] = { type = "road" }
+                    end
+                end
+            end
+        elseif segment.type == "vertical" then
+            for y = segment.y1, segment.y2 do
+                if y >= 1 and y <= height and segment.x >= 1 and segment.x <= width then
+                    if city_grid[y][segment.x].type ~= "arterial" then
+                        city_grid[y][segment.x] = { type = "road" }
+                    end
+                end
+            end
+        end
+    end
+end
+
 function BlockSubdivisionService._fillGridWithPlots(city_grid, zone_grid, width, height)
     for y = 1, height do
         for x = 1, width do
-            if city_grid[y][x].type ~= "arterial" then
+            local tile = city_grid[y][x]
+            -- THE FIX: Also check for "downtown_road" to prevent it from being paved over
+            if tile.type ~= "arterial" and tile.type ~= "road" and tile.type ~= "downtown_road" then
                 local zone = zone_grid and zone_grid[y] and zone_grid[y][x]
                 if zone and string.find(zone, "park") then
-                    city_grid[y][x] = { type = "grass" }
+                    tile.type = "grass"
                 else
-                    city_grid[y][x] = { type = "plot" }
+                    tile.type = "plot"
                 end
             end
         end

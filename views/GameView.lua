@@ -24,9 +24,9 @@ function GameView:draw()
 
     love.graphics.setScissor(sidebar_w, 0, screen_w - sidebar_w, screen_h)
 
-    if Game.lab_grid then
+    if Game.lab_grid or Game.wfc_final_grid then
         love.graphics.push()
-        love.graphics.translate(sidebar_w, 0)
+        -- REMOVED the redundant love.graphics.translate() call that was here
         self:drawLabGrid()
         love.graphics.pop()
     else
@@ -135,30 +135,28 @@ function GameView:drawLabGrid()
     local tile_size = math.max(4, math.min(tile_size_w, tile_size_h, 25))
     
     local total_grid_w, total_grid_h = grid_w * tile_size, grid_h * tile_size
-    local offset_x, offset_y = (available_w - total_grid_w) / 2, (available_h - total_grid_h) / 2
+    -- THE FIX: Properly calculate the offset to account for the sidebar
+    local offset_x = sidebar_w + (available_w - total_grid_w) / 2
+    local offset_y = (available_h - total_grid_h) / 2
     
     love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
     love.graphics.rectangle("fill", offset_x - 10, offset_y - 40, total_grid_w + 20, total_grid_h + 50)
     
-    -- Draw zone background first
     if Game.lab_zone_grid then
         self:drawZoneBackground(offset_x, offset_y, tile_size)
     end
     
-    -- Draw the main grid cells (only arterials and plots, no street tiles)
     for y = 1, grid_h do
         for x = 1, grid_w do
             if grid[y] and grid[y][x] and grid[y][x].type then
                 local tile_type = grid[y][x].type
                 
-                -- Only draw arterials as solid blocks
                 if tile_type == "arterial" then
                     local color = self:getTileColor(tile_type)
                     love.graphics.setColor(color)
                     love.graphics.rectangle("fill", offset_x + (x-1)*tile_size, offset_y + (y-1)*tile_size, tile_size, tile_size)
                 end
                 
-                -- Draw plots as subtle outlines (so zones show through)
                 if tile_type == "plot" then
                     love.graphics.setColor(0.5, 0.5, 0.5, 0.2)
                     love.graphics.rectangle("line", offset_x + (x-1)*tile_size, offset_y + (y-1)*tile_size, tile_size, tile_size)
@@ -167,32 +165,26 @@ function GameView:drawLabGrid()
         end
     end
     
-    -- *** SUPER SIMPLE ROAD DRAWING ***
     if Game.street_segments then
         love.graphics.setColor(0.3, 0.3, 0.3, 1.0)
         love.graphics.setLineWidth(math.max(2, tile_size * 0.15))
         
-        -- Just draw each segment as a simple line, nothing else
         for _, segment in ipairs(Game.street_segments) do
             if segment.type == "horizontal" then
-                local x1 = offset_x + segment.x1 * tile_size
+                local x1 = offset_x + (segment.x1 - 1) * tile_size
                 local x2 = offset_x + segment.x2 * tile_size
-                local y = offset_y + segment.y * tile_size
-                love.graphics.line(x1, y, x2, y)
-                
+                local y_pos = offset_y + (segment.y - 0.5) * tile_size
+                love.graphics.line(x1, y_pos, x2, y_pos)
             elseif segment.type == "vertical" then
-                local x = offset_x + segment.x * tile_size
-                local y1 = offset_y + segment.y1 * tile_size
+                local y1 = offset_y + (segment.y1 - 1) * tile_size
                 local y2 = offset_y + segment.y2 * tile_size
-                love.graphics.line(x, y1, x, y2)
+                local x_pos = offset_x + (segment.x - 0.5) * tile_size
+                love.graphics.line(x_pos, y1, x_pos, y2)
             end
         end
-        
         love.graphics.setLineWidth(1)
     end
-    -- *** END SUPER SIMPLE ROAD DRAWING ***
     
-    -- Draw arterial overlay paths if they exist
     if Game.smooth_highway_overlay_paths and #Game.smooth_highway_overlay_paths > 0 then
         love.graphics.setLineWidth(math.max(2, tile_size / 4))
         love.graphics.setColor(1, 0.5, 0.7, 0.8)
@@ -209,7 +201,6 @@ function GameView:drawLabGrid()
         love.graphics.setLineWidth(1)
     end
 
-    -- Draw arterial control paths as thick lines ON grid cells
     if Game.arterial_control_paths and #Game.arterial_control_paths > 0 then
         love.graphics.setLineWidth(math.max(3, math.floor(tile_size / 1)))
         love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
@@ -250,36 +241,21 @@ function GameView:drawFinalWfcCity()
 
     local tile_size_w = math.floor(available_w * 0.9 / grid_w)
     local tile_size_h = math.floor(available_h * 0.9 / grid_h)
-    local tile_size = math.max(4, math.min(tile_size_w, tile_size_h, 25))
+    local tile_size = math.max(2, math.min(tile_size_w, tile_size_h, 25))
     
     local total_grid_w, total_grid_h = grid_w * tile_size, grid_h * tile_size
-    local offset_x, offset_y = (available_w - total_grid_w) / 2, (available_h - total_grid_h) / 2
+    local offset_x = sidebar_w + (available_w - total_grid_w) / 2
+    local offset_y = (available_h - total_grid_h) / 2
     
-    for y = 1, grid_h do
-        for x = 1, grid_w do
-            local cell = grid[y][x]
-            if cell and cell.zone then
-                local color = self:getZoneColor(cell.zone)
-                love.graphics.setColor(color)
-                love.graphics.rectangle("fill", offset_x + (x-1)*tile_size, offset_y + (y-1)*tile_size, tile_size, tile_size)
-            end
-        end
+    -- Step 1: Draw Zone Colors as background
+    if Game.lab_zone_grid then
+        self:drawZoneBackground(offset_x, offset_y, tile_size)
     end
-
-    love.graphics.setColor(0.2, 0.2, 0.2, 0.9)
-    love.graphics.setLineWidth(math.max(1, math.floor(tile_size / 5)))
     
-    for _, road in ipairs(roads) do
-        local x1 = offset_x + road.x1 * tile_size
-        local y1 = offset_y + road.y1 * tile_size
-        local x2 = offset_x + road.x2 * tile_size
-        local y2 = offset_y + road.y2 * tile_size
-        love.graphics.line(x1, y1, x2, y2)
-    end
-
+    -- Step 2: Draw Arterials first (as thick lines)
     if Game.arterial_control_paths and #Game.arterial_control_paths > 0 then
-        love.graphics.setLineWidth(math.max(2, math.floor(tile_size / 3)))
-        love.graphics.setColor(0.1, 0.1, 0.1, 0.6)
+        love.graphics.setLineWidth(math.max(3, tile_size * 0.8))
+        love.graphics.setColor(0.2, 0.2, 0.2, 1.0)
         
         for _, path in ipairs(Game.arterial_control_paths) do
             if #path > 1 then
@@ -295,7 +271,25 @@ function GameView:drawFinalWfcCity()
             end
         end
     end
+
+    -- Step 3: Draw Local Streets
+    love.graphics.setColor(0.3, 0.3, 0.3, 1.0)
+    love.graphics.setLineWidth(math.max(1, tile_size * 0.5))
     
+    for _, road in ipairs(roads) do
+        if road.type == "horizontal" then
+            local x1 = offset_x + (road.x1 - 1) * tile_size
+            local x2 = offset_x + road.x2 * tile_size
+            local y_pos = offset_y + (road.y - 0.5) * tile_size
+            love.graphics.line(x1, y_pos, x2, y_pos)
+        elseif road.type == "vertical" then
+            local y1 = offset_y + (road.y1 - 1) * tile_size
+            local y2 = offset_y + road.y2 * tile_size
+            local x_pos = offset_x + (road.x - 0.5) * tile_size
+            love.graphics.line(x_pos, y1, x_pos, y2)
+        end
+    end
+
     love.graphics.setLineWidth(1)
 end
 

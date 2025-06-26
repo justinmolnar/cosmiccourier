@@ -15,12 +15,28 @@ function WfcLabController:getHandledKeys()
         ["w"] = true, ["e"] = true, ["r"] = true, ["y"] = true,
         ["s"] = true, ["d"] = true, ["f"] = true,
         ["c"] = true, ["t"] = true, ["h"] = true, ["u"] = true,
-        ["1"] = true, ["2"] = true, ["3"] = true
+        ["1"] = true, ["2"] = true, ["3"] = true,
+        ["space"] = true
     }
 end
 
 function WfcLabController:keypressed(key)
     local Game = self.game
+
+    if key == "space" then
+        print("=== Loading Main City into Lab Visualization ===")
+        if Game.main_city_debug_data and Game.main_city_debug_data.city_grid then
+            Game.lab_grid = nil -- Ensure the old debug grid is cleared
+            Game.wfc_final_grid = Game.main_city_debug_data.city_grid
+            Game.lab_zone_grid = Game.main_city_debug_data.zone_grid
+            Game.wfc_road_data = Game.main_city_debug_data.street_segments
+            Game.arterial_control_paths = Game.main_city_debug_data.arterial_paths
+            print("Main city data loaded into lab view.")
+        else
+            print("ERROR: No main city debug data found to display.")
+        end
+        return -- End the function here to not process other keys
+    end
 
     if key == "w" or key == "e" then
         print("=== Testing WFC Grid Generation ===")
@@ -29,15 +45,17 @@ function WfcLabController:keypressed(key)
             width = (key == "w") and 32 or 64, 
             height = (key == "w") and 24 or 48, 
             use_wfc_for_zones = true,
-            use_recursive_streets = false, -- Don't generate streets yet
-            generate_arterials = false -- Don't generate arterials yet
+            use_recursive_streets = false, 
+            generate_arterials = false 
         }
         local result = NewCityGenService.generateDetailedCity(wfc_params)
         if result and result.city_grid then
             Game.lab_grid = result.city_grid
             Game.lab_zone_grid = result.zone_grid
-            Game.arterial_control_paths = {} -- Clear arterials
+            Game.arterial_control_paths = {} 
             Game.smooth_highway_overlay_paths = {}
+            Game.wfc_final_grid = nil
+            Game.wfc_road_data = nil
             print("WFC Zone Generation SUCCESS!")
         else
             print("WFC Zone Generation FAILED!")
@@ -56,7 +74,6 @@ function WfcLabController:keypressed(key)
             width, height = 250, 250
         end
 
-        -- Let the service handle the dynamic parameters
         local wfc_params = { 
             width = width, 
             height = height, 
@@ -70,6 +87,8 @@ function WfcLabController:keypressed(key)
             Game.lab_zone_grid = result.zone_grid
             Game.arterial_control_paths = result.arterial_paths or {}
             Game.smooth_highway_overlay_paths = {}
+            Game.wfc_final_grid = nil
+            Game.wfc_road_data = nil
             print("Large WFC Generation SUCCESS! (" .. width .. "x" .. height .. ")")
         else
             print("Large WFC Generation FAILED! (" .. width .. "x" .. height .. ")")
@@ -80,7 +99,6 @@ function WfcLabController:keypressed(key)
         print("=== Generating and SAVING Arterial Roads ===")
         if Game.lab_grid and Game.lab_zone_grid then
             local NewCityGenService = require("services.NewCityGenService")
-            -- Let the service calculate num_arterials dynamically
             local arterial_params = { min_edge_distance = 15 }
             local success, generated_paths = NewCityGenService.generateArterialsOnly(Game.lab_grid, Game.lab_zone_grid, arterial_params)
             if success then
@@ -98,10 +116,8 @@ function WfcLabController:keypressed(key)
         print("=== Generating Streets with Recursive Subdivision ===")
         if Game.lab_grid and Game.lab_zone_grid then
             local NewCityGenService = require("services.NewCityGenService")
-            -- Let the service calculate block sizes dynamically
             local street_params = {}
             if key == "d" then
-                -- Still allow overrides for specific tests
                 street_params = { min_block_size = 2, max_block_size = 5 }
                 print("Forcing SMALL block sizes (2-5)")
             elseif key == "f" then
@@ -139,7 +155,6 @@ function WfcLabController:keypressed(key)
     if key == "u" then
         print("=== Full Pipeline Test: Zones + Arterials + Streets ===")
         local NewCityGenService = require("services.NewCityGenService")
-        -- Let the service handle all dynamic parameters
         local full_params = { 
             width = 48, 
             height = 36, 
@@ -153,6 +168,8 @@ function WfcLabController:keypressed(key)
             Game.lab_zone_grid = result.zone_grid
             Game.arterial_control_paths = result.arterial_paths or {}
             Game.smooth_highway_overlay_paths = {}
+            Game.wfc_final_grid = nil
+            Game.wfc_road_data = nil
             print("Full pipeline SUCCESS!")
         else
             print("Full pipeline FAILED!")
@@ -184,6 +201,7 @@ function WfcLabController:keypressed(key)
         print("F - Generate streets with large blocks (5-12 size)")
         print("U - Full pipeline test (zones + arterials + streets)")
         print("Y - Show arterial overlay visualization")
+        print("SPACE - Show a copy of the main game's generated city")
         print("C - Clear all")
         print("T - Toggle district zone visibility")
         print("H - Show this help")

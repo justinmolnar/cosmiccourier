@@ -36,7 +36,7 @@ end
 function Map:isRoad(tile_type)
     return tile_type == "road" or
            tile_type == "downtown_road" or
-           tile_type == "arterial" or
+           tile_type == "arterial" or 
            tile_type == "highway" or
            tile_type == "highway_ring" or
            tile_type == "highway_ns" or
@@ -148,31 +148,33 @@ function Map:setScale(new_scale)
     local screen_w, screen_h = love.graphics.getDimensions()
     local game_world_w = screen_w - (Game and Game.C.UI.SIDEBAR_WIDTH or 280)
     
+    local grid_w = #target_map.grid > 0 and #target_map.grid[1] or 1
+    local grid_h = #target_map.grid > 0 and #target_map.grid or 1
+
     if new_scale == self.C.MAP.SCALES.DOWNTOWN then
-        local downtown_center_x_grid = self.downtown_offset.x + (self.C.MAP.DOWNTOWN_GRID_WIDTH / 2)
-        local downtown_center_y_grid = self.downtown_offset.y + (self.C.MAP.DOWNTOWN_GRID_HEIGHT / 2)
+        -- Use the downtown dimensions from the constants file
+        local downtown_w = self.C.MAP.DOWNTOWN_GRID_WIDTH
+        local downtown_h = self.C.MAP.DOWNTOWN_GRID_HEIGHT
+        local downtown_center_x_grid = self.downtown_offset.x + (downtown_w / 2)
+        local downtown_center_y_grid = self.downtown_offset.y + (downtown_h / 2)
         
         Game.camera.x, Game.camera.y = self:getPixelCoords(downtown_center_x_grid, downtown_center_y_grid)
-        Game.camera.scale = 16 / self.C.MAP.TILE_SIZE
+        Game.camera.scale = game_world_w / ((downtown_w + 5) * self.C.MAP.TILE_SIZE)
         
     elseif new_scale == self.C.MAP.SCALES.CITY then
-        local city_center_x_grid = self.C.MAP.CITY_GRID_WIDTH / 2
-        local city_center_y_grid = self.C.MAP.CITY_GRID_HEIGHT / 2
+        local city_center_x_grid = grid_w / 2
+        local city_center_y_grid = grid_h / 2
         Game.camera.x, Game.camera.y = self:getPixelCoords(city_center_x_grid, city_center_y_grid)
         
-        local total_map_width_pixels = self.C.MAP.CITY_GRID_WIDTH * self.C.MAP.TILE_SIZE
+        local total_map_width_pixels = grid_w * self.C.MAP.TILE_SIZE
         Game.camera.scale = game_world_w / total_map_width_pixels
 
     elseif new_scale == self.C.MAP.SCALES.REGION then
-        if #target_map.grid == 0 then
-            target_map.grid = require("services.MapGenerationService")._createGrid(self.C.MAP.REGION_GRID_WIDTH, self.C.MAP.REGION_GRID_HEIGHT, "grass")
-        end
-        
-        local region_center_x_grid = self.C.MAP.REGION_GRID_WIDTH / 2
-        local region_center_y_grid = self.C.MAP.REGION_GRID_HEIGHT / 2
+        local region_center_x_grid = grid_w / 2
+        local region_center_y_grid = grid_h / 2
         Game.camera.x, Game.camera.y = target_map:getPixelCoords(region_center_x_grid, region_center_y_grid)
         
-        local total_map_width_pixels = self.C.MAP.REGION_GRID_WIDTH * self.C.MAP.TILE_SIZE
+        local total_map_width_pixels = grid_w * self.C.MAP.TILE_SIZE
         Game.camera.scale = game_world_w / total_map_width_pixels
     end
     
@@ -180,7 +182,7 @@ function Map:setScale(new_scale)
         Game.EventBus:publish("map_scale_changed")
     end
     
-    print("Set camera view to", self.C.MAP.SCALE_NAMES[Game.state.current_map_scale])
+    print("Set camera view to", self:getScaleName())
     return true
 end
 

@@ -7,74 +7,197 @@ local NewCityGenService = {}
 local WFCZoningService = require("services.WFCZoningService")
 local BlockSubdivisionService = require("services.BlockSubdivisionService")
 
-function NewCityGenService.generateDetailedCity(params)
-    print("NewCityGenService: Starting detailed city generation with recursive subdivision")
+function NewCityGenService._forceStreetsFromDowntownArterials(city_grid, district)
+    print("Forcing streets to grow directly from downtown arterials...")
+    local road_type = "downtown_road"
+    local dist_x, dist_y = district.x, district.y
+    local dist_w, dist_h = district.w, district.h
     
-    -- Extract parameters with defaults
-    local width = params.width or 64
-    local height = params.height or 48
-    local terrain_data = params.terrain_data or {}
-    local highway_connections = params.highway_connections or {}
-    local use_wfc_for_zones = params.use_wfc_for_zones or true
-    local use_recursive_streets = params.use_recursive_streets ~= false -- Default to true
+    local arterial_points = {}
+    -- First, find all arterial points that are inside the downtown district
+    for y = dist_y, dist_y + dist_h - 1 do
+        for x = dist_x, dist_x + dist_w - 1 do
+            if city_grid[y][x].type == "arterial" then
+                table.insert(arterial_points, {x = x, y = y})
+            end
+        end
+    end
+
+    if #arterial_points == 0 then
+        print("WARNING: No arterial road points found within downtown to build streets from.")
+        return
+    end
+
+    -- For every 4th arterial point found, grow a horizontal street
+    -- This creates a simple, predictable grid pattern.
+    for i = 1, #arterial_points do
+        if i % 4 == 0 then
+            local p = arterial_points[i]
+
+            -- Grow a street to the left from the arterial point
+            for x = p.x - 1, dist_x, -1 do
+                if city_grid[p.y][x].type ~= "plot" and city_grid[p.y][x].type ~= "downtown_plot" then break end -- Stop if we hit anything
+                city_grid[p.y][x].type = road_type
+            end
+
+            -- Grow a street to the right from the arterial point
+            for x = p.x + 1, dist_x + dist_w - 1 do
+                if city_grid[p.y][x].type ~= "plot" and city_grid[p.y][x].type ~= "downtown_plot" then break end -- Stop if we hit anything
+                city_grid[p.y][x].type = road_type
+            end
+        end
+    end
+    print("Finished growing streets from downtown arterials.")
+end
+
+function NewCityGenService.generateDetailedCity(params)
+    print("NewCityGenService: Starting detailed city generation...")
+    
+    local C_MAP = require("data.constants").MAP
+    local width = params.width or C_MAP.CITY_GRID_WIDTH
+    local height = params.height or C_MAP.CITY_GRID_HEIGHT
     
     local city_grid = NewCityGenService._createEmptyGrid(width, height)
     
     -- STAGE 1: Zone Generation
-    print("NewCityGenService: Stage 1 - Zone Generation")
-    local zone_grid
-    if use_wfc_for_zones then
-        zone_grid = NewCityGenService._generateZonesWithWFC(width, height, params)
-    else
-        zone_grid = NewCityGenService._generateZonesSimple(width, height, params)
-    end
+    local wfc_params = {
+        downtown_width = C_MAP.DOWNTOWN_GRID_WIDTH,
+        downtown_height = C_MAP.DOWNTOWN_GRID_HEIGHT
+    }
+    local zone_grid = NewCityGenService._generateZonesWithWFC(width, height, wfc_params)
+    if not zone_grid then return nil end
     
-    if not zone_grid then
-        print("ERROR: Zone generation failed!")
-        return nil
-    end
+    -- STAGE 2: Arterial Road Generation
+    local arterial_paths = NewCityGenService._generateArterialsSimple(city_grid, zone_grid, {}, params)
     
-    -- STAGE 2: Arterial Road Generation  
-    print("NewCityGenService: Stage 2 - Arterial Road Generation")
-    local arterial_paths = {}
-    if params.generate_arterials ~= false then
-        arterial_paths = NewCityGenService._generateArterialsSimple(city_grid, zone_grid, highway_connections, params)
-    end
-    
-    -- STAGE 3: Street Generation using Recursive Subdivision
-    print("NewCityGenService: Stage 3 - Street Generation with Recursive Subdivision")
-    if use_recursive_streets then
-        -- DYNAMIC BLOCK SIZES
-        local map_diagonal = math.sqrt(width^2 + height^2)
-        local dynamic_max_size = math.max(8, math.floor(map_diagonal / 20))
-        local dynamic_min_size = math.max(4, math.floor(dynamic_max_size / 2))
+    -- STAGE 3: THE FIX - Pre-Subdivide Downtown to guide the main street algorithm
+    local downtown_w = C_MAP.DOWNTOWN_GRID_WIDTH
+    local downtown_h = C_MAP.DOWNTOWN_GRID_HEIGHT
+    local district = {
+        x = math.floor(width / 2) - math.floor(downtown_w / 2),
+        y = math.floor(height / 2) - math.floor(downtown_h / 2),
+        w = downtown_w,
+        h = downtown_h
+    }
 
-        local street_params = {
-            min_block_size = params.min_block_size or dynamic_min_size,
-            max_block_size = params.max_block_size or dynamic_max_size,
-            street_width = params.street_width or 1
-        }
-        BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, street_params)
-    else
-        NewCityGenService._generateDetailsSimple(city_grid, zone_grid, params)
+    -- Draw two vertical and two horizontal lines to create "nodes" for the generator to work from.
+    local v1_x = district.x + math.floor(district.w * 0.33)
+    local v2_x = district.x + math.floor(district.w * 0.66)
+    for y = district.y, district.y + district.h - 1 do
+        city_grid[y][v1_x].type = "downtown_road"
+        city_grid[y][v2_x].type = "downtown_road"
     end
     
-    -- STAGE 4: Fill remaining areas with plots
-    print("NewCityGenService: Stage 4 - Filling plots")
-    NewCityGenService._fillRemainingWithPlots(city_grid, zone_grid, width, height)
+    local h1_y = district.y + math.floor(district.h * 0.33)
+    local h2_y = district.y + math.floor(district.h * 0.66)
+    for x = district.x, district.x + district.w - 1 do
+        city_grid[h1_y][x].type = "downtown_road"
+        city_grid[h2_y][x].type = "downtown_road"
+    end
+    
+    -- STAGE 4: Run the main street algorithm, which will now correctly process the pre-divided downtown
+    BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, params)
     
     print("NewCityGenService: City generation complete")
     return {
         city_grid = city_grid,
         zone_grid = zone_grid,
         arterial_paths = arterial_paths,
-        stats = {
-            width = width,
-            height = height,
-            zones_generated = NewCityGenService._countZones(zone_grid),
-            generation_method = "Recursive Subdivision"
-        }
+        street_segments = Game.street_segments,
+        stats = { width = width, height = height }
     }
+end
+
+function NewCityGenService._forceDowntownGrid(city_grid, district)
+    print("Forcefully carving grid into downtown district...")
+    
+    local road_type = "downtown_road"
+    local dist_x, dist_y = district.x, district.y
+    local dist_w, dist_h = district.w, district.h
+    local road_spacing = 6 -- How many tiles between each new road.
+
+    -- Force vertical streets
+    for x = dist_x, dist_x + dist_w - 1 do
+        if (x - dist_x) % road_spacing == 0 then
+            for y = dist_y, dist_y + dist_h - 1 do
+                if city_grid[y] and city_grid[y][x] then
+                    city_grid[y][x].type = road_type
+                end
+            end
+        end
+    end
+
+    -- Force horizontal streets
+    for y = dist_y, dist_y + dist_h - 1 do
+        if (y - dist_y) % road_spacing == 0 then
+            for x = dist_x, dist_x + dist_w - 1 do
+                if city_grid[y] and city_grid[y][x] then
+                    city_grid[y][x].type = road_type
+                end
+            end
+        end
+    end
+    print("Downtown grid carved.")
+end
+
+
+function NewCityGenService._growStreetsFromDowntownArterials(city_grid, arterial_paths, district, num_streets)
+    print("Forcing streets to grow from downtown arterials...")
+    if not arterial_paths or #arterial_paths == 0 then return end
+
+    local downtown_arterial_points = {}
+    for _, path in ipairs(arterial_paths) do
+        for _, point in ipairs(path) do
+            if point.x >= district.x and point.x < district.x + district.w and
+               point.y >= district.y and point.y < district.y + district.h then
+                table.insert(downtown_arterial_points, point)
+            end
+        end
+    end
+
+    if #downtown_arterial_points == 0 then
+        print("Warning: No arterial road points found within downtown to grow from.")
+        return
+    end
+
+    local roads_created = 0
+    for i = 1, num_streets do
+        local start_point = downtown_arterial_points[love.math.random(1, #downtown_arterial_points)]
+        
+        local prev_point, next_point
+        for _, path in ipairs(arterial_paths) do
+            for p_idx, point in ipairs(path) do
+                -- THE FIX: Compare coordinates, not table references
+                if point.x == start_point.x and point.y == start_point.y and p_idx > 1 and p_idx < #path then
+                    prev_point = path[p_idx - 1]
+                    next_point = path[p_idx + 1]
+                    break
+                end
+            end
+            if prev_point then break end
+        end
+
+        local is_vertical = false
+        if prev_point and next_point and math.abs(next_point.x - prev_point.x) < math.abs(next_point.y - prev_point.y) then
+            is_vertical = true
+        end
+
+        local dx, dy = 0, 0
+        if is_vertical then
+            dx = love.math.random(0,1) == 0 and -1 or 1
+        else
+            dy = love.math.random(0,1) == 0 and -1 or 1
+        end
+
+        local cx, cy = start_point.x + dx, start_point.y + dy
+        while (cx >= district.x and cx < district.x + district.w and cy >= district.y and cy < district.y + district.h) do
+            if city_grid[cy][cx].type ~= "plot" and city_grid[cy][cx].type ~= "downtown_plot" then break end
+            city_grid[cy][cx].type = "downtown_road"
+            cx, cy = cx + dx, cy + dy
+        end
+        roads_created = roads_created + 1
+    end
+    print("Created " .. roads_created .. " streets branching from downtown arterials.")
 end
 
 -- Create an empty grid filled with grass
