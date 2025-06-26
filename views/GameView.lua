@@ -209,20 +209,43 @@ function GameView:drawFinalWfcCity()
         end
     end
 
-    -- Draw the roads on top
+    -- Draw the local WFC roads on top
     love.graphics.setColor(0.2, 0.2, 0.2, 0.9) -- Slightly darker, more visible roads
     love.graphics.setLineWidth(math.max(1, math.floor(tile_size / 5)))
     
     for _, road in ipairs(roads) do
-        -- CORRECTED road drawing logic to align with grid lines
         local x1 = offset_x + road.x1 * tile_size
         local y1 = offset_y + road.y1 * tile_size
         local x2 = offset_x + road.x2 * tile_size
         local y2 = offset_y + road.y2 * tile_size
         love.graphics.line(x1, y1, x2, y2)
     end
+
+    -- MODIFICATION: Draw the arterial roads as a final overlay
+    if Game.arterial_control_paths and #Game.arterial_control_paths > 0 then
+        love.graphics.setLineWidth(math.max(2, math.floor(tile_size / 3))) -- Arteries are thicker
+        love.graphics.setColor(0.1, 0.1, 0.1, 0.6) -- Dark, semi-transparent color for arteries
+        
+        for _, path in ipairs(Game.arterial_control_paths) do
+            local pixel_path = {}
+            if #path > 1 then
+                for i = 1, #path - 1 do
+                    -- Draw a line segment between each node in the arterial path
+                    local node1 = path[i]
+                    local node2 = path[i+1]
+                    local p1x = offset_x + (node1.x - 0.5) * tile_size
+                    local p1y = offset_y + (node1.y - 0.5) * tile_size
+                    local p2x = offset_x + (node2.x - 0.5) * tile_size
+                    local p2y = offset_y + (node2.y - 0.5) * tile_size
+                    love.graphics.line(p1x, p1y, p2x, p2y)
+                end
+            end
+        end
+    end
+    
     love.graphics.setLineWidth(1)
 end
+
 
 -- FIXED: Update zone overlay to use the same positioning
 function GameView:drawZoneOverlay(offset_x, offset_y, tile_size)
