@@ -149,9 +149,6 @@ function GameView:drawLabGrid()
     local offset_x = (available_w - total_grid_w) / 2
     local offset_y = (available_h - total_grid_h) / 2
     
-    print(string.format("Lab Grid: %dx%d, tile_size=%d, screen=%dx%d", 
-          grid_w, grid_h, tile_size, available_w, available_h))
-    
     -- Draw background
     love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
     love.graphics.rectangle("fill", offset_x - 10, offset_y - 40, total_grid_w + 20, total_grid_h + 50)

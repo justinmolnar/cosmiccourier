@@ -22,13 +22,13 @@ function DebugMenuController:new(game)
     instance.text_input_active = nil -- Which parameter is being edited
     instance.text_input_value = "" -- Current text being typed
     
+    -- ADDED TAB DATA
+    instance.tabs = { "Generation", "Gameplay", "Stats" }
+    instance.active_tab = "Generation"
+    instance.hovered_tab = nil
+    
     -- Debug parameters that can be tweaked
     instance.params = {
-        -- WFC Toggles (NEW)
-        use_wfc_for_zones = true,
-        use_wfc_for_arterials = false,
-        use_wfc_for_details = false,
-        
         -- Component Toggles (EXISTING)
         generate_downtown = true,
         generate_districts = true,
@@ -75,15 +75,15 @@ function DebugMenuController:new(game)
     
     -- Button definitions
     instance.buttons = {
-        {id = "regen_all", text = "Regenerate Everything", color = {0.8, 0.2, 0.2}},
-        {id = "clear_all", text = "Clear All Roads", color = {0.6, 0.6, 0.6}},
-        {id = "regen_downtown", text = "Regen Downtown Only", color = {0.2, 0.8, 0.2}},
-        {id = "regen_districts", text = "Regen Districts Only", color = {0.2, 0.6, 0.8}},
-        {id = "regen_ring", text = "Regen Ring Road Only", color = {0.2, 0.4, 0.8}},
-        {id = "regen_highways", text = "Regen Highways Only", color = {0.6, 0.8, 0.2}},
-        {id = "regen_connections", text = "Regen Connections Only", color = {0.8, 0.6, 0.2}},
-        {id = "test_pathfinding", text = "Test Pathfinding (Random)", color = {0.8, 0.2, 0.8}},
-        {id = "reset_params", text = "Reset All Parameters", color = {0.4, 0.4, 0.4}},
+        {id = "regen_all", text = "Regenerate Everything", color = {0.8, 0.2, 0.2}, tab = "Generation"},
+        {id = "clear_all", text = "Clear All Roads", color = {0.6, 0.6, 0.6}, tab = "Generation"},
+        {id = "regen_downtown", text = "Regen Downtown Only", color = {0.2, 0.8, 0.2}, tab = "Generation"},
+        {id = "regen_districts", text = "Regen Districts Only", color = {0.2, 0.6, 0.8}, tab = "Generation"},
+        {id = "regen_ring", text = "Regen Ring Road Only", color = {0.2, 0.4, 0.8}, tab = "Generation"},
+        {id = "regen_highways", text = "Regen Highways Only", color = {0.6, 0.8, 0.2}, tab = "Generation"},
+        {id = "regen_connections", text = "Regen Connections Only", color = {0.8, 0.6, 0.2}, tab = "Generation"},
+        {id = "test_pathfinding", text = "Test Pathfinding (Random)", color = {0.8, 0.2, 0.8}, tab = "Generation"},
+        {id = "reset_params", text = "Reset All Parameters", color = {0.4, 0.4, 0.4}, tab = "Generation"},
     }
     
     return instance
@@ -104,114 +104,86 @@ end
 
 function DebugMenuController:handle_mouse_down(x, y, button)
     if not self.visible then return false end
-    
-    -- First check if click is even within menu bounds - if not, return false immediately
+
+    -- Check if click is outside the menu's main rectangle
     if not (x >= self.x and x <= self.x + self.w and y >= self.y and y <= self.y + self.h) then
-        -- Click is outside menu - cancel any text input and don't consume the click
-        self.text_input_active = nil
-        return false
+        return false -- Click was outside, do not consume it
     end
     
-    -- Check if click is within menu bounds
-    if x >= self.x and x <= self.x + self.w and y >= self.y and y <= self.y + self.h then
-        
-        -- Check scrollbar first
-        if self.content_height > self.h - 60 then
-            local scrollbar_x = self.x + self.w - 15
-            local scrollbar_w = 10
-            local scrollbar_y_start = self.y + 30
-            local scrollbar_h = self.h - 60
+    -- From here, we consume the click to prevent interaction with the game world
+    
+    -- 1. Handle Non-Scrolling UI (Title bar, Close button, Tabs)
+    if y <= self.y + 25 then -- Title Bar Drag
+        self.dragging = true
+        self.drag_offset_x = x - self.x
+        self.drag_offset_y = y - self.y
+        return true
+    end
+
+    if x >= self.x + self.w - 25 and x <= self.x + self.w - 4 and y >= self.y + 2 and y <= self.y + 23 then -- Close Button
+        self.visible = false
+        return true
+    end
+    
+    local tab_y = self.y + 25
+    local tab_h = 25
+    if y > tab_y and y < tab_y + tab_h then -- Tabs
+        local tab_w = self.w / #self.tabs
+        local tab_index = math.floor((x - self.x) / tab_w) + 1
+        if tab_index >= 1 and tab_index <= #self.tabs then
+            self.active_tab = self.tabs[tab_index]
+            return true
+        end
+    end
+    
+    -- 2. Handle Scrolling UI (Buttons and Parameters)
+    local content_y_on_screen = self.y + 51
+    local content_h_on_screen = self.h - 52
+    
+    -- Check if the click is within the visible bounds of the scrollable area
+    if y > content_y_on_screen and y < content_y_on_screen + content_h_on_screen then
+        -- This is the crucial part: Convert mouse 'y' into the scrolled content's coordinate space
+        local y_in_content = y - content_y_on_screen + self.scroll_y
+
+        if self.active_tab == "Generation" then
+            -- Use a clean cursor that mirrors the draw function's logic
+            local current_y_in_content = 10 
             
-            if x >= scrollbar_x and x <= scrollbar_x + scrollbar_w and 
-               y >= scrollbar_y_start and y <= scrollbar_y_start + scrollbar_h then
-                
-                -- Check if clicking on the scrollbar handle for dragging
-                local scrollbar_handle_h = scrollbar_h * ((self.h - 60) / self.content_height)
-                scrollbar_handle_h = math.max(scrollbar_handle_h, 15)
-                local scroll_percentage = self.scroll_y / math.max(1, self.content_height - (self.h - 60))
-                local handle_y = scrollbar_y_start + ((scrollbar_h - scrollbar_handle_h) * scroll_percentage)
-                
-                if y >= handle_y and y <= handle_y + scrollbar_handle_h then
-                    -- Start dragging the handle
-                    self.dragging_scrollbar = true
-                    self.scrollbar_drag_start_y = y
-                    self.scroll_y_at_drag_start = self.scroll_y
-                    return true
-                else
-                    -- Click elsewhere on scrollbar track - jump to that position
-                    local click_position = (y - scrollbar_y_start) / scrollbar_h
-                    self.scroll_y = click_position * math.max(0, self.content_height - (self.h - 60))
-                    self.scroll_y = math.max(0, math.min(self.scroll_y, math.max(0, self.content_height - (self.h - 60))))
-                    return true
+            -- Parameters Section
+            current_y_in_content = current_y_in_content + 20 -- "Parameters:" header height
+            for param_name, value in pairs(self.params) do
+                if y_in_content >= current_y_in_content and y_in_content < current_y_in_content + 25 then
+                    -- Minus button
+                    if x >= self.x + self.w - 70 and x <= self.x + self.w - 50 then
+                        self:adjustParameter(param_name, -1)
+                        return true
+                    end
+                    -- Plus button
+                    if x >= self.x + self.w - 50 and x <= self.x + self.w - 30 then
+                        self:adjustParameter(param_name, 1)
+                        return true
+                    end
+                end
+                current_y_in_content = current_y_in_content + 25
+            end
+
+            -- Actions Section
+            current_y_in_content = current_y_in_content + 10 + 20 -- Spacing + "Actions:" header height
+            for _, btn in ipairs(self.buttons) do
+                if btn.tab == self.active_tab then
+                    if y_in_content >= current_y_in_content and y_in_content < current_y_in_content + 30 then
+                        if x >= self.x + 10 and x <= self.x + self.w - 10 then
+                            self:executeAction(btn.id)
+                            return true
+                        end
+                    end
+                    current_y_in_content = current_y_in_content + 35
                 end
             end
         end
-        -- Check title bar for dragging
-        if y <= self.y + 25 then
-            self.dragging = true
-            self.drag_offset_x = x - self.x
-            self.drag_offset_y = y - self.y
-            return true
-        end
-        
-        -- Check close button
-        if x >= self.x + self.w - 25 and x <= self.x + self.w - 4 and y >= self.y + 2 and y <= self.y + 23 then
-            self.visible = false
-            return true
-        end
-        
-        -- Check buttons
-        local content_y = self.y + 35 - self.scroll_y
-        
-        -- Parameter adjustment buttons (both on the right side now)
-        local param_y = content_y + 20 -- Skip header
-        for param_name, value in pairs(self.params) do
-            if type(value) == "number" then
-                -- Check if clicking on the value text (to start editing)
-                local value_x = self.x + 35
-                local value_w = self.w - 140
-                if x >= value_x and x <= value_x + value_w and y >= param_y and y <= param_y + 20 then
-                    self.text_input_active = param_name
-                    self.text_input_value = tostring(value)
-                    return true
-                end
-                
-                -- Minus button (now on the right, left of plus)
-                if x >= self.x + self.w - 70 and x <= self.x + self.w - 50 and y >= param_y and y <= param_y + 20 then
-                    self:adjustParameter(param_name, -1)
-                    return true
-                end
-                -- Plus button (far right)
-                if x >= self.x + self.w - 50 and x <= self.x + self.w - 30 and y >= param_y and y <= param_y + 20 then
-                    self:adjustParameter(param_name, 1)
-                    return true
-                end
-                param_y = param_y + 25
-            elseif type(value) == "boolean" then
-                -- Toggle button
-                if x >= self.x + 10 and x <= self.x + self.w - 10 and y >= param_y and y <= param_y + 20 then
-                    self.params[param_name] = not self.params[param_name]
-                    self.game.error_service.logInfo("DebugMenu", "Toggled " .. param_name .. " to " .. tostring(self.params[param_name]))
-                    return true
-                end
-                param_y = param_y + 25
-            end
-        end
-        
-        -- Action buttons
-        param_y = param_y + 20
-        for i, btn in ipairs(self.buttons) do
-            local btn_y = param_y + (i - 1) * 35
-            if x >= self.x + 10 and x <= self.x + self.w - 10 and y >= btn_y and y <= btn_y + 30 then
-                self:executeAction(btn.id)
-                return true
-            end
-        end
-        
-        return true -- Consume click even if not on specific element
     end
-    
-    return false
+
+    return true -- Consume click
 end
 
 function DebugMenuController:handle_text_input(text)
@@ -385,51 +357,9 @@ function DebugMenuController:executeAction(action_id)
         safeExecute(function()
             self:applyParametersToModules()
             
-            -- FIXED: Check if we should use the new WFC system
-            if self.params.use_wfc_for_zones then
-                print("DebugMenu: Using new WFC city generation system")
-                
-                -- Import the new service
-                local NewCityGenService = require("services.NewCityGenService")
-                
-                -- Set up parameters for the new system  
-                local wfc_params = {
-                    width = 64,  -- Fixed size for testing
-                    height = 48,
-                    use_wfc_for_zones = self.params.use_wfc_for_zones,
-                    use_wfc_for_arterials = self.params.use_wfc_for_arterials,
-                    use_wfc_for_details = self.params.use_wfc_for_details,
-                    industrial_zones = true,
-                    terrain_data = {},
-                    highway_connections = {}
-                }
-                
-                -- Generate the new city
-                local result = NewCityGenService.generateDetailedCity(wfc_params)
-                
-                if result and result.city_grid then
-                    -- CRITICAL: Store the result properly so GameView can access it
-                    self.game.lab_grid = result.city_grid
-                    self.game.lab_zone_grid = result.zone_grid
-                    self.game.lab_stats = result.stats
-                    
-                    print("DebugMenu: Lab grid stored successfully")
-                    print("DebugMenu: Grid size:", #result.city_grid, "x", #result.city_grid[1])
-                    if result.stats and result.stats.zones_generated then
-                        print("DebugMenu: Zone counts:")
-                        for zone, count in pairs(result.stats.zones_generated) do
-                            print("  " .. zone .. ": " .. count)
-                        end
-                    end
-                else
-                    print("ERROR: NewCityGenService failed, clearing lab grid")
-                    self.game.lab_grid = nil
-                end
-            else
-                print("DebugMenu: WFC disabled, using original generation")
-                self.game.lab_grid = nil
-                self.game.map:generate()
-            end
+            -- REVERTED: Always use the original generation system for the debug menu
+            print("DebugMenu: Using original legacy generation system")
+            self.game.map:generate()
             
             self.game.error_service.logInfo("DebugMenu", "Regenerated entire map with current parameters")
         end, "Regenerate All")

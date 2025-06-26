@@ -81,7 +81,7 @@ function DebugMenuView:draw()
     love.graphics.setColor(1, 1, 1)
     love.graphics.printf("×", x + w - 25, y + 5, 21, "center")
 
-    -- NEW: Draw Tabs
+    -- Draw Tabs
     local tab_y = y + 25
     local tab_h = 25
     local tab_w = w / #self.controller.tabs
@@ -105,20 +105,19 @@ function DebugMenuView:draw()
     local current_content_y = y + 55
     love.graphics.setFont(self.game.fonts.ui_small)
     
-    -- Draw parameters section (only for active tab)
-    love.graphics.setColor(1, 1, 0.8)
-    love.graphics.print("Parameters:", x + 10, current_content_y)
-    current_content_y = current_content_y + 20
-    
-    local param_count = 0
-    for param_name, param_data in pairs(self.controller.params) do
-        if param_data.tab == active_tab then
+    -- Only draw content for the active tab
+    if active_tab == "Generation" then
+        -- Draw parameters section
+        love.graphics.setColor(1, 1, 0.8)
+        love.graphics.print("Parameters:", x + 10, current_content_y)
+        current_content_y = current_content_y + 20
+        
+        local param_count = 0
+        for param_name, value in pairs(self.controller.params) do
             param_count = param_count + 1
-            local value = param_data.value
             local param_draw_y = current_content_y + (param_count - 1) * 25
             
             if type(value) == "number" then
-                -- RE-ADD DRAWING LOGIC FOR NUMBERS
                 love.graphics.setColor(1, 1, 1)
                 love.graphics.print(param_name, x + 10, param_draw_y + 3)
                 love.graphics.printf(string.format("%.3f", value), x + 35, param_draw_y + 3, w - 140, "right")
@@ -131,7 +130,6 @@ function DebugMenuView:draw()
                 love.graphics.setColor(1, 1, 1)
                 love.graphics.printf("+", x + w - 50, param_draw_y + 3, 20, "center")
             elseif type(value) == "boolean" then
-                -- RE-ADD DRAWING LOGIC FOR BOOLEANS
                 local toggle_color = value and {0.4, 0.8, 0.4} or {0.8, 0.4, 0.4}
                 love.graphics.setColor(toggle_color)
                 love.graphics.rectangle("fill", x + 10, param_draw_y, 20, 20)
@@ -140,46 +138,49 @@ function DebugMenuView:draw()
                 love.graphics.print(param_name, x + 35, param_draw_y + 3)
             end
         end
-    end
-    current_content_y = current_content_y + param_count * 25
-    
-    -- Draw actions section (only for active tab)
-    current_content_y = current_content_y + 10
-    love.graphics.setColor(1, 1, 0.8)
-    love.graphics.print("Actions:", x + 10, current_content_y)
-    current_content_y = current_content_y + 20
-    
-    local button_count = 0
-    for i, btn in ipairs(self.controller.buttons) do
-        if btn.tab == active_tab then
-            button_count = button_count + 1
-            local btn_y = current_content_y + (button_count - 1) * 35
-            -- RE-ADD DRAWING LOGIC FOR BUTTONS
-            local bg_color = btn.color
-            love.graphics.setColor(bg_color)
-            love.graphics.rectangle("fill", x + 10, btn_y, w - 20, 30)
-            love.graphics.setColor(1, 1, 1)
-            love.graphics.rectangle("line", x + 10, btn_y, w - 20, 30)
-            love.graphics.printf(btn.text, x + 10, btn_y + 8, w - 20, "center")
+        current_content_y = current_content_y + param_count * 25
+        
+        -- Draw actions section
+        current_content_y = current_content_y + 10
+        love.graphics.setColor(1, 1, 0.8)
+        love.graphics.print("Actions:", x + 10, current_content_y)
+        current_content_y = current_content_y + 20
+        
+        local button_count = 0
+        for i, btn in ipairs(self.controller.buttons) do
+            if btn.tab == active_tab then
+                button_count = button_count + 1
+                local btn_y = current_content_y + (button_count - 1) * 35
+                local bg_color = btn.color
+                love.graphics.setColor(bg_color)
+                love.graphics.rectangle("fill", x + 10, btn_y, w - 20, 30)
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.rectangle("line", x + 10, btn_y, w - 20, 30)
+                love.graphics.printf(btn.text, x + 10, btn_y + 8, w - 20, "center")
+            end
         end
     end
     
     love.graphics.pop()
     love.graphics.setScissor()
 
-    -- Update content height for scrollbar calculation
-    content_height = (param_count * 25) + (button_count * 35) + 60
-    self.controller.content_height = content_height
+    -- Calculate content height for scrollbar
+    if active_tab == "Generation" then
+        local param_count = 0; for _ in pairs(self.controller.params) do param_count = param_count + 1 end
+        local button_count = #self.controller.buttons
+        content_height = (param_count * 25) + (button_count * 35) + 60
+        self.controller.content_height = content_height
 
-    -- Draw scrollbar
-    if content_height > h - 80 then
-        local scrollbar_h = (h - 55) * ((h - 80) / content_height)
-        scrollbar_y = y + 50 + (scroll_y / content_height) * (h - 80 - scrollbar_h)
-        
-        love.graphics.setColor(0.3, 0.3, 0.4)
-        love.graphics.rectangle("fill", x + w - 15, y + 50, 10, h - 50)
-        love.graphics.setColor(0.6, 0.6, 0.7)
-        love.graphics.rectangle("fill", x + w - 15, scrollbar_y, 10, scrollbar_h)
+        -- Draw scrollbar
+        if content_height > h - 80 then
+            local scrollbar_h = (h - 55) * ((h - 80) / content_height)
+            local scrollbar_y_pos = y + 50 + (scroll_y / content_height) * (h - 80 - scrollbar_h)
+            
+            love.graphics.setColor(0.3, 0.3, 0.4)
+            love.graphics.rectangle("fill", x + w - 15, y + 50, 10, h - 50)
+            love.graphics.setColor(0.6, 0.6, 0.7)
+            love.graphics.rectangle("fill", x + w - 15, scrollbar_y_pos, 10, scrollbar_h)
+        end
     end
     
     love.graphics.pop()
