@@ -1,6 +1,6 @@
 -- controllers/DebugMenuController.lua
 -- Debug menu controller that integrates with the current MVC architecture
--- FIXED for WFC integration
+-- FIXED: Mouse position handling and scrollbar functionality
 
 local DebugMenuController = {}
 DebugMenuController.__index = DebugMenuController
@@ -19,6 +19,8 @@ function DebugMenuController:new(game)
     instance.scroll_y = 0
     instance.content_height = 0
     instance.dragging_scrollbar = false
+    instance.scrollbar_drag_start_y = 0
+    instance.scroll_y_at_drag_start = 0
     instance.text_input_active = nil -- Which parameter is being edited
     instance.text_input_value = "" -- Current text being typed
     
@@ -136,14 +138,50 @@ function DebugMenuController:handle_mouse_down(x, y, button)
         end
     end
     
-    -- 2. Handle Scrolling UI (Buttons and Parameters)
-    local content_y_on_screen = self.y + 51
-    local content_h_on_screen = self.h - 52
+    -- 2. Handle Scrollbar Interaction (FIXED)
+    local content_area_y = self.y + 51
+    local content_area_h = self.h - 52
     
-    -- Check if the click is within the visible bounds of the scrollable area
-    if y > content_y_on_screen and y < content_y_on_screen + content_h_on_screen then
+    -- Check if we have a scrollbar
+    if self.content_height > content_area_h then
+        local scrollbar_x = self.x + self.w - 15
+        local scrollbar_w = 10
+        
+        -- Check if click is on scrollbar
+        if x >= scrollbar_x and x <= scrollbar_x + scrollbar_w and 
+           y >= content_area_y and y <= content_area_y + content_area_h then
+            
+            -- Calculate scrollbar handle position and size
+            local handle_h = content_area_h * (content_area_h / self.content_height)
+            handle_h = math.max(handle_h, 15)
+            
+            local scroll_range = math.max(0, self.content_height - content_area_h)
+            local scroll_percentage = scroll_range > 0 and (self.scroll_y / scroll_range) or 0
+            
+            local usable_track_h = content_area_h - handle_h
+            local handle_y = content_area_y + (usable_track_h * scroll_percentage)
+            
+            -- Check if click is on the handle
+            if y >= handle_y and y <= handle_y + handle_h then
+                self.dragging_scrollbar = true
+                self.scrollbar_drag_start_y = y
+                self.scroll_y_at_drag_start = self.scroll_y
+                return true
+            else
+                -- Click is on scrollbar track - jump to that position
+                local relative_y = y - content_area_y
+                local new_scroll_percentage = relative_y / content_area_h
+                self.scroll_y = new_scroll_percentage * scroll_range
+                self.scroll_y = math.max(0, math.min(self.scroll_y, scroll_range))
+                return true
+            end
+        end
+    end
+    
+    -- 3. Handle Scrolling UI Content (Buttons and Parameters) - FIXED
+    if y > content_area_y and y < content_area_y + content_area_h then
         -- This is the crucial part: Convert mouse 'y' into the scrolled content's coordinate space
-        local y_in_content = y - content_y_on_screen + self.scroll_y
+        local y_in_content = y - content_area_y + self.scroll_y
 
         if self.active_tab == "Generation" then
             -- Use a clean cursor that mirrors the draw function's logic
@@ -152,16 +190,28 @@ function DebugMenuController:handle_mouse_down(x, y, button)
             -- Parameters Section
             current_y_in_content = current_y_in_content + 20 -- "Parameters:" header height
             for param_name, value in pairs(self.params) do
-                if y_in_content >= current_y_in_content and y_in_content < current_y_in_content + 25 then
-                    -- Minus button
-                    if x >= self.x + self.w - 70 and x <= self.x + self.w - 50 then
-                        self:adjustParameter(param_name, -1)
-                        return true
+                if type(value) == "number" then
+                    if y_in_content >= current_y_in_content and y_in_content < current_y_in_content + 25 then
+                        -- Minus button
+                        if x >= self.x + self.w - 70 and x <= self.x + self.w - 50 then
+                            self:adjustParameter(param_name, -1)
+                            return true
+                        end
+                        -- Plus button
+                        if x >= self.x + self.w - 50 and x <= self.x + self.w - 30 then
+                            self:adjustParameter(param_name, 1)
+                            return true
+                        end
                     end
-                    -- Plus button
-                    if x >= self.x + self.w - 50 and x <= self.x + self.w - 30 then
-                        self:adjustParameter(param_name, 1)
-                        return true
+                elseif type(value) == "boolean" then
+                    if y_in_content >= current_y_in_content and y_in_content < current_y_in_content + 25 then
+                        -- Toggle button (entire parameter row is clickable)
+                        if x >= self.x + 10 and x <= self.x + self.w - 30 then
+                            self.params[param_name] = not self.params[param_name]
+                            self.game.error_service.logInfo("DebugMenu", 
+                                string.format("Toggled %s to %s", param_name, tostring(self.params[param_name])))
+                            return true
+                        end
                     end
                 end
                 current_y_in_content = current_y_in_content + 25
@@ -172,7 +222,7 @@ function DebugMenuController:handle_mouse_down(x, y, button)
             for _, btn in ipairs(self.buttons) do
                 if btn.tab == self.active_tab then
                     if y_in_content >= current_y_in_content and y_in_content < current_y_in_content + 30 then
-                        if x >= self.x + 10 and x <= self.x + self.w - 10 then
+                        if x >= self.x + 10 and x <= self.x + self.w - 30 then -- Account for scrollbar space
                             self:executeAction(btn.id)
                             return true
                         end
@@ -255,62 +305,40 @@ function DebugMenuController:update(dt)
         self.y = math.max(0, math.min(self.y, screen_h - self.h))
     end
     
-    -- Handle scrollbar dragging
+    -- Handle scrollbar dragging (FIXED)
     if self.dragging_scrollbar then
         local mx, my = love.mouse.getPosition()
         local drag_delta = my - self.scrollbar_drag_start_y
         
         -- Convert drag delta to scroll delta
-        local scrollbar_h = self.h - 60
-        local scrollbar_handle_h = scrollbar_h * ((self.h - 60) / self.content_height)
+        local content_area_h = self.h - 52
+        local scrollbar_handle_h = content_area_h * (content_area_h / self.content_height)
         scrollbar_handle_h = math.max(scrollbar_handle_h, 15)
-        local usable_track_h = scrollbar_h - scrollbar_handle_h
+        local usable_track_h = content_area_h - scrollbar_handle_h
         
         if usable_track_h > 0 then
-            local scroll_range = math.max(0, self.content_height - (self.h - 60))
+            local scroll_range = math.max(0, self.content_height - content_area_h)
             local scroll_per_pixel = scroll_range / usable_track_h
             self.scroll_y = self.scroll_y_at_drag_start + (drag_delta * scroll_per_pixel)
             self.scroll_y = math.max(0, math.min(self.scroll_y, scroll_range))
         end
     end
     
-    -- Calculate content height for scrolling
-    local param_count = 0
-    for _, _ in pairs(self.params) do param_count = param_count + 1 end
-    self.content_height = (param_count * 25) + (#self.buttons * 35) + 100
-    
-    -- Update hovered button
-    local mx, my = love.mouse.getPosition()
-    self.hovered_button = nil
-    
-    if mx >= self.x and mx <= self.x + self.w and my >= self.y + 35 and my <= self.y + self.h then
-        local content_y = self.y + 35 - self.scroll_y
+    -- Calculate content height for scrolling (IMPROVED)
+    if self.active_tab == "Generation" then
+        local param_count = 0
+        for _, _ in pairs(self.params) do param_count = param_count + 1 end
         
-        -- Check parameter buttons
-        local param_y = content_y + 20
-        for param_name, value in pairs(self.params) do
-            if type(value) == "number" then
-                if ((mx >= self.x + 10 and mx <= self.x + 30) or (mx >= self.x + self.w - 50 and mx <= self.x + self.w - 30)) and 
-                   my >= param_y and my <= param_y + 20 then
-                    self.hovered_button = param_name
-                end
-                param_y = param_y + 25
-            elseif type(value) == "boolean" then
-                if mx >= self.x + 10 and mx <= self.x + self.w - 10 and my >= param_y and my <= param_y + 20 then
-                    self.hovered_button = param_name
-                end
-                param_y = param_y + 25
+        local button_count = 0
+        for _, btn in ipairs(self.buttons) do
+            if btn.tab == self.active_tab then
+                button_count = button_count + 1
             end
         end
         
-        -- Check action buttons
-        param_y = param_y + 20
-        for i, btn in ipairs(self.buttons) do
-            local btn_y = param_y + (i - 1) * 35
-            if mx >= self.x + 10 and mx <= self.x + self.w - 10 and my >= btn_y and my <= btn_y + 30 then
-                self.hovered_button = btn.id
-            end
-        end
+        self.content_height = 10 + 20 + (param_count * 25) + 10 + 20 + (button_count * 35) + 20
+    else
+        self.content_height = 100 -- Default for other tabs
     end
 end
 
@@ -359,7 +387,10 @@ function DebugMenuController:executeAction(action_id)
             
             -- REVERTED: Always use the original generation system for the debug menu
             print("DebugMenu: Using original legacy generation system")
-            self.game.map:generate()
+            self.game.maps.city:generate()
+            
+            -- ADDED: Sync changes to region map so they're visible at region scale
+            self:syncCityToRegion()
             
             self.game.error_service.logInfo("DebugMenu", "Regenerated entire map with current parameters")
         end, "Regenerate All")
@@ -367,32 +398,44 @@ function DebugMenuController:executeAction(action_id)
     elseif action_id == "clear_all" then
         safeExecute(function()
             self:clearAllRoads()
+            -- ADDED: Sync changes to region map
+            self:syncCityToRegion()
             self.game.error_service.logInfo("DebugMenu", "Cleared all roads and structures")
         end, "Clear All")
         
     elseif action_id == "regen_downtown" then
         safeExecute(function()
             self:regenerateDowntownOnly()
+            -- ADDED: Sync changes to region map
+            self:syncCityToRegion()
         end, "Regenerate Downtown")
         
     elseif action_id == "regen_districts" then
         safeExecute(function()
             self:regenerateDistrictsOnly()
+            -- ADDED: Sync changes to region map
+            self:syncCityToRegion()
         end, "Regenerate Districts")
         
     elseif action_id == "regen_ring" then
         safeExecute(function()
             self:regenerateRingRoadOnly()
+            -- ADDED: Sync changes to region map
+            self:syncCityToRegion()
         end, "Regenerate Ring Road")
         
     elseif action_id == "regen_highways" then
         safeExecute(function()
             self:regenerateHighwaysOnly()
+            -- ADDED: Sync changes to region map
+            self:syncCityToRegion()
         end, "Regenerate Highways")
         
     elseif action_id == "regen_connections" then
         safeExecute(function()
             self:regenerateConnectionsOnly()
+            -- ADDED: Sync changes to region map
+            self:syncCityToRegion()
         end, "Regenerate Connections")
         
     elseif action_id == "test_pathfinding" then
@@ -408,7 +451,7 @@ end
 
 function DebugMenuController:applyParametersToModules()
     -- Store debug parameters in the map object so generators can access them
-    self.game.map.debug_params = self.params
+    self.game.maps.city.debug_params = self.params
     self.game.error_service.logInfo("DebugMenu", "Applied debug parameters to map generation modules")
     
     -- Log the current parameters being applied
@@ -417,8 +460,48 @@ function DebugMenuController:applyParametersToModules()
     end
 end
 
+function DebugMenuController:syncCityToRegion()
+    -- After modifying the city map, we need to copy those changes to the region map
+    local region_map = self.game.maps.region
+    local city_map = self.game.maps.city
+    
+    if not region_map or not city_map or not region_map.main_city_offset then
+        return
+    end
+    
+    local city_grid = city_map.grid
+    local region_grid = region_map.grid
+    
+    if not city_grid or not region_grid or #city_grid == 0 then
+        return
+    end
+    
+    -- Get the offset where the main city is located in the region
+    local offset_x = region_map.main_city_offset.x
+    local offset_y = region_map.main_city_offset.y
+    
+    local city_w = self.game.C.MAP.CITY_GRID_WIDTH
+    local city_h = self.game.C.MAP.CITY_GRID_HEIGHT
+    
+    -- Copy city grid changes to the corresponding area in the region grid
+    for y = 1, math.min(city_h, #city_grid) do
+        for x = 1, math.min(city_w, #city_grid[1]) do
+            local region_x = offset_x + x
+            local region_y = offset_y + y
+            
+            -- Make sure we're within the region grid bounds
+            if region_y >= 1 and region_y <= #region_grid and 
+               region_x >= 1 and region_x <= #region_grid[1] then
+                region_grid[region_y][region_x] = city_grid[y][x]
+            end
+        end
+    end
+    
+    self.game.error_service.logInfo("DebugMenu", "Synchronized city changes to region map")
+end
+
 function DebugMenuController:clearAllRoads()
-    local grid = self.game.map.grid
+    local grid = self.game.maps.city.grid
     if not grid or #grid == 0 then return end
     
     local grid_h, grid_w = #grid, #grid[1]
@@ -433,7 +516,7 @@ function DebugMenuController:clearAllRoads()
     end
     
     -- Regenerate building plots after clearing
-    self.game.map.building_plots = self.game.map:getPlotsFromGrid(grid)
+    self.game.maps.city.building_plots = self.game.maps.city:getPlotsFromGrid(grid)
     self.game.error_service.logInfo("DebugMenu", "Cleared all roads, regenerated building plots")
 end
 
@@ -446,10 +529,10 @@ function DebugMenuController:regenerateDowntownOnly()
     end
     
     -- Clear only downtown area and regenerate it
-    local downtown_offset = self.game.map.downtown_offset
+    local downtown_offset = self.game.maps.city.downtown_offset
     local C_MAP = self.game.C.MAP
     
-    local grid = self.game.map.grid
+    local grid = self.game.maps.city.grid
     if not grid or not downtown_offset then return end
     
     -- Clear downtown area
@@ -470,10 +553,10 @@ function DebugMenuController:regenerateDowntownOnly()
         h = C_MAP.DOWNTOWN_GRID_HEIGHT
     }
     
-    Downtown.generateDowntownModule(grid, downtown_district, "road", "plot", C_MAP.NUM_SECONDARY_ROADS, self.params)
+    Downtown.generateDowntownModule(grid, downtown_district, "road", "plot", self.params)
     
     -- Regenerate building plots
-    self.game.map.building_plots = self.game.map:getPlotsFromGrid(grid)
+    self.game.maps.city.building_plots = self.game.maps.city:getPlotsFromGrid(grid)
     self.game.error_service.logInfo("DebugMenu", "Regenerated downtown only")
 end
 
@@ -487,7 +570,7 @@ function DebugMenuController:regenerateDistrictsOnly()
     
     -- This requires more complex logic to regenerate districts without affecting other elements
     -- For now, regenerate everything
-    self.game.map:generate()
+    self.game.maps.city:generate()
     self.game.error_service.logInfo("DebugMenu", "Regenerated districts (full regen)")
 end
 
@@ -499,7 +582,7 @@ function DebugMenuController:regenerateRingRoadOnly()
         return
     end
     
-    local grid = self.game.map.grid
+    local grid = self.game.maps.city.grid
     if not grid or #grid == 0 then return end
     
     -- Clear existing ring roads
@@ -523,12 +606,12 @@ function DebugMenuController:regenerateRingRoadOnly()
         local ring_road_nodes = RingRoad.generatePath(existing_districts, C_MAP.CITY_GRID_WIDTH, C_MAP.CITY_GRID_HEIGHT, self.params)
         
         if #ring_road_nodes > 0 then
-            local ring_road_curve = self.game.map:generateSplinePoints(ring_road_nodes, 10)
+            local ring_road_curve = self.game.maps.city:generateSplinePoints(ring_road_nodes, 10)
             
             -- Draw the ring road
             if #ring_road_curve > 1 then
                 for i = 1, #ring_road_curve - 1 do
-                    self.game.map:drawThickLineColored(grid, ring_road_curve[i].x, ring_road_curve[i].y, 
+                    self.game.maps.city:drawThickLineColored(grid, ring_road_curve[i].x, ring_road_curve[i].y, 
                                                      ring_road_curve[i+1].x, ring_road_curve[i+1].y, "highway_ring", 3)
                 end
             end
@@ -546,7 +629,7 @@ function DebugMenuController:regenerateHighwaysOnly()
         return
     end
     
-    local grid = self.game.map.grid
+    local grid = self.game.maps.city.grid
     if not grid or #grid == 0 then return end
     
     -- Clear existing highways
@@ -579,11 +662,11 @@ function DebugMenuController:regenerateHighwaysOnly()
         -- Draw highways
         local num_ns_highways = self.params.num_ns_highways or 2
         for highway_idx, path_nodes in ipairs(merged_highway_paths) do
-            local highway_curve = self.game.map:generateSplinePoints(path_nodes, 10)
+            local highway_curve = self.game.maps.city:generateSplinePoints(path_nodes, 10)
             local highway_type = highway_idx <= num_ns_highways and "highway_ns" or "highway_ew"
             
             for i = 1, #highway_curve - 1 do
-                self.game.map:drawThickLineColored(grid, highway_curve[i].x, highway_curve[i].y, 
+                self.game.maps.city:drawThickLineColored(grid, highway_curve[i].x, highway_curve[i].y, 
                                                  highway_curve[i+1].x, highway_curve[i+1].y, highway_type, 3)
             end
         end
@@ -600,7 +683,7 @@ function DebugMenuController:regenerateConnectionsOnly()
         return
     end
     
-    local grid = self.game.map.grid
+    local grid = self.game.maps.city.grid
     if not grid or #grid == 0 then return end
     
     -- Clear existing connection roads (keep highways and district roads)
@@ -633,11 +716,11 @@ function DebugMenuController:findExistingDistricts()
     -- Analyze the current map to find district boundaries
     -- This is a simplified approach - in a full implementation you'd want to store district data
     local districts = {}
-    local grid = self.game.map.grid
+    local grid = self.game.maps.city.grid
     if not grid or #grid == 0 then return districts end
     
     -- Add downtown district
-    local downtown_offset = self.game.map.downtown_offset
+    local downtown_offset = self.game.maps.city.downtown_offset
     local C_MAP = self.game.C.MAP
     if downtown_offset then
         table.insert(districts, {
@@ -663,7 +746,7 @@ end
 
 function DebugMenuController:findExistingHighwayPoints()
     local points = {}
-    local grid = self.game.map.grid
+    local grid = self.game.maps.city.grid
     if not grid or #grid == 0 then return points end
     
     -- Find all highway and ring road tiles
@@ -681,7 +764,7 @@ end
 
 function DebugMenuController:isInDistrictOrDowntown(x, y)
     -- Check if a point is within downtown area
-    local downtown_offset = self.game.map.downtown_offset
+    local downtown_offset = self.game.maps.city.downtown_offset
     local C_MAP = self.game.C.MAP
     
     if downtown_offset then
@@ -697,14 +780,14 @@ function DebugMenuController:isInDistrictOrDowntown(x, y)
 end
 
 function DebugMenuController:testPathfinding()
-    local grid = self.game.map.grid
+    local grid = self.game.maps.city.grid
     if grid and #grid > 0 then
-        local plots = self.game.map.building_plots
+        local plots = self.game.maps.city.building_plots
         if #plots >= 2 then
             local start_plot = plots[love.math.random(1, #plots)]
             local end_plot = plots[love.math.random(1, #plots)]
-            local start_node = self.game.map:findNearestRoadTile(start_plot)
-            local end_node = self.game.map:findNearestRoadTile(end_plot)
+            local start_node = self.game.maps.city:findNearestRoadTile(start_plot)
+            local end_node = self.game.maps.city:findNearestRoadTile(end_plot)
             
             if start_node and end_node then
                 -- Use bike pathfinding costs for testing
@@ -720,7 +803,7 @@ function DebugMenuController:testPathfinding()
                     plot = 1000
                 }
                 
-                local path = self.game.pathfinder.findPath(grid, start_node, end_node, costs, self.game.map)
+                local path = self.game.pathfinder.findPath(grid, start_node, end_node, costs, self.game.maps.city)
                 if path then
                     self.game.error_service.logInfo("DebugMenu", 
                         string.format("✓ Test path found: %d nodes from (%d,%d) to (%d,%d)", 
@@ -765,7 +848,7 @@ function DebugMenuController:drawTestPath(game)
         
         local pixel_path = {}
         for _, node in ipairs(self.test_path) do
-            local px, py = game.map:getPixelCoords(node.x, node.y)
+            local px, py = game.maps.city:getPixelCoords(node.x, node.y)
             table.insert(pixel_path, px)
             table.insert(pixel_path, py)
         end
@@ -781,11 +864,6 @@ end
 
 function DebugMenuController:resetParameters()
     self.params = {
-        -- WFC Toggles (NEW)
-        use_wfc_for_zones = true,
-        use_wfc_for_arterials = false,
-        use_wfc_for_details = false,
-        
         -- Component Toggles
         generate_downtown = true,
         generate_districts = true,
