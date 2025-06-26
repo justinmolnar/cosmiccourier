@@ -1,4 +1,6 @@
 -- controllers/WfcLabController.lua
+-- Updated with recursive block subdivision testing
+
 local WfcLabController = {}
 WfcLabController.__index = WfcLabController
 
@@ -11,6 +13,7 @@ end
 function WfcLabController:getHandledKeys()
     return {
         ["w"] = true, ["e"] = true, ["r"] = true, ["y"] = true,
+        ["s"] = true, ["d"] = true, ["f"] = true,
         ["c"] = true, ["t"] = true, ["h"] = true, ["u"] = true
     }
 end
@@ -21,14 +24,22 @@ function WfcLabController:keypressed(key)
     if key == "w" or key == "e" then
         print("=== Testing WFC Grid Generation ===")
         local NewCityGenService = require("services.NewCityGenService")
-        local wfc_params = { width = (key == "w") and 32 or 64, height = (key == "w") and 24 or 48, use_wfc_for_zones = true }
+        local wfc_params = { 
+            width = (key == "w") and 32 or 64, 
+            height = (key == "w") and 24 or 48, 
+            use_wfc_for_zones = true,
+            use_recursive_streets = false, -- Don't generate streets yet
+            generate_arterials = false -- Don't generate arterials yet
+        }
         local result = NewCityGenService.generateDetailedCity(wfc_params)
         if result and result.city_grid then
             Game.lab_grid = result.city_grid
             Game.lab_zone_grid = result.zone_grid
-            print("WFC SUCCESS!")
+            Game.arterial_control_paths = {} -- Clear arterials
+            Game.smooth_highway_overlay_paths = {}
+            print("WFC Zone Generation SUCCESS!")
         else
-            print("WFC FAILED!")
+            print("WFC Zone Generation FAILED!")
         end
     end
     
@@ -43,6 +54,66 @@ function WfcLabController:keypressed(key)
                 print("Arterial road generation SUCCESS! Saved " .. #Game.arterial_control_paths .. " paths.")
             else
                 print("Arterial road generation FAILED!")
+            end
+        else
+            print("ERROR: No lab grid available. Press 'W' or 'E' first.")
+        end
+    end
+
+    if key == "s" then
+        print("=== Generating Streets with Recursive Subdivision ===")
+        if Game.lab_grid and Game.lab_zone_grid then
+            local NewCityGenService = require("services.NewCityGenService")
+            local street_params = { 
+                min_block_size = 3, 
+                max_block_size = 8, 
+                street_width = 1 
+            }
+            local success = NewCityGenService.generateStreetsOnly(Game.lab_grid, Game.lab_zone_grid, Game.arterial_control_paths or {}, street_params)
+            if success then
+                print("Street generation SUCCESS!")
+            else
+                print("Street generation FAILED!")
+            end
+        else
+            print("ERROR: No lab grid available. Press 'W' or 'E' first.")
+        end
+    end
+
+    if key == "d" then
+        print("=== Testing Different Block Sizes ===")
+        if Game.lab_grid and Game.lab_zone_grid then
+            local NewCityGenService = require("services.NewCityGenService")
+            local street_params = { 
+                min_block_size = 2, 
+                max_block_size = 5, 
+                street_width = 1 
+            }
+            local success = NewCityGenService.generateStreetsOnly(Game.lab_grid, Game.lab_zone_grid, Game.arterial_control_paths or {}, street_params)
+            if success then
+                print("Small block generation SUCCESS!")
+            else
+                print("Small block generation FAILED!")
+            end
+        else
+            print("ERROR: No lab grid available. Press 'W' or 'E' first.")
+        end
+    end
+
+    if key == "f" then
+        print("=== Testing Large Block Sizes ===")
+        if Game.lab_grid and Game.lab_zone_grid then
+            local NewCityGenService = require("services.NewCityGenService")
+            local street_params = { 
+                min_block_size = 5, 
+                max_block_size = 12, 
+                street_width = 1 
+            }
+            local success = NewCityGenService.generateStreetsOnly(Game.lab_grid, Game.lab_zone_grid, Game.arterial_control_paths or {}, street_params)
+            if success then
+                print("Large block generation SUCCESS!")
+            else
+                print("Large block generation FAILED!")
             end
         else
             print("ERROR: No lab grid available. Press 'W' or 'E' first.")
@@ -64,27 +135,28 @@ function WfcLabController:keypressed(key)
     end
 
     if key == "u" then
-        print("=== Triggering High-Fidelity WFC Block Pass (Phase 4) ===")
-        if not Game.lab_grid or not Game.lab_zone_grid or not Game.arterial_control_paths then
-            print("ERROR: Missing necessary data. Please press 'E', then 'R' before pressing 'U'.")
-            return
-        end
-        local WfcBlockService = require("services.WfcBlockService")
-        local wfc_params = {
-            width = #Game.lab_grid[1],
-            height = #Game.lab_grid,
-            zone_grid = Game.lab_zone_grid,
-            arterial_paths = Game.arterial_control_paths
+        print("=== Full Pipeline Test: Zones + Arterials + Streets ===")
+        local NewCityGenService = require("services.NewCityGenService")
+        local full_params = { 
+            width = 48, 
+            height = 36, 
+            use_wfc_for_zones = true,
+            use_recursive_streets = true,
+            generate_arterials = true,
+            num_arterials = 3,
+            min_block_size = 3,
+            max_block_size = 7,
+            street_width = 1
         }
-        local result = WfcBlockService.generateBlocks(wfc_params)
-        if result then
-            print("Phase 4 SUCCESS: WFC solver finished. Storing final grid for rendering.")
-            Game.wfc_final_grid = result.grid
-            Game.wfc_road_data = result.roads
-            -- Clear old overlays to see the new result clearly
+        local result = NewCityGenService.generateDetailedCity(full_params)
+        if result and result.city_grid then
+            Game.lab_grid = result.city_grid
+            Game.lab_zone_grid = result.zone_grid
+            Game.arterial_control_paths = result.arterial_paths or {}
             Game.smooth_highway_overlay_paths = {}
+            print("Full pipeline SUCCESS!")
         else
-            print("Phase 4 FAILED: Could not solve the WFC grid.")
+            print("Full pipeline FAILED!")
         end
     end
     
@@ -104,11 +176,15 @@ function WfcLabController:keypressed(key)
     end
     
     if key == "h" then
-        print("=== WFC Test Controls ===")
-        print("E - Generate coarse zones") 
-        print("R - Generate grid-based arterials on top of zones")
-        print("U - Run high-fidelity WFC pass to generate final city")
-        print("C - Clear lab grid and all overlays")
+        print("=== Recursive Block Subdivision Test Controls ===")
+        print("W/E - Generate zones only (small/large)")
+        print("R - Generate arterials on top of zones")
+        print("S - Generate streets with recursive subdivision (normal blocks)")
+        print("D - Generate streets with small blocks (2-5 size)")
+        print("F - Generate streets with large blocks (5-12 size)")
+        print("U - Full pipeline test (zones + arterials + streets)")
+        print("Y - Show arterial overlay visualization")
+        print("C - Clear all")
         print("T - Toggle district zone visibility")
         print("H - Show this help")
     end
@@ -236,158 +312,6 @@ function WfcLabController._fixLightningBolts(points)
     
     table.insert(fixed, points[#points]) -- Always keep the last point
     return fixed
-end
-
-function WfcLabController._mergeParallelPaths(paths)
-    if #paths <= 1 then return paths end
-    
-    local merged = {}
-    local used = {}
-    
-    for i = 1, #paths do
-        if not used[i] then
-            local current_path = paths[i]
-            local parallel_paths = {current_path}
-            used[i] = true
-            
-            -- Look for other paths that run parallel to this one
-            for j = i + 1, #paths do
-                if not used[j] then
-                    if WfcLabController._pathsRunParallel(current_path, paths[j]) then
-                        table.insert(parallel_paths, paths[j])
-                        used[j] = true
-                    end
-                end
-            end
-            
-            -- If we found parallel paths, merge them into a centerline
-            if #parallel_paths > 1 then
-                local centerline = WfcLabController._createCenterline(parallel_paths)
-                table.insert(merged, centerline)
-            else
-                table.insert(merged, current_path)
-            end
-        end
-    end
-    
-    return merged
-end
-
-function WfcLabController._pathsRunParallel(path1, path2)
-    local close_segments = 0
-    local total_segments = 0
-    local max_distance = 2 -- Reduced from 3 - only merge if very close
-    
-    -- Check every few points to see if paths run close together
-    local step = math.max(1, math.floor(math.min(#path1, #path2) / 8)) -- Check more points
-    
-    for i = 1, #path1, step do
-        local p1 = path1[i]
-        local min_distance = math.huge
-        
-        -- Find closest point on path2
-        for j = 1, #path2 do
-            local p2 = path2[j]
-            local distance = math.sqrt((p1.x - p2.x)^2 + (p1.y - p2.y)^2)
-            min_distance = math.min(min_distance, distance)
-        end
-        
-        total_segments = total_segments + 1
-        if min_distance <= max_distance then
-            close_segments = close_segments + 1
-        end
-    end
-    
-    -- Increased threshold - need 60% overlap to merge (was 40%)
-    local overlap_ratio = total_segments > 0 and (close_segments / total_segments) or 0
-    print("Path overlap check: " .. close_segments .. "/" .. total_segments .. " = " .. string.format("%.2f", overlap_ratio))
-    return overlap_ratio > 0.6
-end
-
-function WfcLabController._createCenterline(parallel_paths)
-    if #parallel_paths == 1 then return parallel_paths[1] end
-    
-    -- Use the longest path as the base structure
-    local base_path = parallel_paths[1]
-    for i = 2, #parallel_paths do
-        if #parallel_paths[i] > #base_path then
-            base_path = parallel_paths[i]
-        end
-    end
-    
-    local centerline = {}
-    
-    -- For each point in the base path, average with nearby points from other paths
-    for i = 1, #base_path do
-        local base_point = base_path[i]
-        local sum_x, sum_y, count = base_point.x, base_point.y, 1
-        
-        -- Find corresponding points in other paths
-        for j = 1, #parallel_paths do
-            if parallel_paths[j] ~= base_path then
-                local closest_point = nil
-                local closest_distance = math.huge
-                
-                -- Find the closest point on this path
-                for _, point in ipairs(parallel_paths[j]) do
-                    local distance = math.sqrt((point.x - base_point.x)^2 + (point.y - base_point.y)^2)
-                    if distance < closest_distance and distance <= 5 then -- Within 5 tiles
-                        closest_distance = distance
-                        closest_point = point
-                    end
-                end
-                
-                if closest_point then
-                    sum_x = sum_x + closest_point.x
-                    sum_y = sum_y + closest_point.y
-                    count = count + 1
-                end
-            end
-        end
-        
-        table.insert(centerline, {
-            x = math.floor(sum_x / count + 0.5),
-            y = math.floor(sum_y / count + 0.5)
-        })
-    end
-    
-    return centerline
-end
-
-function WfcLabController._simplifyPath(path)
-    if #path <= 2 then return path end
-    
-    local simplified = {path[1]}
-    
-    for i = 2, #path - 1 do
-        local prev = simplified[#simplified]
-        local curr = path[i]
-        local next = path[i + 1]
-        
-        -- Calculate direction vectors
-        local dx1 = curr.x - prev.x
-        local dy1 = curr.y - prev.y
-        local dx2 = next.x - curr.x
-        local dy2 = next.y - curr.y
-        
-        -- If the direction change is small, skip this point
-        local angle1 = math.atan2(dy1, dx1)
-        local angle2 = math.atan2(dy2, dx2)
-        local angle_diff = math.abs(angle1 - angle2)
-        
-        -- Normalize angle difference to 0-π
-        if angle_diff > math.pi then
-            angle_diff = 2 * math.pi - angle_diff
-        end
-        
-        -- Only keep points that represent significant direction changes (> 30 degrees)
-        if angle_diff > math.pi/6 then
-            table.insert(simplified, curr)
-        end
-    end
-    
-    table.insert(simplified, path[#path]) -- Always keep the last point
-    return simplified
 end
 
 return WfcLabController

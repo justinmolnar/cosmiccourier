@@ -1,6 +1,5 @@
 -- views/GameView.lua
--- FIXED: Added proper handling for WFC lab grid to prevent crashes
--- MODIFIED: Added require statements for Bike and Truck models
+-- Updated to render edge-based streets between grid cells
 local Bike = require("models.vehicles.Bike")
 local Truck = require("models.vehicles.Truck")
 
@@ -67,7 +66,6 @@ function GameView:draw()
                 local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1) and active_map:findNearestRoadTile(Game.entities.depot_plot) or active_map:findNearestRoadTile(leg.start_plot)
                 local end_node = active_map:findNearestRoadTile(leg.end_plot)
                 if start_node and end_node and path_grid then
-                    -- THE FIX: Reference the new, centralized vehicle properties in the constants file
                     local required_vehicle_properties = (leg.vehicleType == "bike") and Game.C.VEHICLES.BIKE or Game.C.VEHICLES.TRUCK
                     
                     local cost_function = function(x, y)
@@ -118,13 +116,11 @@ end
 function GameView:drawLabGrid()
     local Game = self.Game
     
-    -- Check if we have the final WFC result to draw
     if Game.wfc_final_grid and Game.wfc_road_data then
         self:drawFinalWfcCity()
         return
     end
 
-    -- Fallback to drawing the intermediate steps if the final grid doesn't exist yet
     if not Game.lab_grid then return end
     local grid = Game.lab_grid
     if not grid or #grid == 0 or not grid[1] then return end
@@ -136,7 +132,7 @@ function GameView:drawLabGrid()
     
     local tile_size_w = math.floor(available_w * 0.9 / grid_w)
     local tile_size_h = math.floor(available_h * 0.9 / grid_h)
-    local tile_size = math.max(6, math.min(tile_size_w, tile_size_h, 25))
+    local tile_size = math.max(4, math.min(tile_size_w, tile_size_h, 25))
     
     local total_grid_w, total_grid_h = grid_w * tile_size, grid_h * tile_size
     local offset_x, offset_y = (available_w - total_grid_w) / 2, (available_h - total_grid_h) / 2
@@ -144,22 +140,71 @@ function GameView:drawLabGrid()
     love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
     love.graphics.rectangle("fill", offset_x - 10, offset_y - 40, total_grid_w + 20, total_grid_h + 50)
     
+    -- Draw zone background first
+    if Game.lab_zone_grid then
+        self:drawZoneBackground(offset_x, offset_y, tile_size)
+    end
+    
+    -- Draw the main grid cells (only arterials and plots, no street tiles)
     for y = 1, grid_h do
         for x = 1, grid_w do
             if grid[y] and grid[y][x] and grid[y][x].type then
-                local color = self:getTileColor(grid[y][x].type)
-                love.graphics.setColor(color)
-                love.graphics.rectangle("fill", offset_x + (x-1)*tile_size, offset_y + (y-1)*tile_size, tile_size, tile_size)
+                local tile_type = grid[y][x].type
+                
+                -- Only draw arterials as solid blocks
+                if tile_type == "arterial" then
+                    local color = self:getTileColor(tile_type)
+                    love.graphics.setColor(color)
+                    love.graphics.rectangle("fill", offset_x + (x-1)*tile_size, offset_y + (y-1)*tile_size, tile_size, tile_size)
+                end
+                
+                -- Draw plots as subtle outlines (so zones show through)
+                if tile_type == "plot" then
+                    love.graphics.setColor(0.5, 0.5, 0.5, 0.2)
+                    love.graphics.rectangle("line", offset_x + (x-1)*tile_size, offset_y + (y-1)*tile_size, tile_size, tile_size)
+                end
             end
         end
     end
     
-    if Game.show_districts and Game.lab_zone_grid then
-        self:drawZoneOverlay(offset_x, offset_y, tile_size)
+    -- Draw street edges BETWEEN grid cells
+    if Game.street_segments then
+        love.graphics.setColor(0.3, 0.3, 0.3, 1.0) -- Solid gray for streets
+        love.graphics.setLineWidth(math.max(2, tile_size / 12))
+        
+        for _, edge in ipairs(Game.street_segments) do
+            if edge.type == "horizontal" then
+                -- Horizontal edge between grid cells
+                local x1 = offset_x + edge.x1 * tile_size
+                local x2 = offset_x + edge.x2 * tile_size
+                local y = offset_y + edge.y * tile_size
+                love.graphics.line(x1, y, x2, y)
+            elseif edge.type == "vertical" then
+                -- Vertical edge between grid cells
+                local x = offset_x + edge.x * tile_size
+                local y1 = offset_y + edge.y1 * tile_size
+                local y2 = offset_y + edge.y2 * tile_size
+                love.graphics.line(x, y1, x, y2)
+            end
+        end
+        love.graphics.setLineWidth(1)
     end
     
+    -- Draw street intersections as small squares (where edges meet)
+    if Game.street_intersections then
+        love.graphics.setColor(0.2, 0.2, 0.2, 1.0) -- Darker gray for intersections
+        local intersection_size = math.max(2, tile_size / 16)
+        
+        for _, intersection in ipairs(Game.street_intersections) do
+            local x = offset_x + intersection.x * tile_size - intersection_size/2
+            local y = offset_y + intersection.y * tile_size - intersection_size/2
+            love.graphics.rectangle("fill", x, y, intersection_size, intersection_size)
+        end
+    end
+    
+    -- Draw arterial overlay paths if they exist
     if Game.smooth_highway_overlay_paths and #Game.smooth_highway_overlay_paths > 0 then
-        love.graphics.setLineWidth(5)
+        love.graphics.setLineWidth(math.max(2, tile_size / 4))
         love.graphics.setColor(1, 0.5, 0.7, 0.8)
         for _, spline_path in ipairs(Game.smooth_highway_overlay_paths) do
             local pixel_path = {}
@@ -174,9 +219,32 @@ function GameView:drawLabGrid()
         love.graphics.setLineWidth(1)
     end
 
+    -- Draw arterial control paths as thick lines ON grid cells
+    if Game.arterial_control_paths and #Game.arterial_control_paths > 0 then
+        love.graphics.setLineWidth(math.max(3, math.floor(tile_size / 3)))
+        love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
+        
+        for _, path in ipairs(Game.arterial_control_paths) do
+            if #path > 1 then
+                for i = 1, #path - 1 do
+                    local node1 = path[i]
+                    local node2 = path[i+1]
+                    local p1x = offset_x + (node1.x - 0.5) * tile_size
+                    local p1y = offset_y + (node1.y - 0.5) * tile_size
+                    local p2x = offset_x + (node2.x - 0.5) * tile_size
+                    local p2y = offset_y + (node2.y - 0.5) * tile_size
+                    love.graphics.line(p1x, p1y, p2x, p2y)
+                end
+            end
+        end
+        love.graphics.setLineWidth(1)
+    end
+
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(Game.fonts.ui)
-    love.graphics.print("WFC Lab Grid - Press 'U' to generate final city", offset_x, offset_y - 35)
+    love.graphics.print("Edge-Based Streets - Press 'H' for help", offset_x, offset_y - 35)
+    
+    self:drawLegend(offset_x + total_grid_w + 20, offset_y)
 end
 
 function GameView:drawFinalWfcCity()
@@ -197,7 +265,6 @@ function GameView:drawFinalWfcCity()
     local total_grid_w, total_grid_h = grid_w * tile_size, grid_h * tile_size
     local offset_x, offset_y = (available_w - total_grid_w) / 2, (available_h - total_grid_h) / 2
     
-    -- Draw the zoned blocks
     for y = 1, grid_h do
         for x = 1, grid_w do
             local cell = grid[y][x]
@@ -209,8 +276,7 @@ function GameView:drawFinalWfcCity()
         end
     end
 
-    -- Draw the local WFC roads on top
-    love.graphics.setColor(0.2, 0.2, 0.2, 0.9) -- Slightly darker, more visible roads
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.9)
     love.graphics.setLineWidth(math.max(1, math.floor(tile_size / 5)))
     
     for _, road in ipairs(roads) do
@@ -221,16 +287,13 @@ function GameView:drawFinalWfcCity()
         love.graphics.line(x1, y1, x2, y2)
     end
 
-    -- MODIFICATION: Draw the arterial roads as a final overlay
     if Game.arterial_control_paths and #Game.arterial_control_paths > 0 then
-        love.graphics.setLineWidth(math.max(2, math.floor(tile_size / 3))) -- Arteries are thicker
-        love.graphics.setColor(0.1, 0.1, 0.1, 0.6) -- Dark, semi-transparent color for arteries
+        love.graphics.setLineWidth(math.max(2, math.floor(tile_size / 3)))
+        love.graphics.setColor(0.1, 0.1, 0.1, 0.6)
         
         for _, path in ipairs(Game.arterial_control_paths) do
-            local pixel_path = {}
             if #path > 1 then
                 for i = 1, #path - 1 do
-                    -- Draw a line segment between each node in the arterial path
                     local node1 = path[i]
                     local node2 = path[i+1]
                     local p1x = offset_x + (node1.x - 0.5) * tile_size
@@ -246,9 +309,7 @@ function GameView:drawFinalWfcCity()
     love.graphics.setLineWidth(1)
 end
 
-
--- FIXED: Update zone overlay to use the same positioning
-function GameView:drawZoneOverlay(offset_x, offset_y, tile_size)
+function GameView:drawZoneBackground(offset_x, offset_y, tile_size)
     local Game = self.Game
     
     if not Game.lab_zone_grid then return end
@@ -256,89 +317,115 @@ function GameView:drawZoneOverlay(offset_x, offset_y, tile_size)
     local zone_grid = Game.lab_zone_grid
     local grid_h, grid_w = #zone_grid, #zone_grid[1]
     
-    -- Draw semi-transparent zone colors
+    -- Draw zone colors as background
     for y = 1, grid_h do
         for x = 1, grid_w do
             if zone_grid[y] and zone_grid[y][x] then
                 local zone = zone_grid[y][x]
                 local zone_color = self:getZoneColor(zone)
                 
-                love.graphics.setColor(zone_color[1], zone_color[2], zone_color[3], 0.4)
+                -- Draw zones prominently as background
+                love.graphics.setColor(zone_color[1], zone_color[2], zone_color[3], 0.7)
                 love.graphics.rectangle("fill", 
-                    offset_x + (x-1) * tile_size + 1, 
-                    offset_y + (y-1) * tile_size + 1, 
-                    tile_size - 2, 
-                    tile_size - 2)
+                    offset_x + (x-1) * tile_size, 
+                    offset_y + (y-1) * tile_size, 
+                    tile_size, 
+                    tile_size)
             end
         end
     end
-    
-    -- Draw zone legend
-    local legend_x = offset_x + grid_w * tile_size + 20
-    local legend_y = offset_y
+end
+
+function GameView:drawLegend(legend_x, legend_y)
+    local Game = self.Game
     
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(Game.fonts.ui_small)
-    love.graphics.print("Zones:", legend_x, legend_y)
+    love.graphics.print("Legend:", legend_x, legend_y)
     
-local zones = {"downtown", "commercial", "residential_north", "residential_south", "industrial_heavy", "industrial_light", "university", "medical", "entertainment", "waterfront", "warehouse", "tech", "park_central", "park_nature"}    for i, zone in ipairs(zones) do
-        local color = self:getZoneColor(zone)
-        love.graphics.setColor(color[1], color[2], color[3])
-        love.graphics.rectangle("fill", legend_x, legend_y + 20 + (i-1)*20, 15, 15)
+    local legend_items = {
+        {type = "arterial", name = "Arterial (on grid)", color = {0.1, 0.1, 0.1}},
+        {type = "street", name = "Street (between grid)", color = {0.3, 0.3, 0.3}},
+        {type = "intersection", name = "Intersection", color = {0.2, 0.2, 0.2}},
+        {type = "plot", name = "Building Plot", color = {0.5, 0.5, 0.5}},
+        {type = "zone", name = "Zone Color", color = {0.7, 0.7, 0.7}}
+    }
+    
+    for i, item in ipairs(legend_items) do
+        local y_pos = legend_y + 20 + (i-1) * 20
+        
+        love.graphics.setColor(item.color[1], item.color[2], item.color[3])
+        if item.type == "street" then
+            love.graphics.setLineWidth(3)
+            love.graphics.line(legend_x, y_pos + 8, legend_x + 15, y_pos + 8)
+            love.graphics.setLineWidth(1)
+        elseif item.type == "intersection" then
+            love.graphics.rectangle("fill", legend_x + 6, y_pos + 6, 4, 4)
+        else
+            love.graphics.rectangle("fill", legend_x, y_pos, 15, 15)
+        end
+        
         love.graphics.setColor(1, 1, 1)
-        love.graphics.print(zone, legend_x + 20, legend_y + 20 + (i-1)*20)
+        love.graphics.print(item.name, legend_x + 20, y_pos)
     end
-end
-
--- FIXED: Helper function to get appropriate colors for different tile types
-function GameView:getTileColor(tile_type)
-    local C_MAP = self.Game.C.MAP
     
-    if tile_type == "road" then
-        return C_MAP.COLORS.ROAD
-    elseif tile_type == "arterial" then
-        return {0.1, 0.1, 0.1} -- Lighter gray for arterials
-    elseif tile_type == "plot" then
-        return C_MAP.COLORS.PLOT
-    elseif tile_type == "grass" then
-        return C_MAP.COLORS.GRASS
-    else
-        return {0.5, 0.5, 0.5} -- Default gray for unknown types
+    love.graphics.print("Streets are BETWEEN grid cells", legend_x, legend_y + 120)
+    love.graphics.print("Arteries are ON grid cells", legend_x, legend_y + 140)
+    love.graphics.print("Zones: " .. (Game.show_districts and "VISIBLE" or "HIDDEN"), legend_x, legend_y + 160)
+    
+    if Game.street_intersections then
+        love.graphics.print("Intersections: " .. #Game.street_intersections, legend_x, legend_y + 180)
+    end
+    if Game.street_segments then
+        love.graphics.print("Street edges: " .. #Game.street_segments, legend_x, legend_y + 200)
     end
 end
 
+function GameView:getTileColor(tile_type)
+    if tile_type == "arterial" then
+        return {0.1, 0.1, 0.1}
+    elseif tile_type == "road" then
+        return {0.3, 0.3, 0.3}
+    elseif tile_type == "plot" then
+        return {0.8, 0.8, 0.9}
+    elseif tile_type == "grass" then
+        return {0.2, 0.8, 0.2}
+    else
+        return {0.5, 0.5, 0.5}
+    end
+end
 
 function GameView:getZoneColor(zone_type)
     if zone_type == "downtown" then
-        return {1, 1, 0} -- Yellow for downtown
+        return {1, 1, 0}
     elseif zone_type == "commercial" then
-        return {0, 0, 1} -- Blue for commercial
+        return {0, 0, 1}
     elseif zone_type == "residential_north" then
-        return {0, 1, 0} -- Green for residential north
+        return {0, 1, 0}
     elseif zone_type == "residential_south" then
-        return {0, 0.7, 0} -- Dark green for residential south
+        return {0, 0.7, 0}
     elseif zone_type == "industrial_heavy" then
-        return {1, 0, 0} -- Red for heavy industrial
+        return {1, 0, 0}
     elseif zone_type == "industrial_light" then
-        return {0.8, 0.2, 0.2} -- Light red for light industrial
+        return {0.8, 0.2, 0.2}
     elseif zone_type == "university" then
-        return {0.6, 0, 0.8} -- Purple for university
+        return {0.6, 0, 0.8}
     elseif zone_type == "medical" then
-        return {1, 0.5, 0.8} -- Pink for medical
+        return {1, 0.5, 0.8}
     elseif zone_type == "entertainment" then
-        return {1, 0.5, 0} -- Orange for entertainment
+        return {1, 0.5, 0}
     elseif zone_type == "waterfront" then
-        return {0, 0.8, 0.8} -- Cyan for waterfront
+        return {0, 0.8, 0.8}
     elseif zone_type == "warehouse" then
-        return {0.5, 0.3, 0.1} -- Brown for warehouse
+        return {0.5, 0.3, 0.1}
     elseif zone_type == "tech" then
-        return {0.3, 0.3, 0.8} -- Dark blue for tech
+        return {0.3, 0.3, 0.8}
     elseif zone_type == "park_central" then
-        return {0.2, 0.8, 0.3} -- Light green for central park
+        return {0.2, 0.8, 0.3}
     elseif zone_type == "park_nature" then
-        return {0.1, 0.6, 0.1} -- Dark green for nature park
+        return {0.1, 0.6, 0.1}
     else
-        return {0.5, 0.5, 0.5} -- Gray for unknown
+        return {0.5, 0.5, 0.5}
     end
 end
 
