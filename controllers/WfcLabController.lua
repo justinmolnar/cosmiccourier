@@ -14,7 +14,8 @@ function WfcLabController:getHandledKeys()
     return {
         ["w"] = true, ["e"] = true, ["r"] = true, ["y"] = true,
         ["s"] = true, ["d"] = true, ["f"] = true,
-        ["c"] = true, ["t"] = true, ["h"] = true, ["u"] = true
+        ["c"] = true, ["t"] = true, ["h"] = true, ["u"] = true,
+        ["1"] = true, ["2"] = true, ["3"] = true
     }
 end
 
@@ -42,12 +43,45 @@ function WfcLabController:keypressed(key)
             print("WFC Zone Generation FAILED!")
         end
     end
+
+    if key == "1" or key == "2" or key == "3" then
+        print("=== Testing Larger WFC Grid Generation ===")
+        local NewCityGenService = require("services.NewCityGenService")
+        local width, height
+        if key == "1" then
+            width, height = 100, 200
+        elseif key == "2" then
+            width, height = 200, 100
+        else -- key == "3"
+            width, height = 250, 250
+        end
+
+        -- Let the service handle the dynamic parameters
+        local wfc_params = { 
+            width = width, 
+            height = height, 
+            use_wfc_for_zones = true,
+            use_recursive_streets = true,
+            generate_arterials = true,
+        }
+        local result = NewCityGenService.generateDetailedCity(wfc_params)
+        if result and result.city_grid then
+            Game.lab_grid = result.city_grid
+            Game.lab_zone_grid = result.zone_grid
+            Game.arterial_control_paths = result.arterial_paths or {}
+            Game.smooth_highway_overlay_paths = {}
+            print("Large WFC Generation SUCCESS! (" .. width .. "x" .. height .. ")")
+        else
+            print("Large WFC Generation FAILED! (" .. width .. "x" .. height .. ")")
+        end
+    end
     
     if key == "r" then
         print("=== Generating and SAVING Arterial Roads ===")
         if Game.lab_grid and Game.lab_zone_grid then
             local NewCityGenService = require("services.NewCityGenService")
-            local arterial_params = { num_arterials = 4, min_edge_distance = 15 }
+            -- Let the service calculate num_arterials dynamically
+            local arterial_params = { min_edge_distance = 15 }
             local success, generated_paths = NewCityGenService.generateArterialsOnly(Game.lab_grid, Game.lab_zone_grid, arterial_params)
             if success then
                 Game.arterial_control_paths = generated_paths
@@ -60,60 +94,28 @@ function WfcLabController:keypressed(key)
         end
     end
 
-    if key == "s" then
+    if key == "s" or key == "d" or key == "f" then
         print("=== Generating Streets with Recursive Subdivision ===")
         if Game.lab_grid and Game.lab_zone_grid then
             local NewCityGenService = require("services.NewCityGenService")
-            local street_params = { 
-                min_block_size = 3, 
-                max_block_size = 8, 
-                street_width = 1 
-            }
+            -- Let the service calculate block sizes dynamically
+            local street_params = {}
+            if key == "d" then
+                -- Still allow overrides for specific tests
+                street_params = { min_block_size = 2, max_block_size = 5 }
+                print("Forcing SMALL block sizes (2-5)")
+            elseif key == "f" then
+                street_params = { min_block_size = 10, max_block_size = 20 }
+                print("Forcing LARGE block sizes (10-20)")
+            else
+                print("Using DYNAMIC block sizes")
+            end
+            
             local success = NewCityGenService.generateStreetsOnly(Game.lab_grid, Game.lab_zone_grid, Game.arterial_control_paths or {}, street_params)
             if success then
                 print("Street generation SUCCESS!")
             else
                 print("Street generation FAILED!")
-            end
-        else
-            print("ERROR: No lab grid available. Press 'W' or 'E' first.")
-        end
-    end
-
-    if key == "d" then
-        print("=== Testing Different Block Sizes ===")
-        if Game.lab_grid and Game.lab_zone_grid then
-            local NewCityGenService = require("services.NewCityGenService")
-            local street_params = { 
-                min_block_size = 2, 
-                max_block_size = 5, 
-                street_width = 1 
-            }
-            local success = NewCityGenService.generateStreetsOnly(Game.lab_grid, Game.lab_zone_grid, Game.arterial_control_paths or {}, street_params)
-            if success then
-                print("Small block generation SUCCESS!")
-            else
-                print("Small block generation FAILED!")
-            end
-        else
-            print("ERROR: No lab grid available. Press 'W' or 'E' first.")
-        end
-    end
-
-    if key == "f" then
-        print("=== Testing Large Block Sizes ===")
-        if Game.lab_grid and Game.lab_zone_grid then
-            local NewCityGenService = require("services.NewCityGenService")
-            local street_params = { 
-                min_block_size = 5, 
-                max_block_size = 12, 
-                street_width = 1 
-            }
-            local success = NewCityGenService.generateStreetsOnly(Game.lab_grid, Game.lab_zone_grid, Game.arterial_control_paths or {}, street_params)
-            if success then
-                print("Large block generation SUCCESS!")
-            else
-                print("Large block generation FAILED!")
             end
         else
             print("ERROR: No lab grid available. Press 'W' or 'E' first.")
@@ -137,16 +139,13 @@ function WfcLabController:keypressed(key)
     if key == "u" then
         print("=== Full Pipeline Test: Zones + Arterials + Streets ===")
         local NewCityGenService = require("services.NewCityGenService")
+        -- Let the service handle all dynamic parameters
         local full_params = { 
             width = 48, 
             height = 36, 
             use_wfc_for_zones = true,
             use_recursive_streets = true,
             generate_arterials = true,
-            num_arterials = 3,
-            min_block_size = 3,
-            max_block_size = 7,
-            street_width = 1
         }
         local result = NewCityGenService.generateDetailedCity(full_params)
         if result and result.city_grid then
@@ -178,6 +177,7 @@ function WfcLabController:keypressed(key)
     if key == "h" then
         print("=== Recursive Block Subdivision Test Controls ===")
         print("W/E - Generate zones only (small/large)")
+        print("1/2/3 - Generate larger grids (100x200, 200x100, 250x250)")
         print("R - Generate arterials on top of zones")
         print("S - Generate streets with recursive subdivision (normal blocks)")
         print("D - Generate streets with small blocks (2-5 size)")

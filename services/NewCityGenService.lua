@@ -44,9 +44,14 @@ function NewCityGenService.generateDetailedCity(params)
     -- STAGE 3: Street Generation using Recursive Subdivision
     print("NewCityGenService: Stage 3 - Street Generation with Recursive Subdivision")
     if use_recursive_streets then
+        -- DYNAMIC BLOCK SIZES
+        local map_diagonal = math.sqrt(width^2 + height^2)
+        local dynamic_max_size = math.max(8, math.floor(map_diagonal / 20))
+        local dynamic_min_size = math.max(4, math.floor(dynamic_max_size / 2))
+
         local street_params = {
-            min_block_size = params.min_block_size or 3,
-            max_block_size = params.max_block_size or 8,
+            min_block_size = params.min_block_size or dynamic_min_size,
+            max_block_size = params.max_block_size or dynamic_max_size,
             street_width = params.street_width or 1
         }
         BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, street_params)
@@ -151,7 +156,7 @@ function NewCityGenService._generateArterialsSimple(city_grid, zone_grid, highwa
     
     -- Set up arterial generation parameters
     local arterial_params = {
-        num_arterials = params.num_arterials or 3,
+        num_arterials = params.num_arterials, -- Let the service calculate if nil
         min_edge_distance = params.min_edge_distance or 15
     }
     
@@ -304,7 +309,7 @@ function NewCityGenService.generateArterialsOnly(city_grid, zone_grid, params)
     
     -- Set up arterial generation parameters
     local arterial_params = {
-        num_arterials = params.num_arterials or 3,
+        num_arterials = params.num_arterials, -- Let service calculate if nil
         min_edge_distance = params.min_edge_distance or 15
     }
     
@@ -334,10 +339,15 @@ function NewCityGenService.generateStreetsOnly(city_grid, zone_grid, arterial_pa
         end
     end
     
+    -- DYNAMIC BLOCK SIZES
+    local map_diagonal = math.sqrt(width^2 + height^2)
+    local dynamic_max_size = math.max(8, math.floor(map_diagonal / 20))
+    local dynamic_min_size = math.max(4, math.floor(dynamic_max_size / 2))
+
     -- Set up street generation parameters
     local street_params = {
-        min_block_size = params.min_block_size or 3,
-        max_block_size = params.max_block_size or 8,
+        min_block_size = params.min_block_size or dynamic_min_size,
+        max_block_size = params.max_block_size or dynamic_max_size,
         street_width = params.street_width or 1
     }
     
