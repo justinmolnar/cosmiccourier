@@ -67,16 +67,25 @@ function WfcLabController:keypressed(key)
             return
         end
 
-        local MapGenerationService = require("services.MapGenerationService")
         Game.smooth_highway_overlay_paths = {} -- Clear previous overlay
 
         for _, control_points in ipairs(Game.arterial_control_paths) do
-            -- The spline function gracefully handles paths with too few points
-            local spline_path = MapGenerationService._generateSplinePoints(control_points, 10)
-            if #spline_path > 1 then
-                table.insert(Game.smooth_highway_overlay_paths, spline_path)
+            local smooth_path = WfcLabController._smoothPathForOverlay(control_points)
+            if #smooth_path > 1 then
+                table.insert(Game.smooth_highway_overlay_paths, smooth_path)
             end
         end
+        
+        -- Merge paths that run beside each other
+        print("Before merging: " .. #Game.smooth_highway_overlay_paths .. " paths")
+        Game.smooth_highway_overlay_paths = WfcLabController._mergeParallelPaths(Game.smooth_highway_overlay_paths)
+        print("After merging: " .. #Game.smooth_highway_overlay_paths .. " paths")
+        
+        -- Simplify paths to reduce jaggedness
+        for i = 1, #Game.smooth_highway_overlay_paths do
+            Game.smooth_highway_overlay_paths[i] = WfcLabController._simplifyPath(Game.smooth_highway_overlay_paths[i])
+        end
+        
         print("Generated " .. #Game.smooth_highway_overlay_paths .. " smooth overlays from saved arterial paths.")
     end
     
@@ -103,6 +112,282 @@ function WfcLabController:keypressed(key)
         print("T - Toggle district zone visibility")
         print("H - Show this help")
     end
+end
+
+-- New smoothing function specifically for overlay visualization
+function WfcLabController._smoothPathForOverlay(points)
+    if not points or #points < 2 then
+        return points or {}
+    end
+    
+    -- If we have less than 4 points, use simple linear interpolation
+    if #points < 4 then
+        return WfcLabController._linearInterpolation(points, 5)
+    end
+    
+    -- For 4+ points, use a gentle Catmull-Rom spline with reduced segments
+    local smooth_points = {}
+    local segments_per_span = 8 -- Reduced from 10 for less jaggedness
+    
+    -- Add the first point
+    table.insert(smooth_points, {x = points[1].x, y = points[1].y})
+    
+    -- Process each span between control points
+    for i = 2, #points - 2 do
+        local p0 = points[i-1]
+        local p1 = points[i]
+        local p2 = points[i+1]
+        local p3 = points[i+2]
+        
+        for t = 0, 1, 1/segments_per_span do
+            if t > 0 then -- Skip t=0 to avoid duplicating points
+                local x = WfcLabController._catmullRom(p0.x, p1.x, p2.x, p3.x, t)
+                local y = WfcLabController._catmullRom(p0.y, p1.y, p2.y, p3.y, t)
+                table.insert(smooth_points, {x = math.floor(x + 0.5), y = math.floor(y + 0.5)})
+            end
+        end
+    end
+    
+    -- Add the last point
+    table.insert(smooth_points, {x = points[#points].x, y = points[#points].y})
+    
+    -- Remove consecutive duplicate points and fix lightning bolt patterns
+    local deduplicated = WfcLabController._removeDuplicates(smooth_points)
+    return WfcLabController._fixLightningBolts(deduplicated)
+end
+
+function WfcLabController._linearInterpolation(points, segments_per_span)
+    local smooth_points = {}
+    
+    for i = 1, #points - 1 do
+        local p1 = points[i]
+        local p2 = points[i + 1]
+        
+        for t = 0, 1, 1/segments_per_span do
+            local x = p1.x + (p2.x - p1.x) * t
+            local y = p1.y + (p2.y - p1.y) * t
+            table.insert(smooth_points, {x = math.floor(x + 0.5), y = math.floor(y + 0.5)})
+        end
+    end
+    
+    return WfcLabController._removeDuplicates(smooth_points)
+end
+
+function WfcLabController._catmullRom(p0, p1, p2, p3, t)
+    local t2 = t * t
+    local t3 = t2 * t
+    
+    return 0.5 * ((2 * p1) +
+                  (-p0 + p2) * t +
+                  (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+                  (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+end
+
+function WfcLabController._removeDuplicates(points)
+    if #points <= 1 then return points end
+    
+    local cleaned = {points[1]}
+    
+    for i = 2, #points do
+        local prev = cleaned[#cleaned]
+        local curr = points[i]
+        
+        -- Only add if it's different from the previous point
+        if prev.x ~= curr.x or prev.y ~= curr.y then
+            table.insert(cleaned, curr)
+        end
+    end
+    
+    return cleaned
+end
+
+function WfcLabController._fixLightningBolts(points)
+    if #points <= 2 then return points end
+    
+    local fixed = {points[1]}
+    
+    for i = 2, #points - 1 do
+        local prev = fixed[#fixed]
+        local curr = points[i]
+        local next = points[i + 1]
+        
+        -- Check if we have a "lightning bolt" pattern
+        local dx1 = curr.x - prev.x
+        local dy1 = curr.y - prev.y
+        local dx2 = next.x - curr.x
+        local dy2 = next.y - curr.y
+        
+        -- If both segments are short (1-2 tiles) and go in roughly opposite directions
+        local dist1 = math.sqrt(dx1*dx1 + dy1*dy1)
+        local dist2 = math.sqrt(dx2*dx2 + dy2*dy2)
+        
+        if dist1 <= 2 and dist2 <= 2 then
+            -- Check if directions are opposing (creating a zigzag)
+            local dot_product = dx1*dx2 + dy1*dy2
+            if dot_product < 0 then -- Opposite directions
+                -- Skip this middle point to create a direct diagonal
+                goto skip_point
+            end
+        end
+        
+        table.insert(fixed, curr)
+        ::skip_point::
+    end
+    
+    table.insert(fixed, points[#points]) -- Always keep the last point
+    return fixed
+end
+
+function WfcLabController._mergeParallelPaths(paths)
+    if #paths <= 1 then return paths end
+    
+    local merged = {}
+    local used = {}
+    
+    for i = 1, #paths do
+        if not used[i] then
+            local current_path = paths[i]
+            local parallel_paths = {current_path}
+            used[i] = true
+            
+            -- Look for other paths that run parallel to this one
+            for j = i + 1, #paths do
+                if not used[j] then
+                    if WfcLabController._pathsRunParallel(current_path, paths[j]) then
+                        table.insert(parallel_paths, paths[j])
+                        used[j] = true
+                    end
+                end
+            end
+            
+            -- If we found parallel paths, merge them into a centerline
+            if #parallel_paths > 1 then
+                local centerline = WfcLabController._createCenterline(parallel_paths)
+                table.insert(merged, centerline)
+            else
+                table.insert(merged, current_path)
+            end
+        end
+    end
+    
+    return merged
+end
+
+function WfcLabController._pathsRunParallel(path1, path2)
+    local close_segments = 0
+    local total_segments = 0
+    local max_distance = 2 -- Reduced from 3 - only merge if very close
+    
+    -- Check every few points to see if paths run close together
+    local step = math.max(1, math.floor(math.min(#path1, #path2) / 8)) -- Check more points
+    
+    for i = 1, #path1, step do
+        local p1 = path1[i]
+        local min_distance = math.huge
+        
+        -- Find closest point on path2
+        for j = 1, #path2 do
+            local p2 = path2[j]
+            local distance = math.sqrt((p1.x - p2.x)^2 + (p1.y - p2.y)^2)
+            min_distance = math.min(min_distance, distance)
+        end
+        
+        total_segments = total_segments + 1
+        if min_distance <= max_distance then
+            close_segments = close_segments + 1
+        end
+    end
+    
+    -- Increased threshold - need 60% overlap to merge (was 40%)
+    local overlap_ratio = total_segments > 0 and (close_segments / total_segments) or 0
+    print("Path overlap check: " .. close_segments .. "/" .. total_segments .. " = " .. string.format("%.2f", overlap_ratio))
+    return overlap_ratio > 0.6
+end
+
+function WfcLabController._createCenterline(parallel_paths)
+    if #parallel_paths == 1 then return parallel_paths[1] end
+    
+    -- Use the longest path as the base structure
+    local base_path = parallel_paths[1]
+    for i = 2, #parallel_paths do
+        if #parallel_paths[i] > #base_path then
+            base_path = parallel_paths[i]
+        end
+    end
+    
+    local centerline = {}
+    
+    -- For each point in the base path, average with nearby points from other paths
+    for i = 1, #base_path do
+        local base_point = base_path[i]
+        local sum_x, sum_y, count = base_point.x, base_point.y, 1
+        
+        -- Find corresponding points in other paths
+        for j = 1, #parallel_paths do
+            if parallel_paths[j] ~= base_path then
+                local closest_point = nil
+                local closest_distance = math.huge
+                
+                -- Find the closest point on this path
+                for _, point in ipairs(parallel_paths[j]) do
+                    local distance = math.sqrt((point.x - base_point.x)^2 + (point.y - base_point.y)^2)
+                    if distance < closest_distance and distance <= 5 then -- Within 5 tiles
+                        closest_distance = distance
+                        closest_point = point
+                    end
+                end
+                
+                if closest_point then
+                    sum_x = sum_x + closest_point.x
+                    sum_y = sum_y + closest_point.y
+                    count = count + 1
+                end
+            end
+        end
+        
+        table.insert(centerline, {
+            x = math.floor(sum_x / count + 0.5),
+            y = math.floor(sum_y / count + 0.5)
+        })
+    end
+    
+    return centerline
+end
+
+function WfcLabController._simplifyPath(path)
+    if #path <= 2 then return path end
+    
+    local simplified = {path[1]}
+    
+    for i = 2, #path - 1 do
+        local prev = simplified[#simplified]
+        local curr = path[i]
+        local next = path[i + 1]
+        
+        -- Calculate direction vectors
+        local dx1 = curr.x - prev.x
+        local dy1 = curr.y - prev.y
+        local dx2 = next.x - curr.x
+        local dy2 = next.y - curr.y
+        
+        -- If the direction change is small, skip this point
+        local angle1 = math.atan2(dy1, dx1)
+        local angle2 = math.atan2(dy2, dx2)
+        local angle_diff = math.abs(angle1 - angle2)
+        
+        -- Normalize angle difference to 0-π
+        if angle_diff > math.pi then
+            angle_diff = 2 * math.pi - angle_diff
+        end
+        
+        -- Only keep points that represent significant direction changes (> 30 degrees)
+        if angle_diff > math.pi/6 then
+            table.insert(simplified, curr)
+        end
+    end
+    
+    table.insert(simplified, path[#path]) -- Always keep the last point
+    return simplified
 end
 
 return WfcLabController
