@@ -3,25 +3,66 @@
 
 local BlockSubdivisionService = {}
 
+local ZONE_BLOCK_SIZE_FACTORS = {
+    -- zone = { min_divisor, max_divisor } -- smaller divisors = smaller blocks = denser streets
+    commercial = { min = 20, max = 10 },
+    residential_north = { min = 25, max = 12 },
+    residential_south = { min = 28, max = 14 },
+    industrial_heavy = { min = 40, max = 25 },
+    industrial_light = { min = 35, max = 20 },
+    university = { min = 30, max = 18 },
+    medical = { min = 22, max = 11 },
+    entertainment = { min = 18, max = 9 },
+    waterfront = { min = 35, max = 20 },
+    warehouse = { min = 45, max = 28 },
+    tech = { min = 20, max = 10 },
+    park_central = { min = 50, max = 30 },
+    park_nature = { min = 60, max = 35 },
+    -- default
+    default = { min = 25, max = 12 }
+}
+
+function BlockSubdivisionService._getBlockSizeForZone(zone_type, map_width, map_height)
+    local factors = ZONE_BLOCK_SIZE_FACTORS[zone_type] or ZONE_BLOCK_SIZE_FACTORS.default
+    local map_diagonal = math.sqrt(map_width^2 + map_height^2)
+
+    local min_size = math.max(4, math.floor(map_diagonal / factors.min))
+    local max_size = math.max(8, math.floor(map_diagonal / factors.max))
+
+    -- Ensure min is not greater than max and there's a valid range
+    if min_size >= max_size then
+        min_size = math.max(4, max_size - 4)
+    end
+    
+    print(string.format("Zone '%s' block size: min=%d, max=%d", zone_type, min_size, max_size))
+
+    return { min_size = min_size, max_size = max_size }
+end
+
+
 function BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, params)
     print("=== BlockSubdivisionService.generateStreets START ===")
-    
+
     local C_MAP = require("data.constants").MAP
     local width, height = #city_grid[1], #city_grid
-    
+
     -- STAGE 1: Define the Downtown District
-    local downtown_w = C_MAP.DOWNTOWN_GRID_WIDTH
-    local downtown_h = C_MAP.DOWNTOWN_GRID_HEIGHT
+    local downtown_w_const = C_MAP.DOWNTOWN_GRID_WIDTH
+    local downtown_h_const = C_MAP.DOWNTOWN_GRID_HEIGHT
+
+    local downtown_w = math.min(width, downtown_w_const)
+    local downtown_h = math.min(height, downtown_h_const)
+
     local downtown_district = {
-        x1 = math.floor(width / 2) - math.floor(downtown_w / 2),
-        y1 = math.floor(height / 2) - math.floor(downtown_h / 2),
-        x2 = math.floor(width / 2) + math.floor(downtown_w / 2),
-        y2 = math.floor(height / 2) + math.floor(downtown_h / 2)
+        x1 = math.floor((width - downtown_w) / 2) + 1,
+        y1 = math.floor((height - downtown_h) / 2) + 1,
+        x2 = math.floor((width - downtown_w) / 2) + downtown_w,
+        y2 = math.floor((height - downtown_h) / 2) + downtown_h
     }
 
     local all_blocks = {}
 
-    -- STAGE 2: THE FIX - Run the existing recursive algorithm on the downtown area first, with special parameters.
+    -- STAGE 2: Run the existing recursive algorithm on the downtown area first, with special parameters.
     print("--- Subdividing Downtown District ---")
     local downtown_blocks = {}
     local DOWNTOWN_MAX_BLOCK_SIZE = 5 -- Force much smaller blocks for a dense grid
@@ -30,12 +71,19 @@ function BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_
     for _, block in ipairs(downtown_blocks) do
         table.insert(all_blocks, block)
     end
-    
+
     -- STAGE 3: Run the algorithm on the rest of the city
     print("--- Subdividing Outer Regions ---")
     local regions = BlockSubdivisionService._findArterialRegions(city_grid, zone_grid, width, height, downtown_district)
+    
+    -- FIX: Loop through found regions and generate blocks with zone-appropriate density
     for region_idx, region in ipairs(regions) do
-        local region_blocks = BlockSubdivisionService._generateProperBlocks(region, params.min_block_size, params.max_block_size)
+        -- Use the new helper function to get dynamic block sizes for the region's zone type
+        local zone_type = region.zone or "residential_north" -- Default to residential
+        local zone_params = BlockSubdivisionService._getBlockSizeForZone(zone_type, width, height)
+
+        -- Pass the zone-specific sizes to the block generator
+        local region_blocks = BlockSubdivisionService._generateProperBlocks(region, zone_params.min_size, zone_params.max_size)
         for _, block in ipairs(region_blocks) do
             table.insert(all_blocks, block)
         end
@@ -44,11 +92,11 @@ function BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_
     -- STAGE 4: Convert all generated blocks (downtown + outer) into streets
     local street_segments = BlockSubdivisionService._convertBlocksToStreetSegments(all_blocks, width, height)
     BlockSubdivisionService._drawStreetsToGrid(city_grid, street_segments, width, height)
-    
+
     -- STAGE 5: Finalize
     Game.street_segments = street_segments
     Game.street_intersections = BlockSubdivisionService._findEdgeIntersections(street_segments)
-    
+
     print("=== BlockSubdivisionService.generateStreets COMPLETE ===")
     return true
 end
@@ -158,18 +206,18 @@ end
 function BlockSubdivisionService._recursiveSplitBlock(block, min_block_size, max_block_size, depth, blocks)
     local width = block.x2 - block.x1 + 1
     local height = block.y2 - block.y1 + 1
-    
+
     print("  Depth " .. depth .. ": Trying to split block (" .. block.x1 .. "," .. block.y1 .. ") to (" .. block.x2 .. "," .. block.y2 .. ") size " .. width .. "x" .. height)
-    
+
     -- Stop if block is small enough or we've gone too deep
-    if (width <= max_block_size and height <= max_block_size) or 
+    if (width <= max_block_size and height <= max_block_size) or
        (width <= min_block_size * 2 or height <= min_block_size * 2) or
        depth > 6 then
         print("  Depth " .. depth .. ": KEEPING block (too small or max depth)")
         table.insert(blocks, block)
         return
     end
-    
+
     -- Decide split direction
     local split_vertical = false
     if width > height * 1.5 then
@@ -182,7 +230,7 @@ function BlockSubdivisionService._recursiveSplitBlock(block, min_block_size, max
         split_vertical = love.math.random() < 0.5
         print("  Depth " .. depth .. ": Splitting " .. (split_vertical and "VERTICALLY" or "HORIZONTALLY") .. " (random)")
     end
-    
+
     if split_vertical then
         -- Split vertically (create left and right blocks)
         local min_split = block.x1 + min_block_size - 1
@@ -192,30 +240,30 @@ function BlockSubdivisionService._recursiveSplitBlock(block, min_block_size, max
             table.insert(blocks, block)
             return
         end
-        
+
         local split_x = love.math.random(min_split, max_split)
         print("  Depth " .. depth .. ": Splitting at x=" .. split_x)
-        
+
         local left_block = {
             x1 = block.x1,
             y1 = block.y1,
             x2 = split_x,
             y2 = block.y2
         }
-        
+
         local right_block = {
             x1 = split_x + 2,  -- +2 to leave space for a 1-wide street
             y1 = block.y1,
             x2 = block.x2,
             y2 = block.y2
         }
-        
+
         print("  Depth " .. depth .. ": Left: (" .. left_block.x1 .. "," .. left_block.y1 .. ") to (" .. left_block.x2 .. "," .. left_block.y2 .. ")")
         print("  Depth " .. depth .. ": Right: (" .. right_block.x1 .. "," .. right_block.y1 .. ") to (" .. right_block.x2 .. "," .. right_block.y2 .. ")")
-        
+
         BlockSubdivisionService._recursiveSplitBlock(left_block, min_block_size, max_block_size, depth + 1, blocks)
         BlockSubdivisionService._recursiveSplitBlock(right_block, min_block_size, max_block_size, depth + 1, blocks)
-        
+
     else
         -- Split horizontally (create top and bottom blocks)
         local min_split = block.y1 + min_block_size - 1
@@ -225,34 +273,31 @@ function BlockSubdivisionService._recursiveSplitBlock(block, min_block_size, max
             table.insert(blocks, block)
             return
         end
-        
+
         local split_y = love.math.random(min_split, max_split)
         print("  Depth " .. depth .. ": Splitting at y=" .. split_y)
-        
+
         local top_block = {
             x1 = block.x1,
             y1 = block.y1,
             x2 = block.x2,
             y2 = split_y
         }
-        
+
         local bottom_block = {
             x1 = block.x1,
             y1 = split_y + 2,  -- +2 to leave space for a 1-wide street
             x2 = block.x2,
             y2 = block.y2
         }
-        
+
         print("  Depth " .. depth .. ": Top: (" .. top_block.x1 .. "," .. top_block.y1 .. ") to (" .. top_block.x2 .. "," .. top_block.y2 .. ")")
         print("  Depth " .. depth .. ": Bottom: (" .. bottom_block.x1 .. "," .. bottom_block.y1 .. ") to (" .. bottom_block.x2 .. "," .. bottom_block.y2 .. ")")
-        
+
         BlockSubdivisionService._recursiveSplitBlock(top_block, min_block_size, max_block_size, depth + 1, blocks)
         BlockSubdivisionService._recursiveSplitBlock(bottom_block, min_block_size, max_block_size, depth + 1, blocks)
     end
 end
-
--- Final fixed _convertBlocksToStreetSegments function
--- Fixes: 1) No T-junctions/dead ends, 2) Extend to map borders
 
 function BlockSubdivisionService._convertBlocksToStreetSegments(blocks, width, height)
     print("Converting " .. #blocks .. " blocks to street segments...")

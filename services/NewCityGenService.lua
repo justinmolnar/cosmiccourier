@@ -52,13 +52,13 @@ end
 
 function NewCityGenService.generateDetailedCity(params)
     print("NewCityGenService: Starting detailed city generation...")
-    
+
     local C_MAP = require("data.constants").MAP
     local width = params.width or C_MAP.CITY_GRID_WIDTH
     local height = params.height or C_MAP.CITY_GRID_HEIGHT
-    
+
     local city_grid = NewCityGenService._createEmptyGrid(width, height)
-    
+
     -- STAGE 1: Zone Generation
     local wfc_params = {
         downtown_width = C_MAP.DOWNTOWN_GRID_WIDTH,
@@ -66,19 +66,23 @@ function NewCityGenService.generateDetailedCity(params)
     }
     local zone_grid = NewCityGenService._generateZonesWithWFC(width, height, wfc_params)
     if not zone_grid then return nil end
-    
+
     -- STAGE 2: Arterial Road Generation
     local arterial_paths = NewCityGenService._generateArterialsSimple(city_grid, zone_grid, {}, params)
-    
+
     -- STAGE 3: THE FIX - Pre-Subdivide Downtown to guide the main street algorithm
-    local downtown_w = C_MAP.DOWNTOWN_GRID_WIDTH
-    local downtown_h = C_MAP.DOWNTOWN_GRID_HEIGHT
+    -- FIX: Ensure downtown dimensions are not larger than the map itself.
+    local downtown_w = math.min(width, C_MAP.DOWNTOWN_GRID_WIDTH)
+    local downtown_h = math.min(height, C_MAP.DOWNTOWN_GRID_HEIGHT)
+
+    -- FIX: Recalculate district origin to be 1-indexed and centered.
     local district = {
-        x = math.floor(width / 2) - math.floor(downtown_w / 2),
-        y = math.floor(height / 2) - math.floor(downtown_h / 2),
+        x = math.floor((width - downtown_w) / 2) + 1,
+        y = math.floor((height - downtown_h) / 2) + 1,
         w = downtown_w,
         h = downtown_h
     }
+
 
     -- Draw two vertical and two horizontal lines to create "nodes" for the generator to work from.
     local v1_x = district.x + math.floor(district.w * 0.33)
@@ -87,17 +91,17 @@ function NewCityGenService.generateDetailedCity(params)
         city_grid[y][v1_x].type = "downtown_road"
         city_grid[y][v2_x].type = "downtown_road"
     end
-    
+
     local h1_y = district.y + math.floor(district.h * 0.33)
     local h2_y = district.y + math.floor(district.h * 0.66)
     for x = district.x, district.x + district.w - 1 do
         city_grid[h1_y][x].type = "downtown_road"
         city_grid[h2_y][x].type = "downtown_road"
     end
-    
+
     -- STAGE 4: Run the main street algorithm, which will now correctly process the pre-divided downtown
     BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, params)
-    
+
     print("NewCityGenService: City generation complete")
     return {
         city_grid = city_grid,
