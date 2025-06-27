@@ -190,6 +190,19 @@ function WfcLabController:keypressed(key)
         Game.show_districts = not Game.show_districts
         print("=== Toggled district visibility to: " .. tostring(Game.show_districts) .. " ===")
     end
+
+    if key == "z" then
+        print("=== MINIMAL TEST: Zones + Arterials Only ===")
+        local NewCityGenService = require("services.NewCityGenService")
+        local params = { width = 48, height = 36 }
+        local result = NewCityGenService.generateMinimalTest(params)
+        if result then
+            Game.lab_grid = result.city_grid
+            Game.lab_zone_grid = result.zone_grid
+            Game.arterial_control_paths = result.arterial_paths
+            print("Minimal test complete - check downtown area")
+        end
+    end
     
     if key == "h" then
         print("=== Recursive Block Subdivision Test Controls ===")

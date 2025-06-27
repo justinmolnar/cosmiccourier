@@ -58,6 +58,9 @@ function WFCZoningService.generateCoherentZones(width, height, downtown_center_x
     params = params or {}
     print("WFC: Starting two-pass coherent zone generation")
     
+    -- DEBUG: Check if this function is accidentally modifying a city_grid instead of zone_grid
+    print("WFC DEBUG: This function should ONLY create zone_grid, NOT modify city_grid!")
+    
     local coarse_width = math.max(4, math.floor(width / 4))
     local coarse_height = math.max(4, math.floor(height / 4))
     local coarse_downtown_x = math.max(1, math.min(coarse_width, math.floor(downtown_center_x / 4)))
@@ -70,11 +73,11 @@ function WFCZoningService.generateCoherentZones(width, height, downtown_center_x
     local fine_grid = WFCZoningService._generateConstrainedFineGrid(width, height, coarse_grid)
     
     print("WFC: Pass 3 - Stamping downtown square")
-    -- Pass the downtown dimensions from params
     local downtown_w = params.downtown_width or 64
     local downtown_h = params.downtown_height or 64
     WFCZoningService._stampDowntownSquare(fine_grid, width, height, downtown_center_x, downtown_center_y, downtown_w, downtown_h)
     
+    print("WFC DEBUG: Returning zone_grid, should NOT affect city_grid!")
     return fine_grid
 end
 
@@ -635,7 +638,6 @@ function WFCZoningService._generateConstrainedFineGrid(width, height, coarse_gri
     return fine_grid
 end
 
--- NEW: Stamp downtown square on top of everything (ALWAYS THE SAME)
 function WFCZoningService._stampDowntownSquare(grid, width, height, center_x, center_y, downtown_w, downtown_h)
     local half_w = math.floor(downtown_w / 2)
     local half_h = math.floor(downtown_h / 2)
@@ -646,8 +648,12 @@ function WFCZoningService._stampDowntownSquare(grid, width, height, center_x, ce
         for dx = -half_w, half_w do
             local x, y = center_x + dx, center_y + dy
             if x >= 1 and x <= width and y >= 1 and y <= height then
-                grid[y][x] = "downtown"
-                stamped_cells = stamped_cells + 1
+                -- CRITICAL FIX: Only stamp if the cell is not already "downtown"
+                -- This prevents overwriting when the zone grid is used later
+                if grid[y][x] ~= "downtown" then
+                    grid[y][x] = "downtown"
+                    stamped_cells = stamped_cells + 1
+                end
             end
         end
     end
