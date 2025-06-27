@@ -135,14 +135,15 @@ function GameView:drawLabGrid()
     local tile_size = math.max(4, math.min(tile_size_w, tile_size_h, 25))
     
     local total_grid_w, total_grid_h = grid_w * tile_size, grid_h * tile_size
-    -- THE FIX: Properly calculate the offset to account for the sidebar
     local offset_x = sidebar_w + (available_w - total_grid_w) / 2
     local offset_y = (available_h - total_grid_h) / 2
     
     love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
     love.graphics.rectangle("fill", offset_x - 10, offset_y - 40, total_grid_w + 20, total_grid_h + 50)
     
-    if Game.lab_zone_grid then
+    if Game.show_flood_fill_regions and Game.debug_flood_fill_regions then
+        self:drawFloodFillRegions(offset_x, offset_y, tile_size)
+    elseif Game.lab_zone_grid then
         self:drawZoneBackground(offset_x, offset_y, tile_size)
     end
     
@@ -223,7 +224,12 @@ function GameView:drawLabGrid()
 
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(Game.fonts.ui)
-    love.graphics.print("Edge-Based Streets - Press 'H' for help", offset_x, offset_y - 35)
+    
+    local title = "Edge-Based Streets - Press 'H' for help"
+    if Game.show_flood_fill_regions then
+        title = "FLOOD FILL REGIONS DEBUG - Press '6' to toggle"
+    end
+    love.graphics.print(title, offset_x, offset_y - 35)
     
     self:drawLegend(offset_x + total_grid_w + 20, offset_y)
 end
@@ -318,6 +324,48 @@ function GameView:drawZoneBackground(offset_x, offset_y, tile_size)
             end
         end
     end
+end
+
+function GameView:drawFloodFillRegions(offset_x, offset_y, tile_size)
+    local Game = self.Game
+    
+    if not Game.debug_flood_fill_regions then return end
+    
+    local region_colors = {
+        {1.0, 0.2, 0.2, 0.6}, {0.2, 1.0, 0.2, 0.6}, {0.2, 0.2, 1.0, 0.6}, 
+        {1.0, 1.0, 0.2, 0.6}, {1.0, 0.2, 1.0, 0.6}, {0.2, 1.0, 1.0, 0.6},
+        {1.0, 0.5, 0.2, 0.6}, {0.5, 0.2, 1.0, 0.6}, {0.2, 0.5, 0.2, 0.6},
+        {0.5, 0.5, 0.2, 0.6}, {0.2, 0.5, 0.5, 0.6}, {0.5, 0.2, 0.5, 0.6}
+    }
+    
+    for region_idx, region in ipairs(Game.debug_flood_fill_regions) do
+        local color = region_colors[((region_idx - 1) % #region_colors) + 1]
+        love.graphics.setColor(color[1], color[2], color[3], color[4])
+        
+        for _, cell in ipairs(region.cells) do
+            love.graphics.rectangle("fill", 
+                offset_x + (cell.x - 1) * tile_size, 
+                offset_y + (cell.y - 1) * tile_size, 
+                tile_size, 
+                tile_size)
+        end
+        
+        love.graphics.setColor(color[1], color[2], color[3], 1.0)
+        love.graphics.setLineWidth(2)
+        love.graphics.rectangle("line",
+            offset_x + (region.min_x - 1) * tile_size,
+            offset_y + (region.min_y - 1) * tile_size,
+            (region.max_x - region.min_x + 1) * tile_size,
+            (region.max_y - region.min_y + 1) * tile_size)
+        
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.setFont(Game.fonts.ui_small)
+        local center_x = offset_x + ((region.min_x + region.max_x) / 2 - 1) * tile_size
+        local center_y = offset_y + ((region.min_y + region.max_y) / 2 - 1) * tile_size
+        love.graphics.print(tostring(region.id), center_x, center_y)
+    end
+    
+    love.graphics.setLineWidth(1)
 end
 
 function GameView:drawLegend(legend_x, legend_y)

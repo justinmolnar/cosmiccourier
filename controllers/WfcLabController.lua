@@ -15,7 +15,7 @@ function WfcLabController:getHandledKeys()
         ["w"] = true, ["e"] = true, ["r"] = true, ["y"] = true,
         ["s"] = true, ["d"] = true, ["f"] = true,
         ["c"] = true, ["t"] = true, ["h"] = true, ["u"] = true,
-        ["1"] = true, ["2"] = true, ["3"] = true,
+        ["1"] = true, ["2"] = true, ["3"] = true, ["6"] = true,
         ["space"] = true
     }
 end
@@ -36,6 +36,28 @@ function WfcLabController:keypressed(key)
             print("ERROR: No main city debug data found to display.")
         end
         return -- End the function here to not process other keys
+    end
+
+        if key == "6" then
+        Game.show_flood_fill_regions = not Game.show_flood_fill_regions
+        
+        if Game.show_flood_fill_regions then
+            print("=== SHOWING FLOOD FILL REGIONS ===")
+            if Game.lab_grid and Game.lab_zone_grid then
+                local regions = WfcLabController._debugFloodFillRegions(Game.lab_grid, Game.lab_zone_grid)
+                Game.debug_flood_fill_regions = regions
+                print("Generated " .. #regions .. " flood fill regions for visualization")
+                for i, region in ipairs(regions) do
+                    print("  Region " .. i .. ": " .. #region.cells .. " cells, zone: " .. (region.zone or "none"))
+                end
+            else
+                print("ERROR: No lab grid available for flood fill analysis")
+            end
+        else
+            print("=== HIDING FLOOD FILL REGIONS ===")
+            Game.debug_flood_fill_regions = nil
+        end
+        return
     end
 
     if key == "w" or key == "e" then
@@ -221,6 +243,54 @@ function WfcLabController:keypressed(key)
     end
 end
 
+function WfcLabController._debugFloodFillRegions(city_grid, zone_grid)
+    local width, height = #city_grid[1], #city_grid
+    local regions = {}
+    local visited = {}
+    
+    for y = 1, height do
+        visited[y] = {}
+        for x = 1, width do
+            visited[y][x] = false
+        end
+    end
+    
+    local C_MAP = require("data.constants").MAP
+    local downtown_w = math.min(width, C_MAP.DOWNTOWN_GRID_WIDTH)
+    local downtown_h = math.min(height, C_MAP.DOWNTOWN_GRID_HEIGHT)
+    local downtown_district = {
+        x1 = math.floor((width - downtown_w) / 2) + 1,
+        y1 = math.floor((height - downtown_h) / 2) + 1,
+        x2 = math.floor((width - downtown_w) / 2) + downtown_w,
+        y2 = math.floor((height - downtown_h) / 2) + downtown_h
+    }
+    
+    local function isInDowntown(x, y)
+        return x >= downtown_district.x1 and x <= downtown_district.x2 and 
+               y >= downtown_district.y1 and y <= downtown_district.y2
+    end
+    
+    print("DEBUG: Downtown bounds: (" .. downtown_district.x1 .. "," .. downtown_district.y1 .. ") to (" .. downtown_district.x2 .. "," .. downtown_district.y2 .. ")")
+    
+    local region_count = 0
+    
+    for y = 1, height do
+        for x = 1, width do
+            if not visited[y][x] and not isInDowntown(x, y) and city_grid[y][x].type ~= "arterial" then
+                local region = WfcLabController._debugFloodFillSingleRegion(city_grid, zone_grid, visited, x, y, width, height, isInDowntown)
+                if region and #region.cells > 10 then
+                    region_count = region_count + 1
+                    region.id = region_count
+                    table.insert(regions, region)
+                    print("  Found region " .. region_count .. ": " .. #region.cells .. " cells, zone: " .. (region.zone or "none"))
+                end
+            end
+        end
+    end
+    
+    return regions
+end
+
 -- New smoothing function specifically for overlay visualization
 function WfcLabController._smoothPathForOverlay(points)
     if not points or #points < 2 then
@@ -343,6 +413,53 @@ function WfcLabController._fixLightningBolts(points)
     
     table.insert(fixed, points[#points]) -- Always keep the last point
     return fixed
+end
+
+function WfcLabController._debugFloodFillSingleRegion(city_grid, zone_grid, visited, start_x, start_y, width, height, isInDowntown)
+    local region = {
+        cells = {},
+        min_x = start_x, max_x = start_x,
+        min_y = start_y, max_y = start_y,
+        zone = nil
+    }
+    
+    local queue = {{x = start_x, y = start_y}}
+    local head = 1
+    
+    while head <= #queue do
+        local current = queue[head]
+        head = head + 1
+        
+        local x, y = current.x, current.y
+        
+        if x >= 1 and x <= width and y >= 1 and y <= height and 
+           not visited[y][x] and not isInDowntown(x, y) and city_grid[y][x].type ~= "arterial" then
+            
+            visited[y][x] = true
+            table.insert(region.cells, {x = x, y = y})
+            
+            region.min_x = math.min(region.min_x, x)
+            region.max_x = math.max(region.max_x, x)
+            region.min_y = math.min(region.min_y, y)
+            region.max_y = math.max(region.max_y, y)
+            
+            if not region.zone and zone_grid and zone_grid[y] and zone_grid[y][x] then
+                region.zone = zone_grid[y][x]
+            end
+            
+            -- FIXED: Check downtown boundary before adding neighbors to queue
+            local neighbors = {{x-1, y}, {x+1, y}, {x, y-1}, {x, y+1}}
+            for _, neighbor in ipairs(neighbors) do
+                local nx, ny = neighbor[1], neighbor[2]
+                if nx >= 1 and nx <= width and ny >= 1 and ny <= height and
+                not visited[ny][nx] and not isInDowntown(nx, ny) then
+                    table.insert(queue, {x = nx, y = ny})
+                end
+            end
+        end
+    end
+    
+    return region
 end
 
 return WfcLabController

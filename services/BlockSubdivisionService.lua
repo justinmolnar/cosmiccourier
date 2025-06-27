@@ -138,7 +138,6 @@ function BlockSubdivisionService._findArterialRegionsExcludeDowntown(city_grid, 
     return regions
 end
 
--- FIXED: Flood fill that respects downtown boundaries
 function BlockSubdivisionService._floodFillRegionExcludeDowntown(city_grid, zone_grid, visited, start_x, start_y, width, height, isInDowntown)
     local region = {
         cells = {},
@@ -171,10 +170,15 @@ function BlockSubdivisionService._floodFillRegionExcludeDowntown(city_grid, zone
                 region.zone = zone_grid[y][x]
             end
             
-            table.insert(queue, {x = x-1, y = y})
-            table.insert(queue, {x = x+1, y = y})
-            table.insert(queue, {x = x, y = y-1})
-            table.insert(queue, {x = x, y = y+1})
+            -- FIXED: Check downtown boundary before adding neighbors to queue
+            local neighbors = {{x-1, y}, {x+1, y}, {x, y-1}, {x, y+1}}
+            for _, neighbor in ipairs(neighbors) do
+                local nx, ny = neighbor[1], neighbor[2]
+                if nx >= 1 and nx <= width and ny >= 1 and ny <= height and
+                   not visited[ny][nx] and not isInDowntown(nx, ny) then
+                    table.insert(queue, {x = nx, y = ny})
+                end
+            end
         end
     end
     
