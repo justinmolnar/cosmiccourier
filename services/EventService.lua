@@ -95,6 +95,15 @@ function EventService.setupVehicleEvents(state, game)
                 state.costs.bike = math.floor(state.costs.bike * 1.15)
             elseif vehicleType == "truck" then
                 state.costs.truck = math.floor(state.costs.truck * 1.25)
+                -- Purge any stale inter-city trips from the pending queue
+                -- (generated before the metro license was unlocked)
+                if not state.metro_license_unlocked then
+                    for i = #game.entities.trips.pending, 1, -1 do
+                        if game.entities.trips.pending[i].is_long_distance then
+                            table.remove(game.entities.trips.pending, i)
+                        end
+                    end
+                end
             end
             game.entities:addVehicle(game, vehicleType)
         end

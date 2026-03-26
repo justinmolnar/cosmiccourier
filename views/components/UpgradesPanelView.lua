@@ -9,7 +9,7 @@ function UpgradesPanelView.draw(game, ui_manager)
         if layout_item.type == "header" then
             love.graphics.setColor(0.7, 0.7, 0.8)
             love.graphics.print(layout_item.text, layout_item.x + 5, layout_item.y)
-            love.graphics.line(layout_item.x, layout_item.y + 20, layout_item.x + layout_item.w, layout_item.y + 20)
+            love.graphics.line(layout_item.x, layout_item.y + 20, layout_item.x + layout_item.w - 10, layout_item.y + 20)
         end
     end
     
@@ -23,13 +23,17 @@ function UpgradesPanelView.draw(game, ui_manager)
         love.graphics.setColor(1, 1, 1)
         love.graphics.rectangle("line", button_data.x, button_data.y, button_data.w, button_data.w)
         
-        -- Icon
+        -- Icon (shifted up slightly to leave room for label at bottom)
         love.graphics.setFont(game.fonts.emoji_ui)
-        love.graphics.printf(button_data.icon, button_data.x, button_data.y + 5, button_data.w, "center")
-        
-        -- Name
+        love.graphics.printf(button_data.icon, button_data.x, button_data.y + 4, button_data.w, "center")
+
+        -- Name label: dark strip at the bottom of the square
+        local label_h = 16
+        love.graphics.setColor(0, 0, 0, 0.55)
+        love.graphics.rectangle("fill", button_data.x + 1, button_data.y + button_data.w - label_h, button_data.w - 2, label_h - 1)
         love.graphics.setFont(game.fonts.ui_small)
-        love.graphics.printf(button_data.name, button_data.x, button_data.y + button_data.w - 5, button_data.w, "center")
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.printf(button_data.name, button_data.x, button_data.y + button_data.w - label_h + 2, button_data.w, "center")
     end
 end
 

@@ -58,12 +58,14 @@ function UIController:handleMouseDown(x, y, button)
     end
 
     -- Clicks on upgrade category buttons (to open the modal)
+    -- Adjust y for scroll offset so clicks match visually scrolled content
     if ui_manager.upgrades_accordion.is_open then
-        if self:handleGenericButtonClick(x, y, ui_manager.layout_cache.upgrades.buttons, Game) then
+        local sy = y + ui_manager.upgrades_accordion.scroll_y
+        if self:handleGenericButtonClick(x, sy, ui_manager.layout_cache.upgrades.buttons, Game) then
             local Modal = require("views.components.Modal")
             -- Find the clicked button to get its data
             for _, btn in ipairs(ui_manager.layout_cache.upgrades.buttons) do
-                if self:isMouseInButton(x, y, btn) then
+                if self:isMouseInButton(x, sy, btn) then
                     local modal_title = btn.name .. " Upgrades"
                     local on_close = function() ui_manager.modal_manager:hide() end
                     local new_modal = Modal:new(modal_title, 800, 600, on_close, btn.data)
@@ -77,11 +79,12 @@ function UIController:handleMouseDown(x, y, button)
 
     -- Clicks on "hire vehicle" buttons
     if ui_manager.vehicles_accordion.is_open then
-        if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.hire_bike) then
+        local vy = y + ui_manager.vehicles_accordion.scroll_y
+        if self:isMouseInButton(x, vy, ui_manager.layout_cache.buttons.hire_bike) then
             Game.EventBus:publish("ui_buy_vehicle_clicked", "bike")
             return true
         end
-        if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.hire_truck) then
+        if self:isMouseInButton(x, vy, ui_manager.layout_cache.buttons.hire_truck) then
             Game.EventBus:publish("ui_buy_vehicle_clicked", "truck")
             return true
         end
@@ -89,7 +92,8 @@ function UIController:handleMouseDown(x, y, button)
 
     -- Clicks on "buy client" button
     if ui_manager.clients_accordion.is_open then
-        if self:isMouseInButton(x, y, ui_manager.layout_cache.buttons.buy_client) then
+        local cy = y + ui_manager.clients_accordion.scroll_y
+        if self:isMouseInButton(x, cy, ui_manager.layout_cache.buttons.buy_client) then
             Game.EventBus:publish("ui_buy_client_clicked")
             return true
         end

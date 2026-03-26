@@ -86,7 +86,7 @@ end
 function UIManager:_calculateUpgradesLayoutHeight(categories)
     local total_height = 10
     local category_header_height = 25
-    local icon_row_height = 85
+    local icon_row_height = 79  -- icon_size(64) + 15 spacing
 
     for _, category in ipairs(categories) do
         total_height = total_height + category_header_height
@@ -197,13 +197,13 @@ function UIManager:_doLayout(game)
                     x = icon_x_cursor,
                     y = upgrade_y_cursor,
                     w = icon_size,
-                    h = icon_size + 15,
+                    h = icon_size,
                     event = "ui_upgrade_button_clicked",
                     data = sub_type
                 })
                 icon_x_cursor = icon_x_cursor + icon_size + icon_padding
             end
-            upgrade_y_cursor = upgrade_y_cursor + icon_size + 30
+            upgrade_y_cursor = upgrade_y_cursor + icon_size + 15
         end
     end
     y_cursor = y_cursor + self.upgrades_accordion.header_h + (self.upgrades_accordion.is_open and self.upgrades_accordion.content_h or 0) + 10

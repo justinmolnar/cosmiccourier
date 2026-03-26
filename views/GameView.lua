@@ -39,6 +39,26 @@ function GameView:draw()
         
         active_map:draw()
 
+        -- Fog overlay: darken everything outside downtown when in downtown view
+        if Game.state.current_map_scale == Game.C.MAP.SCALES.DOWNTOWN then
+            local map = active_map
+            if map.downtown_offset and #map.grid > 0 and #map.grid[1] > 0 then
+                local TS = Game.C.MAP.TILE_SIZE
+                local dt = map.downtown_offset
+                local x1 = (dt.x - 1) * TS
+                local y1 = (dt.y - 1) * TS
+                local x2 = (dt.x + Game.C.MAP.DOWNTOWN_GRID_WIDTH  - 1) * TS
+                local y2 = (dt.y + Game.C.MAP.DOWNTOWN_GRID_HEIGHT - 1) * TS
+                local gw = #map.grid[1] * TS
+                local gh = #map.grid   * TS
+                love.graphics.setColor(0, 0, 0, 0.72)
+                love.graphics.rectangle("fill", 0,  0,  x1,       gh)        -- left strip
+                love.graphics.rectangle("fill", x2, 0,  gw - x2,  gh)        -- right strip
+                love.graphics.rectangle("fill", x1, 0,  x2 - x1,  y1)        -- top middle
+                love.graphics.rectangle("fill", x1, y2, x2 - x1,  gh - y2)   -- bottom middle
+            end
+        end
+
         if Game.active_map_key == "city" then
             if Game.entities.depot_plot then
                 local depot_px, depot_py = active_map:getPixelCoords(Game.entities.depot_plot.x, Game.entities.depot_plot.y)
@@ -110,6 +130,21 @@ function GameView:draw()
         love.graphics.pop()
     end
     
+    -- Draw delivery payout floating texts in screen space
+    if #Game.state.floating_texts > 0 then
+        local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
+        local game_world_w = screen_w - sidebar_w
+        local cx, cy = Game.camera.x, Game.camera.y
+        local cs = Game.camera.scale
+        love.graphics.setFont(Game.fonts.ui)
+        for _, ft in ipairs(Game.state.floating_texts) do
+            local sx = sidebar_w + game_world_w / 2 + (ft.x - cx) * cs
+            local sy = screen_h / 2 + (ft.y - cy) * cs
+            love.graphics.setColor(1, 1, 0.3, ft.alpha)
+            love.graphics.printf(ft.text, sx - 60, sy, 120, "center")
+        end
+    end
+
     love.graphics.setScissor()
 end
 

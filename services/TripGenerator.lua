@@ -24,13 +24,22 @@ function TripGenerator.generateTrip(client_plot, game)
         end
     end
 
+    local metro_unlocked = game.state.metro_license_unlocked
+
     if not trucks_exist then
         return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
-    else
+    elseif not metro_unlocked then
+        -- Trucks exist but no metro license: only downtown + city trips (no inter-city)
         local rand = love.math.random()
-        if rand < 0.5 then
-            return TripGenerator._createInterCityTrip(client_plot, base_payout, speed_bonus, game)
-        elseif rand < 0.75 then
+        if rand < 0.4 then
+            return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
+        else
+            return TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
+        end
+    else
+        -- Metro unlocked: inter-city disabled until region map is implemented; use city trips
+        local rand = love.math.random()
+        if rand < 0.4 then
             return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
         else
             return TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)

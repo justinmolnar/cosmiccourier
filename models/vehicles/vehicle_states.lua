@@ -185,16 +185,20 @@ function States.GoToDropoff:enter(vehicle, game)
     -- Check if the primary trip in cargo requires long-distance travel
     local trip = vehicle.cargo[1]
     
-    -- THE FIX: If it's a long-distance truck trip, bypass the broken "GoToNetworkEntry"
-    -- state and go DIRECTLY to "TravelingOnNetwork".
+    -- Long-distance (inter-city) trips require the metro license.
+    -- If one somehow reaches the truck without the license, drop it and move on.
     if trip and trip.is_long_distance and vehicle.type == "truck" then
-        print(string.format("DEBUG: %s %d has a long-distance trip, transitioning directly to TravelingOnNetwork", vehicle.type, vehicle.id))
-        
-        vehicle:changeState(States.TravelingOnNetwork, game, { 
-            network_type = "highway", 
-            destination_map = "region",
-            destination_plot = trip.legs[#trip.legs].end_plot 
-        })
+        if not game.state.metro_license_unlocked then
+            print(string.format("DEBUG: %s %d dropping inter-city trip (no metro license)", vehicle.type, vehicle.id))
+            table.remove(vehicle.cargo, 1)
+            vehicle:changeState(States.DecideNextAction, game)
+            return
+        end
+
+        -- Inter-city disabled until region map is implemented: drop and move on
+        print(string.format("DEBUG: %s %d dropping inter-city trip (region map not yet implemented)", vehicle.type, vehicle.id))
+        table.remove(vehicle.cargo, 1)
+        vehicle:changeState(States.DecideNextAction, game)
         return
     end
     
@@ -207,7 +211,7 @@ function States.GoToDropoff:enter(vehicle, game)
         return
     end
 
-    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle, game)
+    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
     print(string.format("DEBUG: %s %d path to dropoff: %d nodes, ETA: %.2fs", vehicle.type, vehicle.id, #vehicle.path, vehicle.current_path_eta))
 end
 
@@ -515,7 +519,8 @@ States.Stuck = State:new()
 States.Stuck.name = "Stuck"
 function States.Stuck:enter(vehicle, game)
     -- When a vehicle gets stuck, remember what it was trying to do.
-    vehicle.last_state_before_stuck = vehicle.state
+    -- Use previous_state (saved before the transition) not vehicle.state (which is already Stuck).
+    vehicle.last_state_before_stuck = vehicle.previous_state
     -- Use the new constant for the timer
     vehicle.stuck_timer = game.C.GAMEPLAY.VEHICLE_STUCK_TIMER
     print(string.format("WARNING: %s %d is stuck, will retry pathfinding in %ds.", vehicle.type, vehicle.id, vehicle.stuck_timer))
@@ -524,9 +529,13 @@ end
 function States.Stuck:update(dt, vehicle, game)
     vehicle.stuck_timer = vehicle.stuck_timer - dt
     if vehicle.stuck_timer <= 0 then
-        -- Timer is up, try to do the last action again.
         local previous_state = vehicle.last_state_before_stuck or States.DecideNextAction
-        vehicle:changeState(previous_state, game)
+        -- TravelingOnNetwork can't be restarted from Stuck (no params). Go to Decide instead.
+        if previous_state == States.TravelingOnNetwork or previous_state == States.GoToNetworkEntry or previous_state == States.ExitingNetwork then
+            vehicle:changeState(States.DecideNextAction, game)
+        else
+            vehicle:changeState(previous_state, game)
+        end
     end
 end
 

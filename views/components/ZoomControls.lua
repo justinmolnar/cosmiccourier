@@ -54,7 +54,7 @@ function ZoomControls:update(game)
                     self.tooltip_text = "Zoom out to City View"
                 end
             elseif current_scale == C.MAP.SCALES.CITY then
-                 self.tooltip_text = "Zoom out to Region View"
+                self.tooltip_text = "Zoom out to Region View"
             end
         elseif self:pointInButton(mx, my, self.zoom_in_button) then
             self.hovered_button = "zoom_in"
@@ -68,7 +68,6 @@ function ZoomControls:update(game)
 end
 
 function ZoomControls:shouldShowButtons(game)
-    -- Show buttons if we've reached the threshold OR if the license is already unlocked
     return game.state.money >= self.C.ZOOM.BUTTONS_APPEAR_THRESHOLD or game.state.metro_license_unlocked
 end
 
@@ -92,11 +91,10 @@ function ZoomControls:draw(game)
     -- === Zoom Out Button ('+') LOGIC ===
     local can_afford_license = game.state.money >= C.ZOOM.METRO_LICENSE_COST
     local is_hovered_out = self.hovered_button == "zoom_out"
-    
-    -- MODIFIED: New logic to determine if the button should be enabled
-    local zoom_out_enabled = (current_scale == C.MAP.SCALES.CITY) or 
-                             (current_scale == C.MAP.SCALES.DOWNTOWN and game.state.metro_license_unlocked) or
-                             (current_scale == C.MAP.SCALES.DOWNTOWN and not game.state.metro_license_unlocked and can_afford_license)
+
+    -- Metro license gates downtown→city. City→region is always accessible.
+    local zoom_out_enabled = (current_scale == C.MAP.SCALES.DOWNTOWN and (game.state.metro_license_unlocked or can_afford_license)) or
+                             (current_scale == C.MAP.SCALES.CITY)
 
     love.graphics.setColor(0, 0, 0, 0.7 * transition_alpha)
     love.graphics.rectangle("fill", self.zoom_out_button.x, self.zoom_out_button.y, self.zoom_out_button.w, self.zoom_out_button.h)
@@ -128,7 +126,7 @@ function ZoomControls:draw(game)
     love.graphics.rectangle("line", self.zoom_in_button.x, self.zoom_in_button.y, self.zoom_in_button.w, self.zoom_in_button.h)
     love.graphics.printf("-", self.zoom_in_button.x, self.zoom_in_button.y + 7, self.zoom_in_button.w, "center")
     
-    -- Price indicator logic (this part is correct)
+    -- Price indicator: show metro license cost when in downtown view and not yet unlocked
     if current_scale == C.MAP.SCALES.DOWNTOWN and not game.state.metro_license_unlocked and game.state.money >= C.ZOOM.PRICE_REVEAL_THRESHOLD then
         love.graphics.setColor(1, 1, 0, transition_alpha)
         love.graphics.setFont(game.fonts.ui_small)
@@ -171,12 +169,17 @@ function ZoomControls:handle_click(x, y, game)
     
     -- === Zoom Out Button Click Logic ===
     if self:pointInButton(x, y, self.zoom_out_button) then
-        -- Case 1: In Downtown, license not owned, but can afford it.
-        if current_scale == C.MAP.SCALES.DOWNTOWN and not state.metro_license_unlocked and state.money >= C.ZOOM.METRO_LICENSE_COST then
-            game.EventBus:publish("ui_purchase_metro_license_clicked")
-            return true
-        -- Case 2: In Downtown and license is owned, OR in City view.
-        elseif (current_scale == C.MAP.SCALES.DOWNTOWN and state.metro_license_unlocked) or (current_scale == C.MAP.SCALES.CITY) then
+        -- Case 1: In Downtown - metro license gates zoom to city
+        if current_scale == C.MAP.SCALES.DOWNTOWN then
+            if state.metro_license_unlocked then
+                game.EventBus:publish("ui_zoom_out_clicked")
+                return true
+            elseif state.money >= C.ZOOM.METRO_LICENSE_COST then
+                game.EventBus:publish("ui_purchase_metro_license_clicked")
+                return true
+            end
+        -- Case 2: In City - free zoom to region
+        elseif current_scale == C.MAP.SCALES.CITY then
             game.EventBus:publish("ui_zoom_out_clicked")
             return true
         end

@@ -22,11 +22,13 @@ function love.load()
     end, "Constants Validation")
     
     -- Apply graphics configuration
+    local is_fullscreen = GameConfig.get("graphics", "fullscreen")
     love.window.setMode(
-        GameConfig.get("graphics", "window_width"),
-        GameConfig.get("graphics", "window_height"),
+        is_fullscreen and 0 or GameConfig.get("graphics", "window_width"),
+        is_fullscreen and 0 or GameConfig.get("graphics", "window_height"),
         {
-            fullscreen = GameConfig.get("graphics", "fullscreen"),
+            fullscreen = is_fullscreen,
+            fullscreentype = "desktop",
             vsync = GameConfig.get("graphics", "vsync")
         }
     )

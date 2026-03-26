@@ -159,23 +159,27 @@ function Map:setScale(new_scale)
         local downtown_center_y_grid = self.downtown_offset.y + (downtown_h / 2)
         
         Game.camera.x, Game.camera.y = self:getPixelCoords(downtown_center_x_grid, downtown_center_y_grid)
-        Game.camera.scale = game_world_w / ((downtown_w + 5) * self.C.MAP.TILE_SIZE)
+        local scale_w = game_world_w / ((downtown_w + 4) * self.C.MAP.TILE_SIZE)
+        local scale_h = screen_h   / ((downtown_h + 4) * self.C.MAP.TILE_SIZE)
+        Game.camera.scale = math.min(scale_w, scale_h)
         
     elseif new_scale == self.C.MAP.SCALES.CITY then
         local city_center_x_grid = grid_w / 2
         local city_center_y_grid = grid_h / 2
         Game.camera.x, Game.camera.y = self:getPixelCoords(city_center_x_grid, city_center_y_grid)
-        
-        local total_map_width_pixels = grid_w * self.C.MAP.TILE_SIZE
-        Game.camera.scale = game_world_w / total_map_width_pixels
+
+        local scale_w = game_world_w / (grid_w * self.C.MAP.TILE_SIZE)
+        local scale_h = screen_h   / (grid_h * self.C.MAP.TILE_SIZE)
+        Game.camera.scale = math.min(scale_w, scale_h)
 
     elseif new_scale == self.C.MAP.SCALES.REGION then
         local region_center_x_grid = grid_w / 2
         local region_center_y_grid = grid_h / 2
         Game.camera.x, Game.camera.y = target_map:getPixelCoords(region_center_x_grid, region_center_y_grid)
-        
-        local total_map_width_pixels = grid_w * self.C.MAP.TILE_SIZE
-        Game.camera.scale = game_world_w / total_map_width_pixels
+
+        local scale_w = game_world_w / (grid_w * self.C.MAP.TILE_SIZE)
+        local scale_h = screen_h   / (grid_h * self.C.MAP.TILE_SIZE)
+        Game.camera.scale = math.min(scale_w, scale_h)
     end
     
     if Game and Game.EventBus then

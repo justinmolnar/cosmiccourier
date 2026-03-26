@@ -82,8 +82,8 @@ function Vehicle:shouldDrawAtCurrentScale(game)
     local C_MAP = game.C.MAP
     
     if self.type == "bike" then
-        -- Bikes only show at downtown and city scales
-        return current_scale == C_MAP.SCALES.DOWNTOWN or current_scale == C_MAP.SCALES.CITY
+        -- Bikes only show at downtown scale
+        return current_scale == C_MAP.SCALES.DOWNTOWN
     elseif self.type == "truck" then
         -- Trucks show at all scales
         return true
@@ -96,6 +96,7 @@ function Vehicle:changeState(newState, game)
     if self.state and self.state.exit then
         self.state:exit(self, game)
     end
+    self.previous_state = self.state
     self.state = newState
     if self.state and self.state.enter then
         self.state:enter(self, game)
@@ -283,11 +284,12 @@ end
 function Vehicle:shouldUseAbstractedSimulation(game)
     local current_scale = game.state.current_map_scale
     local C_MAP = game.C.MAP
-    
-    if self.type == "bike" and current_scale == C_MAP.SCALES.REGION then
+
+    -- Bikes only run in detailed simulation when viewed in downtown
+    if self.type == "bike" and current_scale ~= C_MAP.SCALES.DOWNTOWN then
         return true
     end
-    
+
     return false
 end
 
