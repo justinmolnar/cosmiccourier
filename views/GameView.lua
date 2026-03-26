@@ -124,19 +124,24 @@ function GameView:drawLabGrid()
     if not Game.lab_grid then return end
     local grid = Game.lab_grid
     if not grid or #grid == 0 or not grid[1] then return end
-    
+
     local grid_h, grid_w = #grid, #grid[1]
     local screen_w, screen_h = love.graphics.getDimensions()
     local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
     local available_w, available_h = screen_w - sidebar_w, screen_h
-    
+
+    if not Game.lab_view then
+        Game.lab_view = { zoom = 1, pan_x = 0, pan_y = 0 }
+    end
+
     local tile_size_w = math.floor(available_w * 0.9 / grid_w)
     local tile_size_h = math.floor(available_h * 0.9 / grid_h)
-    local tile_size = math.max(4, math.min(tile_size_w, tile_size_h, 25))
-    
+    local base_tile_size = math.max(4, math.min(tile_size_w, tile_size_h, 25))
+    local tile_size = math.max(1, math.floor(base_tile_size * Game.lab_view.zoom))
+
     local total_grid_w, total_grid_h = grid_w * tile_size, grid_h * tile_size
-    local offset_x = sidebar_w + (available_w - total_grid_w) / 2
-    local offset_y = (available_h - total_grid_h) / 2
+    local offset_x = sidebar_w + (available_w - total_grid_w) / 2 + Game.lab_view.pan_x
+    local offset_y = (available_h - total_grid_h) / 2 + Game.lab_view.pan_y
     
     love.graphics.setColor(0.1, 0.1, 0.1, 0.8)
     love.graphics.rectangle("fill", offset_x - 10, offset_y - 40, total_grid_w + 20, total_grid_h + 50)
@@ -224,8 +229,8 @@ function GameView:drawLabGrid()
 
     love.graphics.setColor(1, 1, 1)
     love.graphics.setFont(Game.fonts.ui)
-    
-    local title = "Edge-Based Streets - Press 'H' for help"
+
+    local title = "Edge-Based Streets - Scroll to zoom, right-drag to pan, 'H' for help"
     if Game.show_flood_fill_regions then
         title = "FLOOD FILL REGIONS DEBUG - Press '6' to toggle"
     end

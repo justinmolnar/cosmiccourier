@@ -1,4 +1,6 @@
 function love.load()
+    love.math.setRandomSeed(os.time(), math.floor(os.clock() * 1000000))
+
     -- Initialize error handling first
     local ErrorService = require("services.ErrorService")
     ErrorService.initialize({
@@ -183,6 +185,10 @@ end
 
 function love.mousereleased(x, y, button)
     Game.input_controller:mousereleased(x, y, button)
+end
+
+function love.mousemoved(x, y, dx, dy)
+    Game.input_controller:mousemoved(x, y, dx, dy)
 end
 
 function love.textinput(text)

@@ -62,13 +62,16 @@ function WfcLabController:keypressed(key)
 
     if key == "w" or key == "e" then
         print("=== Testing WFC Grid Generation ===")
+        Game.lab_view = { zoom = 1, pan_x = 0, pan_y = 0 }
+        Game.debug_flood_fill_regions = nil
+        Game.show_flood_fill_regions = false
         local NewCityGenService = require("services.NewCityGenService")
-        local wfc_params = { 
-            width = (key == "w") and 32 or 64, 
-            height = (key == "w") and 24 or 48, 
+        local wfc_params = {
+            width = (key == "w") and 100 or 150,
+            height = (key == "w") and 100 or 150,
             use_wfc_for_zones = true,
-            use_recursive_streets = false, 
-            generate_arterials = false 
+            use_recursive_streets = false,
+            generate_arterials = false
         }
         local result = NewCityGenService.generateDetailedCity(wfc_params)
         if result and result.city_grid then
@@ -86,6 +89,9 @@ function WfcLabController:keypressed(key)
 
     if key == "1" or key == "2" or key == "3" then
         print("=== Testing Larger WFC Grid Generation ===")
+        Game.lab_view = { zoom = 1, pan_x = 0, pan_y = 0 }
+        Game.debug_flood_fill_regions = nil
+        Game.show_flood_fill_regions = false
         local NewCityGenService = require("services.NewCityGenService")
         local width, height
         if key == "1" then
@@ -176,10 +182,13 @@ function WfcLabController:keypressed(key)
 
     if key == "u" then
         print("=== Full Pipeline Test: Zones + Arterials + Streets ===")
+        Game.lab_view = { zoom = 1, pan_x = 0, pan_y = 0 }
+        Game.debug_flood_fill_regions = nil
+        Game.show_flood_fill_regions = false
         local NewCityGenService = require("services.NewCityGenService")
-        local full_params = { 
-            width = 48, 
-            height = 36, 
+        local full_params = {
+            width = 200,
+            height = 200,
             use_wfc_for_zones = true,
             use_recursive_streets = true,
             generate_arterials = true,
@@ -201,10 +210,11 @@ function WfcLabController:keypressed(key)
     if key == "c" then
         Game.lab_grid = nil
         Game.lab_zone_grid = nil
-        Game.arterial_control_paths = {} 
+        Game.arterial_control_paths = {}
         Game.smooth_highway_overlay_paths = {}
         Game.wfc_final_grid = nil
         Game.wfc_road_data = nil
+        Game.lab_view = { zoom = 1, pan_x = 0, pan_y = 0 }
         print("=== Cleared lab grid and all overlays ===")
     end
     

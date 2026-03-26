@@ -3,10 +3,12 @@
 
 function love.conf(t)
     t.window.title = "Logistics Idler"
-    t.window.width = 1280
-    t.window.height = 720
+    t.window.width = 0
+    t.window.height = 0
+    t.window.fullscreen = true
+    t.window.fullscreentype = "desktop"
     
-    t.console = true -- ADD THIS LINE to enable the console window
+    t.console = true
 
     -- We don't need the physics module for this game, so we can disable it
     -- to save a little memory.

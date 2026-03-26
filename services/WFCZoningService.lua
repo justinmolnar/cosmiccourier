@@ -274,10 +274,21 @@ function WFCZoningService._findBestDistrictLocation(grid, width, height, zone_ty
         table.insert(candidate_locations, {x = math.floor(width * 0.8), y = math.floor(height * 0.7)})
     end
     
+    -- Add random jitter to candidates so placement varies each run
+    local jitter_x = math.floor(width * 0.12)
+    local jitter_y = math.floor(height * 0.12)
+    for i, loc in ipairs(candidate_locations) do
+        candidate_locations[i] = {
+            x = math.max(1, math.min(width,  loc.x + love.math.random(-jitter_x, jitter_x))),
+            y = math.max(1, math.min(height, loc.y + love.math.random(-jitter_y, jitter_y)))
+        }
+    end
+
     -- Evaluate each candidate location
     for _, loc in ipairs(candidate_locations) do
         if WFCZoningService._canPlaceDistrictAt(grid, width, height, loc.x, loc.y, target_size) then
             local score = WFCZoningService._scoreDistrictLocation(grid, width, height, loc.x, loc.y, zone_type, downtown_x, downtown_y)
+                        + love.math.random() * 5  -- small random tiebreaker
             if score > best_score then
                 best_score = score
                 best_x, best_y = loc.x, loc.y
@@ -639,21 +650,19 @@ function WFCZoningService._generateConstrainedFineGrid(width, height, coarse_gri
 end
 
 function WFCZoningService._stampDowntownSquare(grid, width, height, center_x, center_y, downtown_w, downtown_h)
-    local half_w = math.floor(downtown_w / 2)
-    local half_h = math.floor(downtown_h / 2)
-    
+    -- Use the same bounds formula as BlockSubdivisionService and everywhere else
+    local x1 = math.floor((width - downtown_w) / 2) + 1
+    local y1 = math.floor((height - downtown_h) / 2) + 1
+    local x2 = x1 + downtown_w - 1
+    local y2 = y1 + downtown_h - 1
+
     local stamped_cells = 0
-    
-    for dy = -half_h, half_h do
-        for dx = -half_w, half_w do
-            local x, y = center_x + dx, center_y + dy
+
+    for y = y1, y2 do
+        for x = x1, x2 do
             if x >= 1 and x <= width and y >= 1 and y <= height then
-                -- CRITICAL FIX: Only stamp if the cell is not already "downtown"
-                -- This prevents overwriting when the zone grid is used later
-                if grid[y][x] ~= "downtown" then
-                    grid[y][x] = "downtown"
-                    stamped_cells = stamped_cells + 1
-                end
+                grid[y][x] = "downtown"
+                stamped_cells = stamped_cells + 1
             end
         end
     end

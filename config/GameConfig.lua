@@ -6,9 +6,9 @@ local DEFAULT_CONFIG = {
     -- Graphics settings
     graphics = {
         vsync = true,
-        fullscreen = false,
-        window_width = 1280,
-        window_height = 720,
+        fullscreen = true,
+        window_width = 1920,
+        window_height = 1080,
         camera_smoothing = true,
         particle_effects = true,
         screen_shake = true

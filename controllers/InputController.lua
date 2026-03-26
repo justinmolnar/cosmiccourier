@@ -27,6 +27,11 @@ function InputController:keypressed(key)
         end
     end
     
+    if key == "escape" then
+        love.event.quit()
+        return
+    end
+
     -- Handle debug menu toggle
     if key == "`" then
         self.debug_menu_controller:toggle()
@@ -80,14 +85,25 @@ end
 
 function InputController:mousewheelmoved(x, y)
     local mx, my = love.mouse.getPosition()
-    
+    local Game = self.game
+
+    -- Lab view zoom
+    if Game.lab_grid or Game.wfc_final_grid then
+        if not Game.lab_view then
+            Game.lab_view = { zoom = 1, pan_x = 0, pan_y = 0 }
+        end
+        local factor = y > 0 and 1.2 or (1 / 1.2)
+        Game.lab_view.zoom = math.max(0.25, math.min(20, Game.lab_view.zoom * factor))
+        return
+    end
+
     -- Check debug menu first, but only if mouse is over the menu
     if self.debug_menu_controller:isVisible() then
         if self.debug_menu_controller:handle_scroll(mx, my, y) then
             return
         end
     end
-    
+
     -- Handle UI scrolling if it exists
     if self.game.ui_manager and self.game.ui_manager.handle_scroll then
         self.game.ui_manager:handle_scroll(y)
@@ -95,6 +111,21 @@ function InputController:mousewheelmoved(x, y)
 end
 
 function InputController:mousepressed(x, y, button)
+    local Game = self.game
+
+    -- Lab view right-click drag
+    if (Game.lab_grid or Game.wfc_final_grid) and button == 2 then
+        if not Game.lab_view then
+            Game.lab_view = { zoom = 1, pan_x = 0, pan_y = 0 }
+        end
+        Game.lab_view.dragging = true
+        Game.lab_view.drag_start_x = x
+        Game.lab_view.drag_start_y = y
+        Game.lab_view.drag_start_pan_x = Game.lab_view.pan_x
+        Game.lab_view.drag_start_pan_y = Game.lab_view.pan_y
+        return
+    end
+
     -- Check debug menu first
     if self.debug_menu_controller:isVisible() then
         if self.debug_menu_controller:handle_mouse_down(x, y, button) then
@@ -129,10 +160,22 @@ function InputController:mousepressed(x, y, button)
 end
 
 function InputController:mousereleased(x, y, button)
+    if button == 2 and self.game.lab_view then
+        self.game.lab_view.dragging = false
+    end
+
     self.debug_menu_controller:handle_mouse_up(x, y, button)
-    
+
     if self.game.ui_manager and self.game.ui_manager.handle_mouse_up then
         self.game.ui_manager:handle_mouse_up(x, y, button)
+    end
+end
+
+function InputController:mousemoved(x, y, dx, dy)
+    local Game = self.game
+    if Game.lab_view and Game.lab_view.dragging then
+        Game.lab_view.pan_x = Game.lab_view.drag_start_pan_x + (x - Game.lab_view.drag_start_x)
+        Game.lab_view.pan_y = Game.lab_view.drag_start_pan_y + (y - Game.lab_view.drag_start_y)
     end
 end
 
