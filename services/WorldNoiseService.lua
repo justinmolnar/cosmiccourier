@@ -534,6 +534,7 @@ function WorldNoiseService.generate(w, h, p)
     -- Ocean and coast bands are rendered identically to the height view.
     local river_influence = math.max(1, p.river_influence or 30)
     local biome_colormap  = {}
+    local biome_data      = {}   -- hoisted so Pass 5 can reference it
     do
         local D4b = { {0,-1},{-1,0},{1,0},{0,1} }
         local wdist = {}
@@ -564,7 +565,7 @@ function WorldNoiseService.generate(w, h, p)
         end
 
         local lat_strength = p.latitude_strength or 0.7
-        local biome_data   = {}   -- flat array [i] = { name, temp, wet, is_river, is_lake }
+        -- biome_data declared above so Pass 5 can access it after this do..end
         for y = 1, h do
             biome_colormap[y] = {}
             local base       = (y - 1) * w
@@ -597,10 +598,185 @@ function WorldNoiseService.generate(w, h, p)
                 end
             end
         end
-        return { heightmap = heightmap, colormap = colormap,
-                 biome_colormap = biome_colormap, biome_data = biome_data }
+        -- biome_data now populated in outer scope; Pass 5 runs after this block
     end
 
+    -- Pass 5: City suitability map.
+    -- Combines elevation sweetspot, coast proximity, river proximity, and climate
+    -- into a per-cell [0,1] score.  Rendered as a colour ramp (grey→gold→green).
+    -- All weights and radii are sliders — no magic numbers baked in.
+    local suitability_colormap = {}
+    local raw_suit             = {}   -- hoisted so the return statement can reference it
+    do
+        local D4s = { {0,-1},{-1,0},{1,0},{0,1} }
+
+        -- Coast proximity BFS: seed from all cells at or below coast_max,
+        -- expand outward onto land.  Distance = cells from nearest coastline.
+        local suit_coast_radius = math.max(1, p.suit_coast_radius or 80)
+        local coast_dist = {}
+        do
+            local bq2, bqi2 = {}, 1
+            for i = 1, w * h do
+                if pre_ridge[i] <= p.coast_max then
+                    coast_dist[i] = 0
+                    bq2[#bq2 + 1] = i
+                end
+            end
+            while bqi2 <= #bq2 do
+                local ci  = bq2[bqi2]; bqi2 = bqi2 + 1
+                local nd  = coast_dist[ci] + 1
+                if nd <= suit_coast_radius then
+                    local cy2 = math.floor((ci - 1) / w) + 1
+                    local cx2 = (ci - 1) % w + 1
+                    for _, d in ipairs(D4s) do
+                        local nx2, ny2 = cx2 + d[1], cy2 + d[2]
+                        if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                            local ni = (ny2 - 1) * w + nx2
+                            if not coast_dist[ni] then
+                                coast_dist[ni] = nd
+                                bq2[#bq2 + 1] = ni
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- River proximity BFS: seed from painted (river/lake) cells.
+        local suit_river_radius = math.max(1, p.suit_river_radius or 60)
+        local rdist = {}
+        do
+            local bq3, bqi3 = {}, 1
+            for i = 1, w * h do
+                if painted[i] then
+                    rdist[i] = 0
+                    bq3[#bq3 + 1] = i
+                end
+            end
+            while bqi3 <= #bq3 do
+                local ci  = bq3[bqi3]; bqi3 = bqi3 + 1
+                local nd  = rdist[ci] + 1
+                if nd <= suit_river_radius then
+                    local cy2 = math.floor((ci - 1) / w) + 1
+                    local cx2 = (ci - 1) % w + 1
+                    for _, d in ipairs(D4s) do
+                        local nx2, ny2 = cx2 + d[1], cy2 + d[2]
+                        if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                            local ni = (ny2 - 1) * w + nx2
+                            if not rdist[ni] then
+                                rdist[ni] = nd
+                                bq3[#bq3 + 1] = ni
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Per-cell suitability score.
+        -- Rivers appear as sharp corridors (tight radius, quadratic decay).
+        -- Coast provides a broad baseline across the island perimeter.
+        -- Elevation declines gently toward highlands so river paths aren't killed.
+        -- Cells far from BOTH water sources get an isolation penalty near zero.
+        local suit_elev_weight    = p.suit_elev_weight    or 0.40
+        local suit_coast_weight   = p.suit_coast_weight   or 0.35
+        local suit_river_weight   = p.suit_river_weight   or 0.65
+        local suit_climate_weight = p.suit_climate_weight or 0.20
+
+        -- raw_suit declared above (hoisted)
+        for y = 1, h do
+            local base = (y - 1) * w
+            for x = 1, w do
+                local i     = base + x
+                local h_val = heightmap[y][x]
+                if h_val <= p.coast_max or h_val >= p.mountain_max then
+                    raw_suit[i] = 0
+                else
+                    -- Elevation: gentle quadratic decline from coast up to mountain.
+                    -- Using the full coast→mountain range so rivers in highlands still score.
+                    local rel = (h_val - p.coast_max) / math.max(0.001, p.mountain_max - p.coast_max)
+                    local elev_score = math.max(0, 1 - rel * rel) * suit_elev_weight
+
+                    -- Coast score: broad linear gradient inward from shore
+                    local cd          = coast_dist[i] or (suit_coast_radius + 1)
+                    local coast_score = math.max(0, 1 - cd / suit_coast_radius) * suit_coast_weight
+
+                    -- River score: TIGHT radius with QUADRATIC decay so rivers show
+                    -- as distinct narrow corridors of high suitability, not a blurry haze.
+                    local rd          = rdist[i] or (suit_river_radius + 1)
+                    local rf          = math.max(0, 1 - rd / suit_river_radius)
+                    local river_score = rf * rf * suit_river_weight   -- quadratic = sharp near river
+
+                    -- Climate: modifier 0.5 (hostile) → 1.0 (ideal temperate)
+                    local bd = biome_data[i]
+                    local climate_mod = 0.6
+                    if bd and not bd.is_river and not bd.is_lake then
+                        local t  = bd.temp
+                        local wt = bd.wet
+                        local dt = (t  - 0.50) / 0.30
+                        local dw = (wt - 0.42) / 0.25
+                        climate_mod = 0.5 + 0.5 * math.exp(-0.5 * dt * dt) * math.exp(-0.5 * dw * dw)
+                    end
+                    local climate_score = climate_mod * suit_climate_weight
+
+                    -- Additive: both river and coast contribute visibly
+                    local water = river_score + coast_score
+
+                    -- Isolation penalty: if far from both, collapse score toward 0
+                    local best_proximity = math.max(rf, math.max(0, 1 - cd / suit_coast_radius))
+                    local isolation = math.min(1, best_proximity / 0.15)
+
+                    raw_suit[i] = (water + elev_score + climate_score) * isolation
+                end
+            end
+        end
+
+        -- Normalize raw scores to [0,1] in place; raw_suit becomes suitability_scores
+        local max_suit = 0.0001
+        for i = 1, w * h do
+            if raw_suit[i] and raw_suit[i] > max_suit then max_suit = raw_suit[i] end
+        end
+        for i = 1, w * h do
+            raw_suit[i] = (raw_suit[i] or 0) / max_suit
+        end
+
+        -- Build colormap: water=ocean blue, land lerped grey→gold→green by score
+        for y = 1, h do
+            suitability_colormap[y] = {}
+            local base = (y - 1) * w
+            for x = 1, w do
+                local i     = base + x
+                local score = raw_suit[i]
+                local hv    = heightmap[y][x]
+                if hv <= p.ocean_max then
+                    suitability_colormap[y][x] = { 0.04, 0.08, 0.30 }
+                elseif hv <= p.coast_max then
+                    suitability_colormap[y][x] = { 0.10, 0.12, 0.38 }
+                elseif score < 0.5 then
+                    -- grey (0,0.5) → gold (0.5)
+                    local t = score * 2
+                    suitability_colormap[y][x] = {
+                        0.22 + t * (0.82 - 0.22),
+                        0.20 + t * (0.72 - 0.20),
+                        0.18 + t * (0.10 - 0.18),
+                    }
+                else
+                    -- gold (0.5) → bright green (1.0)
+                    local t = (score - 0.5) * 2
+                    suitability_colormap[y][x] = {
+                        0.82 + t * (0.10 - 0.82),
+                        0.72 + t * (0.85 - 0.72),
+                        0.10 + t * (0.20 - 0.10),
+                    }
+                end
+            end
+        end
+    end
+
+    return { heightmap = heightmap, colormap = colormap,
+             biome_colormap = biome_colormap, biome_data = biome_data,
+             suitability_colormap = suitability_colormap,
+             suitability_scores   = raw_suit }
 end
 
 return WorldNoiseService

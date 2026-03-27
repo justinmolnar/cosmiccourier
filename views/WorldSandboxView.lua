@@ -68,6 +68,35 @@ function WorldSandboxView:draw()
         love.graphics.printf("Press Generate →", sidebar_w, sh / 2 - 10, vw, "center")
     end
 
+    -- City markers (drawn in all view modes when cities are placed)
+    if wsc.city_locations and wsc.world_image then
+        local C  = self.game.C
+        local ts = C.MAP.TILE_SIZE
+        love.graphics.setScissor(sidebar_w, 0, vw, sh)
+        for _, city in ipairs(wsc.city_locations) do
+            -- Cell centre in world space
+            local wpx = (city.x - 0.5) * ts
+            local wpy = (city.y - 0.5) * ts
+            -- Screen coords
+            local sx = sidebar_w + vw / 2 + (wpx - wsc.camera.x) * wsc.camera.scale
+            local sy = sh / 2 + (wpy - wsc.camera.y) * wsc.camera.scale
+            if sx > sidebar_w and sx < sw and sy > 0 and sy < sh then
+                -- Drop shadow
+                love.graphics.setColor(0, 0, 0, 0.6)
+                love.graphics.circle("fill", sx + 1, sy + 1, 7)
+                -- Outer ring
+                love.graphics.setColor(0.10, 0.08, 0.04)
+                love.graphics.circle("fill", sx, sy, 7)
+                -- Gold fill
+                love.graphics.setColor(1.0, 0.85, 0.15)
+                love.graphics.circle("fill", sx, sy, 5.5)
+                -- Centre dot
+                love.graphics.setColor(0.15, 0.10, 0.02)
+                love.graphics.circle("fill", sx, sy, 2)
+            end
+        end
+    end
+
     -- Biome legend (biome view only)
     if wsc.world_image and wsc.view_mode == "biome" then
         local font      = self.game.fonts.ui_small

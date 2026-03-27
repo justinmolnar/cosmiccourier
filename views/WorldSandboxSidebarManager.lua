@@ -15,16 +15,17 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.game = game
 
     -- Accordions
-    inst.world_acc       = Accordion:new("World",           true,  172)
-    inst.continental_acc = Accordion:new("Continental",     true,  110)
-    inst.terrain_acc     = Accordion:new("Terrain",         true,  175)
-    inst.detail_acc      = Accordion:new("Mountains & Detail", false, 276)
-    inst.biomes_acc      = Accordion:new("Biome Heights",   false, 240)
-    inst.actions_acc     = Accordion:new("Actions",         true,  190)
+    inst.world_acc        = Accordion:new("World",              true,  172)
+    inst.continental_acc  = Accordion:new("Continental",        true,  110)
+    inst.terrain_acc      = Accordion:new("Terrain",            true,  175)
+    inst.detail_acc       = Accordion:new("Mountains & Detail", false, 276)
+    inst.biomes_acc       = Accordion:new("Biome Heights",      false, 240)
+    inst.suitability_acc  = Accordion:new("Suitability",        false, 240)
+    inst.actions_acc      = Accordion:new("Actions",            true,  190)
 
     inst.accordions = {
         inst.world_acc, inst.continental_acc, inst.terrain_acc,
-        inst.detail_acc, inst.biomes_acc, inst.actions_acc,
+        inst.detail_acc, inst.biomes_acc, inst.suitability_acc, inst.actions_acc,
     }
 
     local p = wsc.params
@@ -92,21 +93,36 @@ function WorldSandboxSidebarManager:new(wsc, game)
         make_biome_slider("Mountain",    "mountain_max",   nil),
     }
 
-    -- Panel widget lists aligned with accordions (index 6 = actions, handled directly)
+    -- Suitability sliders
+    inst.suitability_sliders = {
+        Slider:new("Coast Radius",   0,   200,  p.suit_coast_radius,   true,  function(v) wsc.params.suit_coast_radius   = v end, game),
+        Slider:new("River Radius",   0,   80,   p.suit_river_radius,   true,  function(v) wsc.params.suit_river_radius   = v end, game),
+        Slider:new("Elev. Weight",   0,   1,    p.suit_elev_weight,    false, function(v) wsc.params.suit_elev_weight    = v end, game),
+        Slider:new("Coast Weight",   0,   1,    p.suit_coast_weight,   false, function(v) wsc.params.suit_coast_weight   = v end, game),
+        Slider:new("River Weight",   0,   1,    p.suit_river_weight,   false, function(v) wsc.params.suit_river_weight   = v end, game),
+        Slider:new("Climate Weight", 0,   1,    p.suit_climate_weight, false, function(v) wsc.params.suit_climate_weight = v end, game),
+        Slider:new("City Count",     1,   50,   p.city_count,          true,  function(v) wsc.params.city_count          = v end, game),
+        Slider:new("City Spacing",   5,   100,  p.city_min_sep,        true,  function(v) wsc.params.city_min_sep        = v end, game),
+    }
+
+    -- Panel widget lists aligned with accordions (index 7 = actions, handled directly)
     inst.panel_widgets = {
         inst.world_sliders,
         inst.continental_sliders,
         inst.terrain_sliders,
         inst.detail_sliders,
         inst.biome_sliders,
+        inst.suitability_sliders,
         {},
     }
 
     -- Action button rects (set in _doLayout)
-    inst.btn_randomize   = { x = 0, y = 0, w = 0, h = 34 }
-    inst.btn_generate    = { x = 0, y = 0, w = 0, h = 38 }
-    inst.btn_view_height = { x = 0, y = 0, w = 0, h = 32 }
-    inst.btn_view_biome  = { x = 0, y = 0, w = 0, h = 32 }
+    inst.btn_randomize    = { x = 0, y = 0, w = 0, h = 34 }
+    inst.btn_generate     = { x = 0, y = 0, w = 0, h = 38 }
+    inst.btn_view_height  = { x = 0, y = 0, w = 0, h = 32 }
+    inst.btn_view_biome   = { x = 0, y = 0, w = 0, h = 32 }
+    inst.btn_view_suit    = { x = 0, y = 0, w = 0, h = 32 }
+    inst.btn_place_cities = { x = 0, y = 0, w = 0, h = 34 }
 
     return inst
 end
@@ -124,10 +140,11 @@ function WorldSandboxSidebarManager:_doLayout()
     for i, acc in ipairs(self.accordions) do
         local panel = self.panel_widgets[i]
         local total_h = 4
-        if i == 6 then
-            -- Actions: four buttons + spacing
+        if i == 7 then
+            -- Actions: six buttons + spacing
             total_h = self.btn_randomize.h + self.btn_generate.h
-                    + self.btn_view_height.h + self.btn_view_biome.h + 36
+                    + self.btn_view_height.h + self.btn_view_biome.h + self.btn_view_suit.h
+                    + self.btn_place_cities.h + 60
         else
             for _, w in ipairs(panel) do
                 total_h = total_h + w.h
@@ -150,7 +167,7 @@ function WorldSandboxSidebarManager:_doLayout()
 
     -- Position widgets inside open accordions
     for i, acc in ipairs(self.accordions) do
-        if i == 6 then break end
+        if i == 7 then break end
         local panel = self.panel_widgets[i]
         local wy    = acc.y + acc.header_h
         for _, w in ipairs(panel) do
@@ -162,10 +179,10 @@ function WorldSandboxSidebarManager:_doLayout()
     end
 
     -- Actions accordion buttons
-    local aa  = self.actions_acc
-    local bx  = pad
-    local btn_y = aa.y + aa.header_h + 6
-    local half_w = math.floor((ww - 4) / 2)
+    local aa     = self.actions_acc
+    local bx     = pad
+    local btn_y  = aa.y + aa.header_h + 6
+    local third_w = math.floor((ww - 8) / 3)
     self.btn_randomize.x = bx
     self.btn_randomize.y = btn_y
     self.btn_randomize.w = ww
@@ -175,10 +192,17 @@ function WorldSandboxSidebarManager:_doLayout()
     local view_y = self.btn_generate.y + self.btn_generate.h + 10
     self.btn_view_height.x = bx
     self.btn_view_height.y = view_y
-    self.btn_view_height.w = half_w
-    self.btn_view_biome.x  = bx + half_w + 4
+    self.btn_view_height.w = third_w
+    self.btn_view_biome.x  = bx + third_w + 4
     self.btn_view_biome.y  = view_y
-    self.btn_view_biome.w  = half_w
+    self.btn_view_biome.w  = third_w
+    self.btn_view_suit.x   = bx + (third_w + 4) * 2
+    self.btn_view_suit.y   = view_y
+    self.btn_view_suit.w   = third_w
+    local city_y = view_y + self.btn_view_height.h + 8
+    self.btn_place_cities.x = bx
+    self.btn_place_cities.y = city_y
+    self.btn_place_cities.w = ww
 end
 
 -- ── Draw ─────────────────────────────────────────────────────────────────────
@@ -223,11 +247,14 @@ function WorldSandboxSidebarManager:draw()
     for i, acc in ipairs(self.accordions) do
         acc:beginDraw()
         if acc.is_open then
-            if i == 6 then
-                draw_button(self.btn_randomize,   "Randomize Seed", false, game)
-                draw_button(self.btn_generate,    "Generate",       true,  game)
-                draw_button(self.btn_view_height, "Height",  self.wsc.view_mode == "height", game)
-                draw_button(self.btn_view_biome,  "Biome",   self.wsc.view_mode == "biome",  game)
+            if i == 7 then
+                draw_button(self.btn_randomize,   "Randomize Seed",  false, game)
+                draw_button(self.btn_generate,    "Generate",        true,  game)
+                draw_button(self.btn_view_height, "Height",     self.wsc.view_mode == "height",      game)
+                draw_button(self.btn_view_biome,  "Biome",      self.wsc.view_mode == "biome",       game)
+                draw_button(self.btn_view_suit,   "Suitability",self.wsc.view_mode == "suitability", game)
+                local has_suit = self.wsc.suitability_scores ~= nil
+                draw_button(self.btn_place_cities, "Place Cities", has_suit and self.wsc.city_locations ~= nil, game)
             else
                 for _, w in ipairs(self.panel_widgets[i]) do
                     w:draw()
@@ -278,11 +305,19 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
             self.wsc:set_view("biome")
             return true
         end
+        if point_in_rect(x, sy, self.btn_view_suit) then
+            self.wsc:set_view("suitability")
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_place_cities) and self.wsc.suitability_scores then
+            self.wsc:place_cities()
+            return true
+        end
     end
 
     -- 4. Widgets in open accordions
     for i, acc in ipairs(self.accordions) do
-        if i == 6 then break end
+        if i == 7 then break end
         if acc.is_open then
             local content_top    = acc.y + acc.header_h
             local content_bottom = content_top + acc.content_h
@@ -304,7 +339,7 @@ function WorldSandboxSidebarManager:handle_mouse_up(x, y, button)
     for _, acc in ipairs(self.accordions) do
         acc:handle_mouse_up(x, y, button)
     end
-    for i = 1, 5 do
+    for i = 1, 6 do
         for _, w in ipairs(self.panel_widgets[i]) do
             if w.handle_mouse_up then w:handle_mouse_up(x, y, button) end
         end
@@ -313,7 +348,7 @@ end
 
 function WorldSandboxSidebarManager:handle_mouse_moved(x, y, dx, dy)
     local _, my = love.mouse.getPosition()
-    for i = 1, 5 do
+    for i = 1, 6 do
         for _, w in ipairs(self.panel_widgets[i]) do
             if w.handle_mouse_moved then w:handle_mouse_moved(x, my, dx, dy) end
         end

@@ -14,11 +14,14 @@ function WorldSandboxController:new(game)
     inst.camera_drag_sx  = 0
     inst.camera_drag_sy  = 0
 
-    inst.heightmap      = nil
-    inst.colormap       = nil
-    inst.biome_colormap = nil
-    inst.biome_data     = nil
-    inst.world_image    = nil
+    inst.heightmap             = nil
+    inst.colormap              = nil
+    inst.biome_colormap        = nil
+    inst.biome_data            = nil
+    inst.suitability_colormap  = nil
+    inst.suitability_scores    = nil
+    inst.city_locations        = nil
+    inst.world_image           = nil
     inst.world_w        = 0
     inst.world_h        = 0
     inst.view_mode      = "height"   -- "height" | "biome"
@@ -62,6 +65,16 @@ function WorldSandboxController:new(game)
         lake_delta       = 0.010, -- slider 0-0.05: how far above a pit floor cells are included in the lake basin
         river_influence  = 50,   -- slider 0-100: BFS radius (cells) that rivers fertilize in biome view
         latitude_strength = 0.7, -- slider 0-1: how strongly latitude (north/south position) drives temperature
+        -- Suitability mapping (city placement scoring)
+        suit_coast_radius   = 80,  -- slider 0-200: coast proximity radius (cells)
+        suit_river_radius   = 20,  -- slider 0-80:  river corridor radius (keep tight for distinct corridors)
+        suit_elev_weight    = 0.40, -- slider 0-1: elevation score weight
+        suit_coast_weight   = 0.35, -- slider 0-1: coast proximity weight
+        suit_river_weight   = 0.65, -- slider 0-1: river proximity weight (rivers are primary)
+        suit_climate_weight = 0.20, -- slider 0-1: climate modifier weight
+        -- City placement
+        city_count   = 12, -- slider 1-50: how many cities to place
+        city_min_sep = 30, -- slider 5-100: minimum cell distance between cities
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
@@ -117,12 +130,15 @@ function WorldSandboxController:generate()
     end)
 
     if ok then
-        self.heightmap      = result.heightmap
-        self.colormap       = result.colormap
-        self.biome_colormap = result.biome_colormap
-        self.biome_data     = result.biome_data
-        self.world_w        = w
-        self.world_h        = h
+        self.heightmap            = result.heightmap
+        self.colormap             = result.colormap
+        self.biome_colormap       = result.biome_colormap
+        self.biome_data           = result.biome_data
+        self.suitability_colormap = result.suitability_colormap
+        self.suitability_scores   = result.suitability_scores
+        self.city_locations       = nil   -- cleared on each regenerate
+        self.world_w              = w
+        self.world_h              = h
         self:_buildImage()
         self:_centerCamera()
         self.status_text = string.format("Generated %dx%d  |  F8 close  |  RMB pan  |  Wheel zoom", w, h)
@@ -132,7 +148,9 @@ function WorldSandboxController:generate()
 end
 
 function WorldSandboxController:_buildImage()
-    local active = (self.view_mode == "biome" and self.biome_colormap) or self.colormap
+    local active = (self.view_mode == "biome"        and self.biome_colormap)
+               or  (self.view_mode == "suitability"  and self.suitability_colormap)
+               or   self.colormap
     local imgdata = love.image.newImageData(self.world_w, self.world_h)
     for y = 1, self.world_h do
         for x = 1, self.world_w do
@@ -147,6 +165,45 @@ end
 function WorldSandboxController:set_view(mode)
     self.view_mode = mode
     if self.colormap then self:_buildImage() end
+end
+
+function WorldSandboxController:place_cities()
+    if not self.suitability_scores then return end
+    local count   = math.max(1, math.floor(self.params.city_count  or 12))
+    local min_sep = math.max(1, math.floor(self.params.city_min_sep or 30))
+    local w, h    = self.world_w, self.world_h
+    local scores  = self.suitability_scores
+
+    -- Build sorted candidate list (land cells with non-zero score)
+    local candidates = {}
+    for i = 1, w * h do
+        local s = scores[i] or 0
+        if s > 0 then
+            candidates[#candidates + 1] = {
+                i = i,
+                x = (i - 1) % w + 1,
+                y = math.floor((i - 1) / w) + 1,
+                s = s,
+            }
+        end
+    end
+    table.sort(candidates, function(a, b) return a.s > b.s end)
+
+    -- Greedy selection: pick highest scorer, suppress cells within min_sep
+    local cities = {}
+    local min_sep_sq = min_sep * min_sep
+    for _, c in ipairs(candidates) do
+        local ok = true
+        for _, city in ipairs(cities) do
+            local dx, dy = c.x - city.x, c.y - city.y
+            if dx * dx + dy * dy < min_sep_sq then ok = false; break end
+        end
+        if ok then
+            cities[#cities + 1] = c
+            if #cities >= count then break end
+        end
+    end
+    self.city_locations = cities
 end
 
 function WorldSandboxController:_centerCamera()
