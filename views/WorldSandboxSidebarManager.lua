@@ -69,6 +69,7 @@ function WorldSandboxSidebarManager:new(wsc, game)
         Slider:new("Meander",       0,     0.15,  p.meander_strength,   false, function(v) wsc.params.meander_strength  = v end, game),
         Slider:new("Lake Size",     0,     0.05,  p.lake_delta,         false, function(v) wsc.params.lake_delta        = v end, game),
         Slider:new("River Influence", 0,  100,   p.river_influence,    true,  function(v) wsc.params.river_influence   = v end, game),
+        Slider:new("Latitude Str.",  0,  1,     p.latitude_strength,  false, function(v) wsc.params.latitude_strength = v end, game),
     }
 
     -- Biome threshold sliders (enforce ascending order in on_change).

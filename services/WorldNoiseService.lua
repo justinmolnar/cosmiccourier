@@ -46,27 +46,99 @@ local function edge_mask(x, y, w, h, margin)
     return fx * fy
 end
 
--- Biome colors influenced by water proximity.
--- fertility=1 near rivers/lakes (lush), fertility=0 far away (arid).
--- Ocean/coast bands are unchanged; land blends between arid and fertile anchors.
-local function biome_color_fertile(h, fertility, p)
+-- Biome name — mirrors biome_color_climate exactly, returns string label.
+local function biome_name_climate(h, temp, wet, p)
+    if h < p.deep_ocean_max then return "Deep Ocean" end
+    if h < p.ocean_max      then return "Ocean" end
+    if h < p.coast_max      then return "Beach" end
+    if h >= p.mountain_max  then return "Snow Cap" end
+    if h >= p.highland_max  then
+        if temp < 0.25 then return "Frozen Rock" end
+        return "Mountain Rock"
+    end
+    if h >= p.forest_max then
+        if temp < 0.22 then return "Cold Highland" end
+        if temp < 0.45 then return "Boreal Highland" end
+        return "Highland"
+    end
+    if h < p.plains_max and wet > 0.72 and temp > 0.35 then
+        if temp > 0.62 then return "Tropical Swamp" end
+        return "Swamp"
+    end
+    if temp < 0.22 then
+        if wet > 0.50 then return "Boreal / Taiga" end
+        return "Tundra"
+    elseif temp < 0.45 then
+        if wet > 0.60 then return "Temp. Rainforest" end
+        if wet > 0.35 then return "Temp. Forest" end
+        if wet > 0.15 then return "Grassland" end
+        return "Shrubland"
+    elseif temp < 0.68 then
+        if wet > 0.60 then return "Subtropical Forest" end
+        if wet > 0.35 then return "Woodland" end
+        if wet > 0.15 then return "Savanna" end
+        return "Semi-arid"
+    else
+        if wet > 0.55 then return "Jungle" end
+        if wet > 0.30 then return "Tropical Forest" end
+        if wet > 0.12 then return "Tropical Savanna" end
+        return "Desert"
+    end
+end
+
+-- Climate-based biome colors.
+-- temp: 0=arctic, 1=tropical (latitude + elevation)
+-- wet:  0=desert, 1=swamp/jungle (water proximity + moisture noise)
+local function biome_color_climate(h, temp, wet, p)
     if h < p.deep_ocean_max then return { 0.04, 0.08, 0.30 } end
     if h < p.ocean_max      then return { 0.07, 0.15, 0.45 } end
-    if h < p.coast_max      then return { 0.76, 0.70, 0.48 } end
-    local f = fertility
-    if h < p.plains_max then
-        -- arid: dry tan/yellow   fertile: lush grassland
-        return { 0.72 - f*0.44, 0.58 + f*0.10, 0.22 - f*0.04 }
-    elseif h < p.forest_max then
-        -- arid: scrubland olive  fertile: dense forest green
-        return { 0.50 - f*0.36, 0.42 + f*0.04, 0.16 - f*0.06 }
-    elseif h < p.highland_max then
-        -- arid: barren brown     fertile: highland meadow
-        return { 0.48 - f*0.10, 0.38 + f*0.10, 0.20 + f*0.06 }
-    elseif h < p.mountain_max then
+    if h < p.coast_max      then return { 0.76, 0.70, 0.48 } end  -- beach
+
+    -- Snow caps (elevation always wins)
+    if h >= p.mountain_max then return { 0.88, 0.90, 0.95 } end
+
+    -- Mountain rock
+    if h >= p.highland_max then
+        if temp < 0.25 then return { 0.65, 0.66, 0.70 } end  -- frozen rock
         return { 0.52, 0.48, 0.42 }
+    end
+
+    -- Highlands / uplands
+    if h >= p.forest_max then
+        if temp < 0.22 then return { 0.58, 0.62, 0.55 } end  -- cold tundra highland
+        if temp < 0.45 then return { 0.30, 0.42, 0.24 } end  -- boreal highland
+        return { 0.40, 0.44, 0.26 }                           -- dry highland
+    end
+
+    -- Swamp: low elevation + very wet + warm enough
+    if h < p.plains_max and wet > 0.72 and temp > 0.35 then
+        if temp > 0.62 then return { 0.18, 0.26, 0.12 } end  -- tropical swamp
+        return { 0.22, 0.30, 0.16 }                           -- temperate swamp
+    end
+
+    -- Land biome matrix: temperature × wetness
+    if temp < 0.22 then
+        -- Arctic
+        if wet > 0.50 then return { 0.22, 0.38, 0.24 } end   -- boreal/taiga
+        return { 0.60, 0.64, 0.52 }                           -- tundra
+    elseif temp < 0.45 then
+        -- Cold temperate
+        if wet > 0.60 then return { 0.18, 0.40, 0.16 } end   -- temperate rainforest
+        if wet > 0.35 then return { 0.24, 0.46, 0.18 } end   -- temperate forest
+        if wet > 0.15 then return { 0.42, 0.58, 0.22 } end   -- grassland
+        return { 0.52, 0.46, 0.24 }                           -- shrubland
+    elseif temp < 0.68 then
+        -- Warm temperate
+        if wet > 0.60 then return { 0.16, 0.44, 0.12 } end   -- subtropical forest
+        if wet > 0.35 then return { 0.34, 0.54, 0.20 } end   -- woodland
+        if wet > 0.15 then return { 0.65, 0.60, 0.24 } end   -- savanna
+        return { 0.76, 0.64, 0.32 }                           -- semi-arid
     else
-        return { 0.88, 0.90, 0.95 }
+        -- Tropical
+        if wet > 0.55 then return { 0.08, 0.30, 0.06 } end   -- jungle
+        if wet > 0.30 then return { 0.20, 0.48, 0.12 } end   -- tropical forest
+        if wet > 0.12 then return { 0.68, 0.62, 0.22 } end   -- tropical savanna
+        return { 0.80, 0.66, 0.28 }                           -- desert
     end
 end
 
@@ -123,11 +195,13 @@ function WorldNoiseService.generate(w, h, p)
     local range = max_h - min_h
     if range < 0.0001 then range = 0.0001 end
 
-    local colormap  = {}
-    local pre_ridge = {}   -- flat 1-D array of smooth heights (before mountain overlay)
+    local colormap    = {}
+    local pre_ridge   = {}   -- flat 1-D array of smooth heights (before mountain overlay)
+    local moisture_map = {}  -- [y][x] moisture value, reused in Pass 4 for climate biomes
 
     for y = 1, h do
-        colormap[y] = {}
+        colormap[y]     = {}
+        moisture_map[y] = {}
         local base = (y - 1) * w
         for x = 1, w do
             local norm = (heightmap[y][x] - min_h) / range
@@ -154,6 +228,7 @@ function WorldNoiseService.generate(w, h, p)
 
             heightmap[y][x] = norm
             local moisture = fbm(x, y, p.moisture_scale, p.moisture_octaves, 0.5, 2.0, sx + 5000, sy + 5000)
+            moisture_map[y][x] = moisture
             colormap[y][x] = biome_color(norm, moisture, p)
         end
     end
@@ -488,23 +563,44 @@ function WorldNoiseService.generate(w, h, p)
             end
         end
 
+        local lat_strength = p.latitude_strength or 0.7
+        local biome_data   = {}   -- flat array [i] = { name, temp, wet, is_river, is_lake }
         for y = 1, h do
             biome_colormap[y] = {}
-            local base = (y - 1) * w
+            local base       = (y - 1) * w
+            -- lat_factor 0 = top of map (north/cold), 1 = bottom (south/warm)
+            local lat_factor = (y - 1) / math.max(1, h - 1)
             for x = 1, w do
                 local i = base + x
                 if painted[i] then
+                    local is_r = not is_lake[i]
                     biome_colormap[y][x] = is_lake[i] and LAKE_COLOR or RIVER_COLOR
+                    biome_data[i] = { name = is_r and "River" or "Lake", temp = 0, wet = 1,
+                                      is_river = is_r, is_lake = is_lake[i] }
                 else
-                    local dist    = wdist[i] or (river_influence + 1)
-                    local fert    = math.max(0, 1 - dist / river_influence)
-                    biome_colormap[y][x] = biome_color_fertile(heightmap[y][x], fert, p)
+                    local h_val  = heightmap[y][x]
+                    local dist   = wdist[i] or (river_influence + 1)
+                    local fert   = math.max(0, 1 - dist / river_influence)
+                    local moist  = moisture_map[y][x]
+                    -- Temperature: latitude sets base warmth; elevation cools
+                    local temp_base = lat_factor * lat_strength + 0.5 * (1 - lat_strength)
+                    local elev_t = 0
+                    if h_val > p.coast_max then
+                        elev_t = (h_val - p.coast_max) / (1.0 - p.coast_max)
+                    end
+                    local temp = math.max(0, math.min(1, temp_base - elev_t * 0.4))
+                    -- Wetness: water proximity (fertility) blended with moisture noise
+                    local wet = math.max(0, math.min(1, fert * 0.7 + moist * 0.3))
+                    biome_colormap[y][x] = biome_color_climate(h_val, temp, wet, p)
+                    biome_data[i] = { name = biome_name_climate(h_val, temp, wet, p),
+                                      temp = temp, wet = wet, is_river = false, is_lake = false }
                 end
             end
         end
+        return { heightmap = heightmap, colormap = colormap,
+                 biome_colormap = biome_colormap, biome_data = biome_data }
     end
 
-    return { heightmap = heightmap, colormap = colormap, biome_colormap = biome_colormap }
 end
 
 return WorldNoiseService

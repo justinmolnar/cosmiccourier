@@ -17,6 +17,7 @@ function WorldSandboxController:new(game)
     inst.heightmap      = nil
     inst.colormap       = nil
     inst.biome_colormap = nil
+    inst.biome_data     = nil
     inst.world_image    = nil
     inst.world_w        = 0
     inst.world_h        = 0
@@ -60,6 +61,7 @@ function WorldSandboxController:new(game)
         meander_strength = 0.08,  -- slider 0-0.15: noise perturbation added to flow heights to create winding paths
         lake_delta       = 0.010, -- slider 0-0.05: how far above a pit floor cells are included in the lake basin
         river_influence  = 50,   -- slider 0-100: BFS radius (cells) that rivers fertilize in biome view
+        latitude_strength = 0.7, -- slider 0-1: how strongly latitude (north/south position) drives temperature
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
@@ -118,6 +120,7 @@ function WorldSandboxController:generate()
         self.heightmap      = result.heightmap
         self.colormap       = result.colormap
         self.biome_colormap = result.biome_colormap
+        self.biome_data     = result.biome_data
         self.world_w        = w
         self.world_h        = h
         self:_buildImage()

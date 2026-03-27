@@ -4,6 +4,35 @@
 local WorldSandboxView = {}
 WorldSandboxView.__index = WorldSandboxView
 
+-- Biome legend entries: { label, r, g, b }
+local BIOME_LEGEND = {
+    { "Deep Ocean",        0.04, 0.08, 0.30 },
+    { "Ocean",             0.07, 0.15, 0.45 },
+    { "Beach",             0.76, 0.70, 0.48 },
+    { "Tundra",            0.60, 0.64, 0.52 },
+    { "Boreal / Taiga",    0.22, 0.38, 0.24 },
+    { "Temp. Forest",      0.24, 0.46, 0.18 },
+    { "Temp. Rainforest",  0.18, 0.40, 0.16 },
+    { "Grassland",         0.42, 0.58, 0.22 },
+    { "Shrubland",         0.52, 0.46, 0.24 },
+    { "Subtropical Forest",0.16, 0.44, 0.12 },
+    { "Woodland",          0.34, 0.54, 0.20 },
+    { "Savanna",           0.65, 0.60, 0.24 },
+    { "Semi-arid",         0.76, 0.64, 0.32 },
+    { "Jungle",            0.08, 0.30, 0.06 },
+    { "Trop. Forest",      0.20, 0.48, 0.12 },
+    { "Trop. Savanna",     0.68, 0.62, 0.22 },
+    { "Desert",            0.80, 0.66, 0.28 },
+    { "Swamp",             0.22, 0.30, 0.16 },
+    { "Trop. Swamp",       0.18, 0.26, 0.12 },
+    { "Highland",          0.40, 0.44, 0.26 },
+    { "Frozen Rock",       0.65, 0.66, 0.70 },
+    { "Mountain Rock",     0.52, 0.48, 0.42 },
+    { "Snow Cap",          0.88, 0.90, 0.95 },
+    { "River",             0.22, 0.52, 0.88 },
+    { "Lake",              0.07, 0.20, 0.55 },
+}
+
 function WorldSandboxView:new(game)
     local inst = setmetatable({}, WorldSandboxView)
     inst.game = game
@@ -37,6 +66,104 @@ function WorldSandboxView:draw()
         love.graphics.setColor(0.4, 0.4, 0.5)
         love.graphics.setFont(self.game.fonts.ui)
         love.graphics.printf("Press Generate →", sidebar_w, sh / 2 - 10, vw, "center")
+    end
+
+    -- Biome legend (biome view only)
+    if wsc.world_image and wsc.view_mode == "biome" then
+        local font      = self.game.fonts.ui_small
+        local row_h     = 14
+        local swatch_w  = 10
+        local pad       = 6
+        local col_w     = 130
+        local cols      = 2
+        local rows      = math.ceil(#BIOME_LEGEND / cols)
+        local panel_w   = cols * col_w + pad * 2
+        local panel_h   = rows * row_h + pad * 2 + 14  -- +14 for title
+        local lx        = sw - panel_w - 4
+        local ly        = sh - 22 - panel_h - 4
+        love.graphics.setScissor()
+        love.graphics.setColor(0, 0, 0, 0.72)
+        love.graphics.rectangle("fill", lx, ly, panel_w, panel_h, 3, 3)
+        love.graphics.setColor(0.35, 0.35, 0.50)
+        love.graphics.rectangle("line", lx, ly, panel_w, panel_h, 3, 3)
+        love.graphics.setColor(0.7, 0.8, 1.0)
+        love.graphics.setFont(font)
+        love.graphics.printf("BIOMES", lx, ly + 3, panel_w, "center")
+        for idx, entry in ipairs(BIOME_LEGEND) do
+            local col = (idx - 1) % cols
+            local row = math.floor((idx - 1) / cols)
+            local ex  = lx + pad + col * col_w
+            local ey  = ly + 14 + pad + row * row_h
+            love.graphics.setColor(entry[2], entry[3], entry[4])
+            love.graphics.rectangle("fill", ex, ey + 1, swatch_w, swatch_w)
+            love.graphics.setColor(0.6, 0.6, 0.6)
+            love.graphics.rectangle("line", ex, ey + 1, swatch_w, swatch_w)
+            love.graphics.setColor(0.88, 0.88, 0.88)
+            love.graphics.print(entry[1], ex + swatch_w + 3, ey)
+        end
+    end
+
+    -- Hover tooltip
+    if wsc.world_image and wsc.heightmap then
+        local mx, my = love.mouse.getPosition()
+        if mx > sidebar_w and mx < sw and my > 0 and my < sh - 22 then
+            local C   = self.game.C
+            local ts  = C.MAP.TILE_SIZE
+            -- Convert screen → world cell
+            local wpx = wsc.camera.x + (mx - sidebar_w - vw / 2) / wsc.camera.scale
+            local wpy = wsc.camera.y + (my - sh / 2) / wsc.camera.scale
+            local cx  = math.floor(wpx / ts) + 1
+            local cy  = math.floor(wpy / ts) + 1
+            if cx >= 1 and cx <= wsc.world_w and cy >= 1 and cy <= wsc.world_h then
+                local elev = wsc.heightmap[cy][cx]
+                local bd   = wsc.biome_data and wsc.biome_data[(cy - 1) * wsc.world_w + cx]
+                local font = self.game.fonts.ui_small
+                -- Build tooltip lines
+                local lines = {}
+                if bd then
+                    lines[#lines + 1] = bd.name
+                else
+                    -- height view: derive basic biome from elevation
+                    local p = wsc.params
+                    if elev < p.deep_ocean_max then lines[#lines + 1] = "Deep Ocean"
+                    elseif elev < p.ocean_max  then lines[#lines + 1] = "Ocean"
+                    elseif elev < p.coast_max  then lines[#lines + 1] = "Beach"
+                    elseif elev < p.plains_max then lines[#lines + 1] = "Plains"
+                    elseif elev < p.forest_max then lines[#lines + 1] = "Forest"
+                    elseif elev < p.highland_max then lines[#lines + 1] = "Highland"
+                    elseif elev < p.mountain_max then lines[#lines + 1] = "Mountain"
+                    else lines[#lines + 1] = "Snow Cap" end
+                end
+                lines[#lines + 1] = string.format("Elevation:  %.2f", elev)
+                if bd and not bd.is_river and not bd.is_lake then
+                    local t = bd.temp
+                    local tl = t < 0.22 and "arctic" or t < 0.45 and "cold" or t < 0.68 and "warm" or "tropical"
+                    lines[#lines + 1] = string.format("Temp:       %.2f  (%s)", t, tl)
+                    local wt = bd.wet
+                    local wl = wt < 0.12 and "arid" or wt < 0.30 and "dry" or wt < 0.55 and "moderate" or wt < 0.72 and "wet" or "very wet"
+                    lines[#lines + 1] = string.format("Wetness:    %.2f  (%s)", wt, wl)
+                end
+                -- Measure and draw
+                local pad    = 7
+                local line_h = 14
+                local tw     = 170
+                local th     = #lines * line_h + pad * 2
+                local tx = mx + 14
+                local ty = my + 14
+                if tx + tw > sw then tx = mx - tw - 4 end
+                if ty + th > sh - 22 then ty = my - th - 4 end
+                love.graphics.setScissor()
+                love.graphics.setColor(0.05, 0.05, 0.10, 0.88)
+                love.graphics.rectangle("fill", tx, ty, tw, th, 3, 3)
+                love.graphics.setColor(0.40, 0.55, 0.80)
+                love.graphics.rectangle("line", tx, ty, tw, th, 3, 3)
+                love.graphics.setFont(font)
+                for idx, line in ipairs(lines) do
+                    love.graphics.setColor(idx == 1 and 1 or 0.78, idx == 1 and 1 or 0.78, idx == 1 and 1 or 0.78)
+                    love.graphics.print(line, tx + pad, ty + pad + (idx - 1) * line_h)
+                end
+            end
+        end
     end
 
     -- Status bar
