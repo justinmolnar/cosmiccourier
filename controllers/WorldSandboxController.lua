@@ -32,6 +32,13 @@ function WorldSandboxController:new(game)
     inst.city_border           = nil
     inst.city_fringe           = nil
     inst.city_pois             = nil
+    inst.city_bounds_list      = nil
+    inst.selected_city_idx     = nil
+    inst.selected_city_bounds  = nil
+    inst.city_image            = nil   -- high-res city grid image (city scope)
+    inst.city_img_min_x        = 0
+    inst.city_img_min_y        = 0
+    inst.city_img_K            = 1
     inst.world_image           = nil
     inst.world_w        = 0
     inst.world_h        = 0
@@ -178,6 +185,10 @@ function WorldSandboxController:generate()
         self.city_border           = nil
         self.city_fringe           = nil
         self.city_pois             = nil
+        self.city_bounds_list      = nil
+        self.selected_city_idx     = nil
+        self.selected_city_bounds  = nil
+        self.city_image            = nil
         self.view_scope            = "world"
         self.scope_mode            = nil
         self.selected_continent_id = nil
@@ -203,6 +214,7 @@ function WorldSandboxController:_buildImage()
     local cbounds   = self.city_bounds
     local cborder   = self.city_border
     local cfringe   = self.city_fringe
+    local sel_city_b = self.selected_city_bounds
     local cont_map  = self.continent_map
     local reg_map   = self.region_map
     local scope     = self.view_scope
@@ -218,6 +230,8 @@ function WorldSandboxController:_buildImage()
                 in_scope = (cont_map and cont_map[i] == sel_cid)
             elseif scope == "region" and sel_rid then
                 in_scope = (reg_map and reg_map[i] == sel_rid)
+            elseif scope == "city" and sel_city_b then
+                in_scope = (sel_city_b[i] == true)
             end
 
             local c = active[y][x]
@@ -244,6 +258,20 @@ end
 function WorldSandboxController:set_view(mode)
     self.view_mode = mode
     if self.colormap then self:_buildImage() end
+    if self.view_scope == "city" and self.selected_city_idx then
+        local idx = self.selected_city_idx
+        local bounds = self.city_bounds_list and self.city_bounds_list[idx]
+        if bounds then
+            local w, h = self.world_w, self.world_h
+            local min_x, max_x, min_y, max_y = w+1, 0, h+1, 0
+            for ci in pairs(bounds) do
+                local x = (ci-1) % w + 1; local y = math.floor((ci-1) / w) + 1
+                if x < min_x then min_x = x end; if x > max_x then max_x = x end
+                if y < min_y then min_y = y end; if y > max_y then max_y = y end
+            end
+            self:_buildCityImage(idx, min_x, max_x, min_y, max_y)
+        end
+    end
 end
 
 -- ── Scope (zoom level) ────────────────────────────────────────────────────────
@@ -253,8 +281,10 @@ function WorldSandboxController:enter_scope_pick(mode)
     self.scope_mode = mode
     if mode == "picking_continent" then
         self.status_text = "Click a continent to zoom in  |  Esc to cancel"
-    else
+    elseif mode == "picking_region" then
         self.status_text = "Click a region to zoom in  |  Esc to cancel"
+    else
+        self.status_text = "Click a city area to zoom in  |  Esc to cancel"
     end
 end
 
@@ -893,10 +923,12 @@ end
 -- Regenerates city_bounds and city_pois for all currently placed cities.
 function WorldSandboxController:_gen_all_bounds()
     if not self.city_locations then return end
-    local new_bounds = {}
-    local new_pois   = {}
-    for _, city in ipairs(self.city_locations) do
+    local new_bounds      = {}
+    local new_bounds_list = {}
+    local new_pois        = {}
+    for idx, city in ipairs(self.city_locations) do
         local claimed, pois = self:_gen_bounds_for_city(city)
+        new_bounds_list[idx] = claimed or {}
         if claimed then
             for ci in pairs(claimed) do new_bounds[ci] = true end
         end
@@ -910,6 +942,7 @@ function WorldSandboxController:_gen_all_bounds()
             end
         end
     end
+    self.city_bounds_list = new_bounds_list
     self.city_bounds = new_bounds
     self.city_pois   = new_pois
 
@@ -963,6 +996,85 @@ function WorldSandboxController:regen_bounds()
     self.status_text = string.format("Bounds regenerated for %d cities", #self.city_locations)
 end
 
+function WorldSandboxController:_selectCity(city_idx)
+    if not self.city_bounds_list or not self.city_bounds_list[city_idx] then return end
+    local bounds = self.city_bounds_list[city_idx]
+    local w, h   = self.world_w, self.world_h
+
+    local min_x, max_x, min_y, max_y = w+1, 0, h+1, 0
+    for ci in pairs(bounds) do
+        local x = (ci-1) % w + 1
+        local y = math.floor((ci-1) / w) + 1
+        if x < min_x then min_x = x end
+        if x > max_x then max_x = x end
+        if y < min_y then min_y = y end
+        if y > max_y then max_y = y end
+    end
+    if max_x < min_x then return end
+
+    self.selected_city_idx    = city_idx
+    self.selected_city_bounds = bounds
+    self.view_scope           = "city"
+    self.scope_mode           = nil
+    self:_buildImage()
+    self:_buildCityImage(city_idx, min_x, max_x, min_y, max_y)
+    self:_fitToArea(min_x, max_x, min_y, max_y)
+    self.status_text = "City view  |  RMB pan  |  Wheel zoom  |  Esc to zoom out"
+end
+
+-- Builds a high-resolution city image: ~200 city cells across, each CELL_PX×CELL_PX image pixels.
+-- Grid lines separate every city cell so the full granularity is visible on screen.
+function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, max_y)
+    local bounds = self.city_bounds_list and self.city_bounds_list[city_idx]
+    if not bounds then return end
+    local active = (self.view_mode == "biome"       and self.biome_colormap)
+               or  (self.view_mode == "suitability" and self.suitability_colormap)
+               or   self.colormap
+    if not active then return end
+
+    local w      = self.world_w
+    local bbox_w = max_x - min_x + 1
+    local bbox_h = max_y - min_y + 1
+
+    -- Each world cell = 9×9 image pixels; lines at 0,3,6 create a tic-tac-toe grid
+    local CELL  = 9
+    local img_w = bbox_w * CELL
+    local img_h = bbox_h * CELL
+
+    local imgdata = love.image.newImageData(img_w, img_h)
+
+    for py = 0, img_h - 1 do
+        local wy = min_y + math.floor(py / CELL)
+        local iy = py % CELL
+        for px = 0, img_w - 1 do
+            local wx = min_x + math.floor(px / CELL)
+            local ci = (wy-1)*w + wx
+            local c  = active[wy] and active[wy][wx] or {0.1, 0.1, 0.1}
+            if bounds[ci] then
+                local ix = px % CELL
+                local outer = (ix == 0 or iy == 0)
+                local inner = (ix == 3 or ix == 6 or iy == 3 or iy == 6)
+                if outer then
+                    imgdata:setPixel(px, py, c[1]*0.20, c[2]*0.20, c[3]*0.20, 1.0)
+                elseif inner then
+                    imgdata:setPixel(px, py, c[1]*0.60, c[2]*0.60, c[3]*0.60, 1.0)
+                else
+                    imgdata:setPixel(px, py, c[1], c[2], c[3], 1.0)
+                end
+            else
+                imgdata:setPixel(px, py, c[1]*0.18+0.01, c[2]*0.18+0.02, c[3]*0.18+0.06, 1.0)
+            end
+        end
+    end
+
+    local img = love.graphics.newImage(imgdata)
+    img:setFilter("nearest", "nearest")
+    self.city_image     = img
+    self.city_img_min_x = min_x
+    self.city_img_min_y = min_y
+    self.city_img_K     = CELL
+end
+
 function WorldSandboxController:_centerCamera()
     local C   = self.game.C
     local ts  = C.MAP.TILE_SIZE
@@ -980,9 +1092,20 @@ end
 function WorldSandboxController:handle_keypressed(key)
     if key == "escape" then
         if self.scope_mode then
-            -- Cancel picking without closing
             self.scope_mode  = nil
             self.status_text = "Cancelled"
+        elseif self.view_scope == "city" then
+            if self.selected_region_id then
+                self:_selectRegion(self.selected_region_id)
+            else
+                self:set_scope_world()
+            end
+        elseif self.view_scope == "region" then
+            if self.selected_continent_id then
+                self:_selectContinent(self.selected_continent_id)
+            else
+                self:set_scope_world()
+            end
         elseif self.view_scope ~= "world" then
             self:set_scope_world()
         else
@@ -1036,6 +1159,10 @@ function WorldSandboxController:handle_mouse_down(x, y, button)
             elseif self.scope_mode == "picking_region" then
                 local rid = self.region_map and self.region_map[i] or 0
                 if rid > 0 then self:_selectRegion(rid) end
+            elseif self.scope_mode == "picking_city" then
+                for idx, bounds in ipairs(self.city_bounds_list or {}) do
+                    if bounds[i] then self:_selectCity(idx); break end
+                end
             end
         end
         return
@@ -1087,6 +1214,17 @@ function WorldSandboxController:handle_mouse_moved(x, y, dx, dy)
                     self.status_text = string.format("Region %d  |  Click to select  |  Esc to cancel", rid)
                 else
                     self.status_text = "Click a region to zoom in  |  Esc to cancel"
+                end
+            elseif self.scope_mode == "picking_city" then
+                local found = false
+                for idx, bounds in ipairs(self.city_bounds_list or {}) do
+                    if bounds[i] then
+                        self.status_text = string.format("City %d  |  Click to zoom in  |  Esc to cancel", idx)
+                        found = true; break
+                    end
+                end
+                if not found then
+                    self.status_text = "Click a city area to zoom in  |  Esc to cancel"
                 end
             end
         end
