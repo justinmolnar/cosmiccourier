@@ -146,6 +146,9 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.btn_view_suit    = { x = 0, y = 0, w = 0, h = 32 }
     inst.btn_view_conts   = { x = 0, y = 0, w = 0, h = 32 }
     inst.btn_view_regions   = { x = 0, y = 0, w = 0, h = 32 }
+    inst.btn_scope_world    = { x = 0, y = 0, w = 0, h = 30 }
+    inst.btn_scope_cont     = { x = 0, y = 0, w = 0, h = 30 }
+    inst.btn_scope_region   = { x = 0, y = 0, w = 0, h = 30 }
     inst.btn_place_cities   = { x = 0, y = 0, w = 0, h = 34 }
     inst.btn_build_highways = { x = 0, y = 0, w = 0, h = 34 }
 
@@ -166,11 +169,12 @@ function WorldSandboxSidebarManager:_doLayout()
         local panel = self.panel_widgets[i]
         local total_h = 4
         if i == 9 then
-            -- Actions: randomize + generate + view grid + place cities + build highways
+            -- Actions: randomize + generate + view grid + scope row + place cities + build highways
             total_h = self.btn_randomize.h + self.btn_generate.h
                     + self.btn_view_height.h + self.btn_view_suit.h   -- two 2-col rows
                     + self.btn_view_regions.h                          -- regions full row
-                    + self.btn_place_cities.h + self.btn_build_highways.h + 100
+                    + self.btn_scope_world.h                           -- scope row
+                    + self.btn_place_cities.h + self.btn_build_highways.h + 120
         else
             for _, w in ipairs(panel) do
                 total_h = total_h + w.h
@@ -224,8 +228,14 @@ function WorldSandboxSidebarManager:_doLayout()
     self.btn_view_conts.x  = bx + half_w + 4; self.btn_view_conts.y  = view_y2; self.btn_view_conts.w  = half_w
     local view_y3 = view_y2 + self.btn_view_suit.h + 4
     self.btn_view_regions.x = bx; self.btn_view_regions.y = view_y3; self.btn_view_regions.w = ww
-    local city_y = view_y3 + self.btn_view_regions.h + 8
-    self.btn_place_cities.x   = bx; self.btn_place_cities.y   = city_y;                              self.btn_place_cities.w   = ww
+    -- Scope buttons: World | Continent | Region (three equal thirds)
+    local scope_y  = view_y3 + self.btn_view_regions.h + 8
+    local third_w  = math.floor((ww - 8) / 3)
+    self.btn_scope_world.x   = bx;                     self.btn_scope_world.y   = scope_y; self.btn_scope_world.w   = third_w
+    self.btn_scope_cont.x    = bx + third_w + 4;       self.btn_scope_cont.y    = scope_y; self.btn_scope_cont.w    = third_w
+    self.btn_scope_region.x  = bx + 2*(third_w + 4);   self.btn_scope_region.y  = scope_y; self.btn_scope_region.w  = third_w
+    local city_y = scope_y + self.btn_scope_world.h + 8
+    self.btn_place_cities.x   = bx; self.btn_place_cities.y   = city_y;                               self.btn_place_cities.w   = ww
     self.btn_build_highways.x = bx; self.btn_build_highways.y = city_y + self.btn_place_cities.h + 4; self.btn_build_highways.w = ww
 end
 
@@ -279,6 +289,11 @@ function WorldSandboxSidebarManager:draw()
                 draw_button(self.btn_view_suit,      "Suitability", self.wsc.view_mode == "suitability", game)
                 draw_button(self.btn_view_conts,     "Continents",  self.wsc.view_mode == "continents",  game)
                 draw_button(self.btn_view_regions,   "Regions",     self.wsc.view_mode == "regions",     game)
+                local sc = self.wsc.view_scope
+                local sm = self.wsc.scope_mode
+                draw_button(self.btn_scope_world,  "World",      sc == "world",                                               game)
+                draw_button(self.btn_scope_cont,   "Continent",  sc == "continent" or sm == "picking_continent",              game)
+                draw_button(self.btn_scope_region, "Region",     sc == "region"    or sm == "picking_region",                 game)
                 local has_suit = self.wsc.suitability_scores ~= nil
                 draw_button(self.btn_place_cities,   "Place Cities",   has_suit and self.wsc.city_locations ~= nil, game)
                 draw_button(self.btn_build_highways, "Build Highways", self.wsc.highway_map ~= nil, game)
@@ -350,6 +365,18 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
         end
         if point_in_rect(x, sy, self.btn_build_highways) and self.wsc.city_locations then
             self.wsc:build_highways()
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_scope_world) then
+            self.wsc:set_scope_world()
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_scope_cont) and self.wsc.continent_map then
+            self.wsc:enter_scope_pick("picking_continent")
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_scope_region) and self.wsc.region_map then
+            self.wsc:enter_scope_pick("picking_region")
             return true
         end
     end

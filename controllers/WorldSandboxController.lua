@@ -31,7 +31,11 @@ function WorldSandboxController:new(game)
     inst.world_image           = nil
     inst.world_w        = 0
     inst.world_h        = 0
-    inst.view_mode      = "height"   -- "height" | "biome"
+    inst.view_mode      = "height"   -- "height" | "biome" | "suitability" | "continents" | "regions"
+    inst.view_scope     = "world"    -- "world" | "continent" | "region"
+    inst.scope_mode     = nil        -- nil | "picking_continent" | "picking_region"
+    inst.selected_continent_id = nil
+    inst.selected_region_id    = nil
     inst.status_text    = ""
 
     inst.sidebar_manager = nil
@@ -160,10 +164,14 @@ function WorldSandboxController:generate()
         self.region_colormap      = result.region_colormap
         self.region_map           = result.region_map
         self.regions_list         = result.regions_list
-        self.city_locations       = nil   -- cleared on each regenerate
-        self.highway_map          = nil
-        self.world_w              = w
-        self.world_h              = h
+        self.city_locations        = nil
+        self.highway_map           = nil
+        self.view_scope            = "world"
+        self.scope_mode            = nil
+        self.selected_continent_id = nil
+        self.selected_region_id    = nil
+        self.world_w               = w
+        self.world_h               = h
         self:_buildImage()
         self:_centerCamera()
         self.status_text = string.format("Generated %dx%d  |  F8 close  |  RMB pan  |  Wheel zoom", w, h)
@@ -178,16 +186,35 @@ function WorldSandboxController:_buildImage()
                or  (self.view_mode == "continents"   and self.continent_colormap)
                or  (self.view_mode == "regions"      and self.region_colormap)
                or   self.colormap
-    local w, h    = self.world_w, self.world_h
-    local hways   = self.highway_map
-    local imgdata = love.image.newImageData(w, h)
+    local w, h      = self.world_w, self.world_h
+    local hways     = self.highway_map
+    local cont_map  = self.continent_map
+    local reg_map   = self.region_map
+    local scope     = self.view_scope
+    local sel_cid   = self.selected_continent_id
+    local sel_rid   = self.selected_region_id
+    local imgdata   = love.image.newImageData(w, h)
     for y = 1, h do
         for x = 1, w do
-            if hways and hways[(y-1)*w + x] then
-                imgdata:setPixel(x-1, y-1, 0.95, 0.78, 0.08, 1.0)  -- golden highway
+            local i = (y-1)*w + x
+            -- Determine if this cell is in the current scope
+            local in_scope = true
+            if scope == "continent" and sel_cid then
+                in_scope = (cont_map and cont_map[i] == sel_cid)
+            elseif scope == "region" and sel_rid then
+                in_scope = (reg_map and reg_map[i] == sel_rid)
+            end
+
+            if hways and hways[i] and in_scope then
+                imgdata:setPixel(x-1, y-1, 0.95, 0.78, 0.08, 1.0)
             else
                 local c = active[y][x]
-                imgdata:setPixel(x-1, y-1, c[1], c[2], c[3], 1.0)
+                if in_scope then
+                    imgdata:setPixel(x-1, y-1, c[1], c[2], c[3], 1.0)
+                else
+                    -- Fog: darken toward deep ocean, desaturate
+                    imgdata:setPixel(x-1, y-1, c[1]*0.18 + 0.01, c[2]*0.18 + 0.02, c[3]*0.18 + 0.06, 1.0)
+                end
             end
         end
     end
@@ -198,6 +225,100 @@ end
 function WorldSandboxController:set_view(mode)
     self.view_mode = mode
     if self.colormap then self:_buildImage() end
+end
+
+-- ── Scope (zoom level) ────────────────────────────────────────────────────────
+
+function WorldSandboxController:enter_scope_pick(mode)
+    -- mode = "picking_continent" | "picking_region"
+    self.scope_mode = mode
+    if mode == "picking_continent" then
+        self.status_text = "Click a continent to zoom in  |  Esc to cancel"
+    else
+        self.status_text = "Click a region to zoom in  |  Esc to cancel"
+    end
+end
+
+function WorldSandboxController:set_scope_world()
+    self.view_scope            = "world"
+    self.scope_mode            = nil
+    self.selected_continent_id = nil
+    self.selected_region_id    = nil
+    if self.colormap then
+        self:_buildImage()
+        self:_centerCamera()
+    end
+    self.status_text = string.format("World view  |  %dx%d  |  RMB pan  |  Wheel zoom", self.world_w, self.world_h)
+end
+
+function WorldSandboxController:_fitToArea(min_x, max_x, min_y, max_y)
+    local C  = self.game.C
+    local ts = C.MAP.TILE_SIZE
+    local sw, sh = love.graphics.getDimensions()
+    local vw = sw - C.UI.SIDEBAR_WIDTH
+    local area_w = (max_x - min_x + 1) * ts
+    local area_h = (max_y - min_y + 1) * ts
+    self.camera.scale = math.min(vw / area_w, sh / area_h) * 0.88
+    self.camera.x = ((min_x + max_x) * 0.5 - 0.5) * ts
+    self.camera.y = ((min_y + max_y) * 0.5 - 0.5) * ts
+end
+
+function WorldSandboxController:_selectContinent(cid)
+    if not self.continent_map or not cid or cid == 0 then return end
+    local w, h   = self.world_w, self.world_h
+    local cmap   = self.continent_map
+    local min_x, max_x, min_y, max_y = w+1, 0, h+1, 0
+    for i = 1, w*h do
+        if cmap[i] == cid then
+            local x = (i-1) % w + 1
+            local y = math.floor((i-1) / w) + 1
+            if x < min_x then min_x = x end
+            if x > max_x then max_x = x end
+            if y < min_y then min_y = y end
+            if y > max_y then max_y = y end
+        end
+    end
+    if max_x < min_x then return end
+    self.selected_continent_id = cid
+    self.selected_region_id    = nil
+    self.view_scope            = "continent"
+    self.scope_mode            = nil
+    self:_buildImage()
+    self:_fitToArea(min_x, max_x, min_y, max_y)
+    self.status_text = string.format("Continent view  |  RMB pan  |  Wheel zoom  |  Click 'World' to zoom out")
+end
+
+function WorldSandboxController:_selectRegion(rid)
+    if not self.region_map or not rid or rid == 0 then return end
+    local w, h   = self.world_w, self.world_h
+    local rmap   = self.region_map
+    local min_x, max_x, min_y, max_y = w+1, 0, h+1, 0
+    for i = 1, w*h do
+        if rmap[i] == rid then
+            local x = (i-1) % w + 1
+            local y = math.floor((i-1) / w) + 1
+            if x < min_x then min_x = x end
+            if x > max_x then max_x = x end
+            if y < min_y then min_y = y end
+            if y > max_y then max_y = y end
+        end
+    end
+    if max_x < min_x then return end
+    -- Keep selected continent consistent with the region
+    local sample_cid = nil
+    for i = 1, w*h do
+        if rmap[i] == rid then
+            sample_cid = self.continent_map and self.continent_map[i]
+            break
+        end
+    end
+    self.selected_region_id    = rid
+    self.selected_continent_id = sample_cid
+    self.view_scope            = "region"
+    self.scope_mode            = nil
+    self:_buildImage()
+    self:_fitToArea(min_x, max_x, min_y, max_y)
+    self.status_text = "Region view  |  RMB pan  |  Wheel zoom  |  Click 'World' to zoom out"
 end
 
 function WorldSandboxController:place_cities()
@@ -553,7 +674,15 @@ end
 
 function WorldSandboxController:handle_keypressed(key)
     if key == "escape" then
-        self:close()
+        if self.scope_mode then
+            -- Cancel picking without closing
+            self.scope_mode  = nil
+            self.status_text = "Cancelled"
+        elseif self.view_scope ~= "world" then
+            self:set_scope_world()
+        else
+            self:close()
+        end
     end
 end
 
@@ -585,6 +714,28 @@ function WorldSandboxController:handle_mouse_down(x, y, button)
         return
     end
 
+    -- Scope picking: LMB selects the continent/region under the cursor
+    if button == 1 and self.scope_mode and self.colormap then
+        local ts         = C.MAP.TILE_SIZE
+        local sw, sh     = love.graphics.getDimensions()
+        local vw         = sw - sidebar_w
+        local wpx        = self.camera.x + (x - sidebar_w - vw * 0.5) / self.camera.scale
+        local wpy        = self.camera.y + (y - sh * 0.5) / self.camera.scale
+        local cx         = math.floor(wpx / ts) + 1
+        local cy         = math.floor(wpy / ts) + 1
+        if cx >= 1 and cx <= self.world_w and cy >= 1 and cy <= self.world_h then
+            local i = (cy-1)*self.world_w + cx
+            if self.scope_mode == "picking_continent" then
+                local cid = self.continent_map and self.continent_map[i] or 0
+                if cid > 0 then self:_selectContinent(cid) end
+            elseif self.scope_mode == "picking_region" then
+                local rid = self.region_map and self.region_map[i] or 0
+                if rid > 0 then self:_selectRegion(rid) end
+            end
+        end
+        return
+    end
+
     if button == 2 then
         self.camera_dragging = true
         self.camera_drag_sx  = x
@@ -605,6 +756,35 @@ function WorldSandboxController:handle_mouse_moved(x, y, dx, dy)
     if self.camera_dragging then
         self.camera.x = self.camera.x - dx / self.camera.scale
         self.camera.y = self.camera.y - dy / self.camera.scale
+    end
+    -- Show hover name during scope picking
+    if self.scope_mode and self.colormap then
+        local C      = self.game.C
+        local sw, sh = love.graphics.getDimensions()
+        local vw     = sw - C.UI.SIDEBAR_WIDTH
+        local ts     = C.MAP.TILE_SIZE
+        local wpx    = self.camera.x + (x - C.UI.SIDEBAR_WIDTH - vw * 0.5) / self.camera.scale
+        local wpy    = self.camera.y + (y - sh * 0.5) / self.camera.scale
+        local cx     = math.floor(wpx / ts) + 1
+        local cy     = math.floor(wpy / ts) + 1
+        if cx >= 1 and cx <= self.world_w and cy >= 1 and cy <= self.world_h then
+            local i = (cy-1)*self.world_w + cx
+            if self.scope_mode == "picking_continent" then
+                local cid = self.continent_map and self.continent_map[i] or 0
+                if cid > 0 then
+                    self.status_text = string.format("Continent %d  |  Click to select  |  Esc to cancel", cid)
+                else
+                    self.status_text = "Click a continent to zoom in  |  Esc to cancel"
+                end
+            elseif self.scope_mode == "picking_region" then
+                local rid = self.region_map and self.region_map[i] or 0
+                if rid > 0 then
+                    self.status_text = string.format("Region %d  |  Click to select  |  Esc to cancel", rid)
+                else
+                    self.status_text = "Click a region to zoom in  |  Esc to cancel"
+                end
+            end
+        end
     end
     if self.sidebar_manager then
         self.sidebar_manager:handle_mouse_moved(x, y, dx, dy)

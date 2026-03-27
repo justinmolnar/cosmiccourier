@@ -68,6 +68,21 @@ function WorldSandboxView:draw()
         love.graphics.printf("Press Generate →", sidebar_w, sh / 2 - 10, vw, "center")
     end
 
+    -- Scope picking: tint the viewport to signal interactive mode
+    if wsc.scope_mode and wsc.world_image then
+        love.graphics.setScissor(sidebar_w, 0, vw, sh)
+        love.graphics.setColor(0.6, 0.85, 1.0, 0.06)
+        love.graphics.rectangle("fill", sidebar_w, 0, vw, sh)
+        -- Crosshair at mouse position
+        local mx, my = love.mouse.getPosition()
+        if mx > sidebar_w then
+            love.graphics.setColor(0.6, 0.85, 1.0, 0.35)
+            love.graphics.setLineWidth(1)
+            love.graphics.line(mx, 0, mx, sh)
+            love.graphics.line(sidebar_w, my, sw, my)
+        end
+    end
+
     -- City markers (drawn in all view modes when cities are placed)
     if wsc.city_locations and wsc.world_image then
         local C  = self.game.C
@@ -82,7 +97,23 @@ function WorldSandboxView:draw()
         end
         local s_range = math.max(max_s - min_s, 0.001)
 
+        local scope    = wsc.view_scope
+        local sel_cid  = wsc.selected_continent_id
+        local sel_rid  = wsc.selected_region_id
+        local cont_map = wsc.continent_map
+        local reg_map  = wsc.region_map
+
         for _, city in ipairs(wsc.city_locations) do
+            -- Skip cities outside the current scope
+            if scope == "continent" and sel_cid and cont_map then
+                local ci = (city.y-1)*wsc.world_w + city.x
+                if cont_map[ci] ~= sel_cid then goto next_city end
+            elseif scope == "region" and sel_rid and reg_map then
+                local ci = (city.y-1)*wsc.world_w + city.x
+                if reg_map[ci] ~= sel_rid then goto next_city end
+            end
+
+            do
             local t   = (city.s - min_s) / s_range   -- 0 = smallest, 1 = largest
             local rad = 3.5 + t * 8.5                 -- 3.5 px (hamlet) → 12 px (capital)
             -- Cell centre in world space
@@ -101,6 +132,8 @@ function WorldSandboxView:draw()
                 love.graphics.setColor(0.15, 0.10, 0.02)
                 love.graphics.circle("fill", sx, sy, math.max(1.5, rad * 0.35))
             end
+            end  -- do
+            ::next_city::
         end
     end
 
