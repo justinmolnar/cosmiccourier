@@ -880,13 +880,208 @@ function WorldNoiseService.generate(w, h, p)
         end
     end
 
+    -- Pass 7: Region subdivision within continents via weighted Dijkstra.
+    -- Crossing cost for each cell = 1 + mountain bonus + river bonus.
+    -- Mountains and rivers act as natural barriers so borders follow terrain.
+    -- Islands get 1 region each; major continents share region_count proportionally.
+    local region_colormap = {}
+    local region_map      = {}   -- flat [i] = region_id  (0 = ocean)
+    local regions_list    = {}   -- [region_id] = { id, continent_id, seed_x, seed_y, color, size }
+    do
+        local D4r = { {0,-1},{-1,0},{1,0},{0,1} }
+        local total_regions   = math.max(1, math.floor(p.region_count        or 20))
+        local mountain_cost   = p.region_mountain_cost or 8
+        local river_cost_r    = p.region_river_cost    or 4
+        local reg_min_sep     = math.max(3, math.floor(p.region_min_sep      or 20))
+        -- Brightness tones cycled per region so neighbours contrast within a continent
+        local TONES = { 1.00, 0.68, 0.86, 0.58, 0.78, 0.62, 0.92, 0.72 }
+
+        -- Allocation: islands always get 1; major continents share total_regions.
+        local major_land = 0
+        for _, c in ipairs(continents) do
+            if not c.is_island then major_land = major_land + c.size end
+        end
+        local allocs = {}
+        do
+            local rems, asum = {}, 0
+            for i, c in ipairs(continents) do
+                if c.is_island then
+                    allocs[i] = 1; asum = asum + 1
+                else
+                    local exact = total_regions * c.size / math.max(1, major_land)
+                    local fv    = math.max(1, math.floor(exact))
+                    allocs[i]   = fv; asum = asum + fv
+                    rems[#rems+1] = { idx=i, rem=exact - math.floor(exact) }
+                end
+            end
+            table.sort(rems, function(a,b) return a.rem > b.rem end)
+            for k = 1, math.max(0, math.min(total_regions - asum, #rems)) do
+                allocs[rems[k].idx] = allocs[rems[k].idx] + 1
+            end
+        end
+
+        -- Group cells by continent id
+        local cont_cells = {}
+        for _, c in ipairs(continents) do cont_cells[c.id] = {} end
+        for i = 1, w * h do
+            local cid = continent_map[i]
+            if cid and cid > 0 and cont_cells[cid] then
+                cont_cells[cid][#cont_cells[cid]+1] = i
+            end
+        end
+
+        -- Place region seeds and register entries
+        local reg_id       = 0
+        local seed_of_cell = {}   -- cell_i -> region_id
+        for ci, c in ipairs(continents) do
+            local cells = cont_cells[c.id]
+            if cells and #cells > 0 then
+                local want = allocs[ci]
+                -- Pseudo-random ordering for spatial spread (deterministic via noise)
+                local scored = {}
+                for _, idx in ipairs(cells) do
+                    local cx2 = (idx-1) % w + 1
+                    local cy2 = math.floor((idx-1) / w) + 1
+                    scored[#scored+1] = { idx=idx, x=cx2, y=cy2,
+                        rank = love.math.noise(cx2*0.07+sx+7777, cy2*0.07+sy+7777) }
+                end
+                table.sort(scored, function(a,b) return a.rank > b.rank end)
+                -- Greedy min-sep selection
+                local seeds, min_sq = {}, reg_min_sep * reg_min_sep
+                for _, s in ipairs(scored) do
+                    local ok = true
+                    for _, p2 in ipairs(seeds) do
+                        local dx, dy = s.x-p2.x, s.y-p2.y
+                        if dx*dx+dy*dy < min_sq then ok=false; break end
+                    end
+                    if ok then seeds[#seeds+1] = s end
+                    if #seeds >= want then break end
+                end
+                if #seeds == 0 then seeds[1] = scored[1] end
+                -- Register region records
+                local bc, ti = c.color, 0
+                for _, s in ipairs(seeds) do
+                    reg_id = reg_id + 1; ti = ti + 1
+                    local tone = TONES[((ti-1) % #TONES) + 1]
+                    regions_list[reg_id] = { id=reg_id, continent_id=c.id,
+                        seed_x=s.x, seed_y=s.y, size=0,
+                        color={ bc[1]*tone, bc[2]*tone, bc[3]*tone } }
+                    seed_of_cell[s.idx] = reg_id
+                end
+            end
+        end
+
+        -- Multi-source weighted Dijkstra using a binary min-heap.
+        -- Each region's expansion is bounded to its own continent.
+        local wdist  = {}
+        local hd, hs = {}, 0
+        local function hpush(d, i)
+            hs=hs+1; hd[hs]={d,i}
+            local pos=hs
+            while pos>1 do
+                local par=math.floor(pos/2)
+                if hd[par][1]>hd[pos][1] then hd[par],hd[pos]=hd[pos],hd[par]; pos=par else break end
+            end
+        end
+        local function hpop()
+            if hs==0 then return nil,nil end
+            local top=hd[1]; hd[1]=hd[hs]; hd[hs]=nil; hs=hs-1
+            local pos=1
+            while true do
+                local l,r,sm=pos*2,pos*2+1,pos
+                if l<=hs and hd[l][1]<hd[sm][1] then sm=l end
+                if r<=hs and hd[r][1]<hd[sm][1] then sm=r end
+                if sm==pos then break end
+                hd[pos],hd[sm]=hd[sm],hd[pos]; pos=sm
+            end
+            return top[1],top[2]
+        end
+
+        for cell_i, rid in pairs(seed_of_cell) do
+            wdist[cell_i]=0; region_map[cell_i]=rid; hpush(0,cell_i)
+        end
+        while hs > 0 do
+            local d, ci = hpop()
+            if not (wdist[ci] and d > wdist[ci]) then
+                local rid  = region_map[ci]
+                local cid  = regions_list[rid] and regions_list[rid].continent_id
+                local cy2  = math.floor((ci-1)/w)+1
+                local cx2  = (ci-1)%w+1
+                for _, d4 in ipairs(D4r) do
+                    local nx2,ny2 = cx2+d4[1], cy2+d4[2]
+                    if nx2>=1 and nx2<=w and ny2>=1 and ny2<=h then
+                        local ni   = (ny2-1)*w+nx2
+                        local ncid = continent_map[ni]
+                        if ncid and ncid>0 and ncid==cid then
+                            local hv   = pre_ridge[ni]
+                            local cost = 1.0
+                            if hv >= p.highland_max then
+                                local t = (hv-p.highland_max)/math.max(0.001,p.mountain_max-p.highland_max)
+                                cost = cost + mountain_cost * math.min(1, t)
+                            end
+                            if painted[ni] then cost = cost + river_cost_r end
+                            local nd = d + cost
+                            if not wdist[ni] or nd < wdist[ni] then
+                                wdist[ni]=nd; region_map[ni]=rid; hpush(nd,ni)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Count sizes
+        for i = 1, w*h do
+            local rid = region_map[i]
+            if rid and rid>0 and regions_list[rid] then
+                regions_list[rid].size = regions_list[rid].size + 1
+            end
+        end
+
+        -- Build colormap: dark border lines + elevation shading within regions
+        for y = 1, h do
+            region_colormap[y] = {}
+            local bi = (y-1)*w
+            for x = 1, w do
+                local i   = bi+x
+                local rid = region_map[i] or 0
+                local hv  = heightmap[y][x]
+                if rid == 0 then
+                    region_colormap[y][x] = hv<=p.ocean_max
+                        and {0.04,0.08,0.30} or {0.08,0.12,0.42}
+                else
+                    local border = false
+                    for _, d4 in ipairs(D4r) do
+                        local nx2,ny2 = x+d4[1],y+d4[2]
+                        if nx2>=1 and nx2<=w and ny2>=1 and ny2<=h then
+                            if (region_map[(ny2-1)*w+nx2] or 0) ~= rid then
+                                border=true; break
+                            end
+                        end
+                    end
+                    if border then
+                        region_colormap[y][x] = {0.04,0.04,0.06}
+                    else
+                        local col = regions_list[rid].color
+                        local rel = math.max(0,(hv-p.ocean_max)/math.max(0.001,1-p.ocean_max))
+                        local br  = 0.60 + 0.40*rel
+                        region_colormap[y][x] = {col[1]*br, col[2]*br, col[3]*br}
+                    end
+                end
+            end
+        end
+    end
+
     return { heightmap = heightmap, colormap = colormap,
              biome_colormap = biome_colormap, biome_data = biome_data,
              suitability_colormap = suitability_colormap,
              suitability_scores   = raw_suit,
              continent_colormap   = continent_colormap,
              continent_map        = continent_map,
-             continents           = continents }
+             continents           = continents,
+             region_colormap      = region_colormap,
+             region_map           = region_map,
+             regions_list         = regions_list }
 end
 
 return WorldNoiseService

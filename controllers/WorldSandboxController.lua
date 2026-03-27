@@ -23,6 +23,9 @@ function WorldSandboxController:new(game)
     inst.continent_colormap    = nil
     inst.continent_map         = nil
     inst.continents            = nil
+    inst.region_colormap       = nil
+    inst.region_map            = nil
+    inst.regions_list          = nil
     inst.city_locations        = nil
     inst.world_image           = nil
     inst.world_w        = 0
@@ -79,6 +82,11 @@ function WorldSandboxController:new(game)
         city_count        = 12,   -- slider 1-50: how many cities to place
         city_min_sep      = 30,   -- slider 5-100: minimum cell distance between cities
         island_threshold  = 0.03, -- slider 0-0.15: land fraction below which a landmass is an island
+        -- Region subdivision (Dijkstra within each continent)
+        region_count         = 20, -- slider 1-80: total regions across all major continents
+        region_mountain_cost = 8,  -- slider 0-20: extra crossing cost per unit highland fraction
+        region_river_cost    = 4,  -- slider 0-20: extra crossing cost for river/lake cells
+        region_min_sep       = 20, -- slider 5-80: min cell distance between region seed points
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
@@ -143,6 +151,9 @@ function WorldSandboxController:generate()
         self.continent_colormap   = result.continent_colormap
         self.continent_map        = result.continent_map
         self.continents           = result.continents
+        self.region_colormap      = result.region_colormap
+        self.region_map           = result.region_map
+        self.regions_list         = result.regions_list
         self.city_locations       = nil   -- cleared on each regenerate
         self.world_w              = w
         self.world_h              = h
@@ -158,6 +169,7 @@ function WorldSandboxController:_buildImage()
     local active = (self.view_mode == "biome"        and self.biome_colormap)
                or  (self.view_mode == "suitability"  and self.suitability_colormap)
                or  (self.view_mode == "continents"   and self.continent_colormap)
+               or  (self.view_mode == "regions"      and self.region_colormap)
                or   self.colormap
     local imgdata = love.image.newImageData(self.world_w, self.world_h)
     for y = 1, self.world_h do
