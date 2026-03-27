@@ -33,11 +33,11 @@ function WorldSandboxController:new(game)
         -- Raise scale for more smaller islands; lower for fewer bigger ones.
         continental_scale   = 0.004,
         continental_octaves = 4,
-        continental_weight  = 0.70,
+        continental_weight  = 0.80,
         -- Terrain layer (smooth FBM — internal elevation variation within islands)
         terrain_scale   = 0.015,
         terrain_octaves = 3,
-        terrain_weight  = 0.25,
+        terrain_weight  = 0.15,
         persistence     = 0.50,
         lacunarity      = 2.00,
         -- Mountain layer (ridge FBM — applied on top of land only, never affects coastlines).
@@ -53,12 +53,12 @@ function WorldSandboxController:new(game)
         moisture_scale   = 0.012,
         moisture_octaves = 3,
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
-        edge_margin = 0.22,
+        edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
         -- coast_max is effectively "sea level" — raise it for more ocean, lower for more land.
-        deep_ocean_max = 0.45,
-        ocean_max      = 0.55,
-        coast_max      = 0.60,
+        deep_ocean_max = 0.42,
+        ocean_max      = 0.50,
+        coast_max      = 0.55,
         plains_max     = 0.70,
         forest_max     = 0.80,
         highland_max   = 0.88,
