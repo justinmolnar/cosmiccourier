@@ -28,6 +28,10 @@ function WorldSandboxController:new(game)
     inst.regions_list          = nil
     inst.city_locations        = nil
     inst.highway_map           = nil
+    inst.city_bounds           = nil
+    inst.city_border           = nil
+    inst.city_fringe           = nil
+    inst.city_pois             = nil
     inst.world_image           = nil
     inst.world_w        = 0
     inst.world_h        = 0
@@ -97,6 +101,10 @@ function WorldSandboxController:new(game)
         highway_river_cost    = 3,  -- slider 0-15: extra cost to cross a river or lake cell
         highway_slope_cost    = 15, -- slider 0-40: cost per unit of elevation change (makes roads contour)
         highway_budget_scale   = 800, -- slider 100-3000: budget per unit of suitability² (larger = more roads)
+        -- City bounds generation (Dijkstra flood-fill from city seed)
+        city_size_fraction = 0.07, -- slider 0.01-0.50: fraction of region cells the city can claim (scaled by suitability)
+        city_poi_count     = 5,    -- slider 2-10: POIs to identify (downtown + districts)
+        city_poi_spacing   = 1.0,  -- slider 0.3-3.0: multiplier on auto-spacing (1.0 = evenly distribute across footprint)
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
@@ -166,6 +174,10 @@ function WorldSandboxController:generate()
         self.regions_list         = result.regions_list
         self.city_locations        = nil
         self.highway_map           = nil
+        self.city_bounds           = nil
+        self.city_border           = nil
+        self.city_fringe           = nil
+        self.city_pois             = nil
         self.view_scope            = "world"
         self.scope_mode            = nil
         self.selected_continent_id = nil
@@ -188,6 +200,9 @@ function WorldSandboxController:_buildImage()
                or   self.colormap
     local w, h      = self.world_w, self.world_h
     local hways     = self.highway_map
+    local cbounds   = self.city_bounds
+    local cborder   = self.city_border
+    local cfringe   = self.city_fringe
     local cont_map  = self.continent_map
     local reg_map   = self.region_map
     local scope     = self.view_scope
@@ -205,16 +220,20 @@ function WorldSandboxController:_buildImage()
                 in_scope = (reg_map and reg_map[i] == sel_rid)
             end
 
-            if hways and hways[i] and in_scope then
+            local c = active[y][x]
+            if not in_scope then
+                imgdata:setPixel(x-1, y-1, c[1]*0.18+0.01, c[2]*0.18+0.02, c[3]*0.18+0.06, 1.0)
+            elseif hways and hways[i] then
                 imgdata:setPixel(x-1, y-1, 0.95, 0.78, 0.08, 1.0)
+            elseif cborder and cborder[i] then
+                imgdata:setPixel(x-1, y-1, 0.72, 0.42, 0.08, 1.0)
+            elseif cbounds and cbounds[i] then
+                imgdata:setPixel(x-1, y-1, c[1]*0.55+0.38, c[2]*0.55+0.30, c[3]*0.55+0.12, 1.0)
+            elseif cfringe and cfringe[i] then
+                -- Soft fringe beyond border: subtle warm bleed, breaks tile-grid hard edge
+                imgdata:setPixel(x-1, y-1, c[1]*0.82+0.10, c[2]*0.82+0.07, c[3]*0.82+0.03, 1.0)
             else
-                local c = active[y][x]
-                if in_scope then
-                    imgdata:setPixel(x-1, y-1, c[1], c[2], c[3], 1.0)
-                else
-                    -- Fog: darken toward deep ocean, desaturate
-                    imgdata:setPixel(x-1, y-1, c[1]*0.18 + 0.01, c[2]*0.18 + 0.02, c[3]*0.18 + 0.06, 1.0)
-                end
+                imgdata:setPixel(x-1, y-1, c[1], c[2], c[3], 1.0)
             end
         end
     end
@@ -469,6 +488,10 @@ function WorldSandboxController:place_cities()
     end
 
     self.city_locations = all_cities
+    -- Generate bounds + POIs for all placed cities right away
+    if self.region_map and self.heightmap then
+        self:_gen_all_bounds()
+    end
 end
 
 function WorldSandboxController:build_highways()
@@ -656,6 +679,288 @@ function WorldSandboxController:build_highways()
 
     self.highway_map = highway_map
     self:_buildImage()
+end
+
+-- Generates bounds + POIs for a single city. Returns claimed (hash), pois (array).
+-- Uses noise-perturbed costs + 8-directional movement for organic blob shape.
+-- Two-phase: inner 65% of target used for POI placement so they're never on the edge.
+-- Downtown = POI candidate closest to centroid of inner area.
+function WorldSandboxController:_gen_bounds_for_city(city)
+    if not self.region_map or not self.heightmap then return nil, nil end
+    local p       = self.params
+    local w, h    = self.world_w, self.world_h
+    local reg_map = self.region_map
+    local hmap    = self.heightmap
+    local bdata   = self.biome_data
+    local scores  = self.suitability_scores
+    local rid     = reg_map[(city.y-1)*w + city.x] or 0
+    if rid == 0 then return nil, nil end
+
+    local region_size = 0
+    for i = 1, w*h do
+        if reg_map[i] == rid then region_size = region_size + 1 end
+    end
+
+    local size_frac    = p.city_size_fraction or 0.07
+    local target_cells = math.max(4, math.floor(region_size * size_frac * (city.s or 0.5)))
+    target_cells       = math.min(target_cells, region_size)
+
+    -- Noise-perturbed terrain cost for organic blobs.
+    -- dcost = diagonal multiplier (1.0 for cardinal, 1.414 for diagonal).
+    local function claim_cost(nx2, ny2, dcost)
+        local elev = hmap[ny2 + 1][nx2 + 1]
+        if elev <= p.ocean_max then return math.huge end
+        local base
+        if     elev <= p.coast_max    then base = 1.5
+        elseif elev <= p.plains_max   then base = 1.0
+        elseif elev <= p.forest_max   then base = 2.0
+        elseif elev <= p.highland_max then base = 5.0
+        elseif elev <= p.mountain_max then base = 15.0
+        else                               base = 30.0 end
+        local ni = ny2 * w + nx2 + 1
+        local bd = bdata and bdata[ni]
+        if bd and (bd.is_river or bd.is_lake) then base = base + 3.0 end
+        -- Noise perturbation so flat terrain doesn't produce perfect circles/diamonds
+        local nv = love.math.noise(nx2 * 0.4 + city.x * 0.13, ny2 * 0.4 + city.y * 0.17)
+        base = base * (0.55 + nv * 0.9)
+        return base * dcost
+    end
+
+    local heap = {}
+    local function hpush(f, i)
+        heap[#heap+1] = {f, i}
+        local pos = #heap
+        while pos > 1 do
+            local par = math.floor(pos/2)
+            if heap[par][1] > heap[pos][1] then
+                heap[par], heap[pos] = heap[pos], heap[par]; pos = par
+            else break end
+        end
+    end
+    local function hpop()
+        local top = heap[1]; local n = #heap
+        heap[1] = heap[n]; heap[n] = nil
+        local pos = 1
+        while true do
+            local l, r, s = pos*2, pos*2+1, pos
+            if l <= #heap and heap[l][1] < heap[s][1] then s = l end
+            if r <= #heap and heap[r][1] < heap[s][1] then s = r end
+            if s == pos then break end
+            heap[pos], heap[s] = heap[s], heap[pos]; pos = s
+        end
+        return top
+    end
+
+    -- 8-directional movement: cardinal (cost×1) + diagonal (cost×√2)
+    local moves = {
+        { 1, 0, 1.0}, {-1, 0, 1.0}, {0, 1, 1.0}, {0,-1, 1.0},
+        { 1, 1, 1.414}, {-1, 1, 1.414}, { 1,-1, 1.414}, {-1,-1, 1.414},
+    }
+
+    local dist          = {}
+    local claimed       = {}
+    local claimed_count = 0
+    local seed          = (city.y-1)*w + city.x
+    dist[seed] = 0
+    hpush(0, seed)
+
+    while #heap > 0 and claimed_count < target_cells do
+        local node = hpop()
+        local d, ci = node[1], node[2]
+        if not claimed[ci] then
+            claimed[ci]   = true
+            claimed_count = claimed_count + 1
+
+            local cx   = (ci-1) % w
+            local cy_i = math.floor((ci-1) / w)
+            for _, m in ipairs(moves) do
+                local nx2 = cx   + m[1]
+                local ny2 = cy_i + m[2]
+                if nx2 >= 0 and nx2 < w and ny2 >= 0 and ny2 < h then
+                    local ni = ny2 * w + nx2 + 1
+                    if reg_map[ni] == rid and not claimed[ni] then
+                        local cost = claim_cost(nx2, ny2, m[3])
+                        if cost < math.huge then
+                            local nd = d + cost
+                            if not dist[ni] or nd < dist[ni] then
+                                dist[ni] = nd
+                                hpush(nd, ni)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Erode claimed area: remove cells where any 8-neighbor is unclaimed.
+    -- Two passes guarantee POIs are always ≥2 cells from any edge.
+    local eroded = {}
+    for ci in pairs(claimed) do eroded[ci] = true end
+    for _ = 1, 2 do
+        local next_e = {}
+        for ci in pairs(eroded) do
+            local cx2 = (ci-1) % w
+            local cy2 = math.floor((ci-1) / w)
+            local ok  = true
+            for _, m in ipairs(moves) do
+                local nx2 = cx2 + m[1]; local ny2 = cy2 + m[2]
+                if nx2 < 0 or nx2 >= w or ny2 < 0 or ny2 >= h or not eroded[ny2*w+nx2+1] then
+                    ok = false; break
+                end
+            end
+            if ok then next_e[ci] = true end
+        end
+        -- If erosion wiped everything out (tiny city), stop early
+        local any = next(next_e)
+        if not any then break end
+        eroded = next_e
+    end
+    -- Fall back to full claimed set if erosion left nothing
+    local inner = next(eroded) and eroded or claimed
+
+    -- POI count scales with suitability; min 1, max = slider
+    local poi_max   = math.max(1, math.floor(p.city_poi_count or 5))
+    local poi_count = math.max(1, math.floor(poi_max * (city.s or 0.5)))
+
+    -- Separation spreads POIs evenly across the inner footprint
+    local spacing    = p.city_poi_spacing or 1.0
+    local inner_size = 0
+    for _ in pairs(inner) do inner_size = inner_size + 1 end
+    local poi_sep    = math.max(2, math.floor(math.sqrt(inner_size / math.max(1, poi_count)) * spacing))
+    local poi_sep_sq = poi_sep * poi_sep
+
+    -- Build candidate list from INNER cells only (guaranteed padding from edge)
+    local suit_cells = {}
+    for ci in pairs(inner) do
+        suit_cells[#suit_cells+1] = { i=ci, s=(scores and scores[ci] or 0) }
+    end
+    table.sort(suit_cells, function(a, b) return a.s > b.s end)
+
+    local used       = {}
+    local candidates = {}
+    for _, sc in ipairs(suit_cells) do
+        local px = (sc.i-1) % w + 1
+        local py = math.floor((sc.i-1) / w) + 1
+        local ok = true
+        for _, c in ipairs(candidates) do
+            local ddx, ddy = px-c.x, py-c.y
+            if ddx*ddx+ddy*ddy < poi_sep_sq then ok=false; break end
+        end
+        if ok then
+            used[sc.i] = true
+            candidates[#candidates+1] = { x=px, y=py, s=sc.s, region_id=rid }
+        end
+        if #candidates >= poi_count then break end
+    end
+    -- Fallback: fill remaining ignoring separation so every city always gets POIs
+    if #candidates < poi_count then
+        for _, sc in ipairs(suit_cells) do
+            if not used[sc.i] then
+                candidates[#candidates+1] = { x=(sc.i-1)%w+1, y=math.floor((sc.i-1)/w)+1,
+                                               s=sc.s, region_id=rid }
+            end
+            if #candidates >= poi_count then break end
+        end
+    end
+
+    -- Centroid of eroded inner area; downtown = candidate closest to it
+    local sum_x, sum_y, n = 0, 0, 0
+    for ci in pairs(inner) do
+        sum_x = sum_x + (ci-1) % w + 1
+        sum_y = sum_y + math.floor((ci-1) / w) + 1
+        n     = n + 1
+    end
+    local cen_x = n > 0 and sum_x / n or city.x
+    local cen_y = n > 0 and sum_y / n or city.y
+
+    local best_d2, dt_idx = math.huge, 1
+    for k, c in ipairs(candidates) do
+        local d2 = (c.x - cen_x)^2 + (c.y - cen_y)^2
+        if d2 < best_d2 then best_d2 = d2; dt_idx = k end
+    end
+
+    local pois = {}
+    for k, c in ipairs(candidates) do
+        pois[#pois+1] = { x=c.x, y=c.y, s=c.s, region_id=rid,
+                          type=(k == dt_idx and "downtown" or "district") }
+    end
+    if #pois > 1 then pois[1], pois[dt_idx] = pois[dt_idx], pois[1] end
+
+    return claimed, pois
+end
+
+-- Regenerates city_bounds and city_pois for all currently placed cities.
+function WorldSandboxController:_gen_all_bounds()
+    if not self.city_locations then return end
+    local new_bounds = {}
+    local new_pois   = {}
+    for _, city in ipairs(self.city_locations) do
+        local claimed, pois = self:_gen_bounds_for_city(city)
+        if claimed then
+            for ci in pairs(claimed) do new_bounds[ci] = true end
+        end
+        if pois then
+            for _, poi in ipairs(pois) do
+                new_pois[#new_pois+1] = poi
+                if poi.type == "downtown" then
+                    city.x = poi.x
+                    city.y = poi.y
+                end
+            end
+        end
+    end
+    self.city_bounds = new_bounds
+    self.city_pois   = new_pois
+
+    local w, h = self.world_w, self.world_h
+
+    -- Border: claimed cells with at least one non-claimed cardinal neighbor
+    local border = {}
+    for ci in pairs(new_bounds) do
+        local cx = (ci-1) % w
+        local cy = math.floor((ci-1) / w)
+        for _, m in ipairs({{1,0},{-1,0},{0,1},{0,-1}}) do
+            local nx2 = cx + m[1]
+            local ny2 = cy + m[2]
+            if nx2 < 0 or nx2 >= w or ny2 < 0 or ny2 >= h then
+                border[ci] = true; break
+            else
+                local ni = ny2 * w + nx2 + 1
+                if not new_bounds[ni] then border[ci] = true; break end
+            end
+        end
+    end
+    self.city_border = border
+
+    -- Fringe: noise-based expansion 1 cell beyond bounds for sub-tile soft edge
+    local fringe = {}
+    for ci in pairs(new_bounds) do
+        local cx = (ci-1) % w
+        local cy = math.floor((ci-1) / w)
+        for _, m in ipairs({{1,0},{-1,0},{0,1},{0,-1},{1,1},{-1,1},{1,-1},{-1,-1}}) do
+            local nx2 = cx + m[1]
+            local ny2 = cy + m[2]
+            if nx2 >= 0 and nx2 < w and ny2 >= 0 and ny2 < h then
+                local ni = ny2 * w + nx2 + 1
+                if not new_bounds[ni] then
+                    local nv = love.math.noise(nx2 * 4.3 + 0.5, ny2 * 3.7 + 0.5)
+                    if nv > 0.40 then fringe[ni] = true end
+                end
+            end
+        end
+    end
+    self.city_fringe = fringe
+end
+
+function WorldSandboxController:regen_bounds()
+    if not self.city_locations then
+        self.status_text = "Place cities first"
+        return
+    end
+    self:_gen_all_bounds()
+    self:_buildImage()
+    self.status_text = string.format("Bounds regenerated for %d cities", #self.city_locations)
 end
 
 function WorldSandboxController:_centerCamera()

@@ -137,6 +137,45 @@ function WorldSandboxView:draw()
         end
     end
 
+    -- POI markers (downtown + districts, visible in region scope, filtered to selected region)
+    if wsc.city_pois and wsc.view_scope == "region" then
+        local C   = self.game.C
+        local ts  = C.MAP.TILE_SIZE
+        local sel = wsc.selected_region_id
+        love.graphics.setScissor(sidebar_w, 0, vw, sh)
+        for _, poi in ipairs(wsc.city_pois) do
+            if poi.region_id ~= sel then goto next_poi end
+            local wpx = (poi.x - 0.5) * ts
+            local wpy = (poi.y - 0.5) * ts
+            local sx = sidebar_w + vw / 2 + (wpx - wsc.camera.x) * wsc.camera.scale
+            local sy = sh / 2 + (wpy - wsc.camera.y) * wsc.camera.scale
+            if sx > sidebar_w and sx < sw and sy > 0 and sy < sh then
+                if poi.type == "downtown" then
+                    -- Downtown: large white circle with dark ring
+                    love.graphics.setColor(0, 0, 0, 0.7)
+                    love.graphics.circle("fill", sx+1, sy+1, 8)
+                    love.graphics.setColor(0.15, 0.12, 0.08)
+                    love.graphics.circle("fill", sx, sy, 8)
+                    love.graphics.setColor(1.0, 1.0, 1.0)
+                    love.graphics.circle("fill", sx, sy, 6)
+                    love.graphics.setColor(0.15, 0.12, 0.08)
+                    love.graphics.circle("fill", sx, sy, 2.5)
+                else
+                    -- District: smaller cyan circle
+                    love.graphics.setColor(0, 0, 0, 0.6)
+                    love.graphics.circle("fill", sx+1, sy+1, 5.5)
+                    love.graphics.setColor(0.10, 0.20, 0.20)
+                    love.graphics.circle("fill", sx, sy, 5.5)
+                    love.graphics.setColor(0.35, 0.90, 0.85)
+                    love.graphics.circle("fill", sx, sy, 4)
+                    love.graphics.setColor(0.10, 0.20, 0.20)
+                    love.graphics.circle("fill", sx, sy, 1.5)
+                end
+            end
+            ::next_poi::
+        end
+    end
+
     -- Biome legend (biome view only)
     if wsc.world_image and wsc.view_mode == "biome" then
         local font      = self.game.fonts.ui_small
