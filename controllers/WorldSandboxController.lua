@@ -191,18 +191,20 @@ function WorldSandboxController:place_cities()
     if not self.suitability_scores then return end
     local total_count = math.max(1, math.floor(self.params.city_count  or 12))
     local min_sep     = math.max(1, math.floor(self.params.city_min_sep or 30))
-    local w, h        = self.world_w, self.world_h
+    local w           = self.world_w
     local scores      = self.suitability_scores
     local cont_map    = self.continent_map
     local conts       = self.continents
+    local reg_map     = self.region_map
+    local reg_list    = self.regions_list
 
-    -- If no continent data, fall back to simple global greedy selection
-    if not cont_map or not conts or #conts == 0 then
+    -- Fall back to flat greedy if no continent/region data
+    if not cont_map or not conts or #conts == 0 or not reg_map or not reg_list then
         local cands = {}
-        for i = 1, w * h do
+        for i = 1, w * self.world_h do
             local s = scores[i] or 0
             if s > 0 then
-                cands[#cands + 1] = { i=i, x=(i-1)%w+1, y=math.floor((i-1)/w)+1, s=s }
+                cands[#cands + 1] = { x=(i-1)%w+1, y=math.floor((i-1)/w)+1, s=s }
             end
         end
         table.sort(cands, function(a, b) return a.s > b.s end)
@@ -220,13 +222,13 @@ function WorldSandboxController:place_cities()
         return
     end
 
-    -- Proportional allocation per continent (largest-remainder method)
+    -- Step 1: proportional city allocation per continent (largest-remainder)
     local total_land = 0
     for _, c in ipairs(conts) do total_land = total_land + c.size end
     if total_land == 0 then return end
 
-    local allocs    = {}
-    local alloc_sum = 0
+    local allocs     = {}
+    local alloc_sum  = 0
     local remainders = {}
     for i, c in ipairs(conts) do
         local exact   = total_count * c.size / total_land
@@ -240,41 +242,98 @@ function WorldSandboxController:place_cities()
         allocs[remainders[k].idx] = allocs[remainders[k].idx] + 1
     end
 
-    -- Build sorted candidate list per continent
+    -- Step 2: build per-region sorted candidate lists, grouped by continent
     local cont_id_to_idx = {}
     for i, c in ipairs(conts) do cont_id_to_idx[c.id] = i end
-    local cont_cands = {}
-    for i = 1, #conts do cont_cands[i] = {} end
-    for i = 1, w * h do
+
+    -- reg_cands[rid] = sorted candidates; cont_regions[ci] = list of rids
+    local reg_cands    = {}
+    local cont_regions = {}
+    for i = 1, #conts do cont_regions[i] = {} end
+
+    for i = 1, w * self.world_h do
         local s   = scores[i] or 0
-        local idx = cont_id_to_idx[cont_map[i] or 0]
-        if s > 0 and idx then
-            cont_cands[idx][#cont_cands[idx]+1] = { i=i, x=(i-1)%w+1, y=math.floor((i-1)/w)+1, s=s }
+        local rid = reg_map[i] or 0
+        if s > 0 and rid > 0 and reg_list[rid] then
+            local ci = cont_id_to_idx[reg_list[rid].continent_id]
+            if ci then
+                if not reg_cands[rid] then
+                    reg_cands[rid] = {}
+                    cont_regions[ci][#cont_regions[ci]+1] = rid
+                end
+                local t = reg_cands[rid]
+                t[#t+1] = { x=(i-1)%w+1, y=math.floor((i-1)/w)+1, s=s }
+            end
         end
     end
-    for i = 1, #conts do
-        table.sort(cont_cands[i], function(a, b) return a.s > b.s end)
+    for _, cands in pairs(reg_cands) do
+        table.sort(cands, function(a, b) return a.s > b.s end)
     end
 
-    -- Greedy placement per continent; global min_sep enforced across all cities
+    local reg_count = {}
+    local reg_ptr   = {}
+    for rid in pairs(reg_cands) do
+        reg_count[rid] = 0
+        reg_ptr[rid]   = 1
+    end
+
+    -- All placed cities (global, for min_sep enforcement across continents)
     local all_cities = {}
     local sq         = min_sep * min_sep
-    for ci = 1, #conts do
+
+    -- Step 3: per-continent placement. Each pick selects the globally highest-
+    -- scoring candidate from any region on that continent that is currently at
+    -- the minimum city count. Regions above the minimum are locked until all
+    -- catch up, ensuring every region gets one city before any gets two.
+    for ci, c_rids in ipairs(cont_regions) do
         local want = allocs[ci]
         local placed = 0
-        for _, c in ipairs(cont_cands[ci]) do
-            if placed >= want then break end
-            local ok = true
-            for _, p2 in ipairs(all_cities) do
-                local dx, dy = c.x-p2.x, c.y-p2.y
-                if dx*dx+dy*dy < sq then ok=false; break end
+
+        while placed < want do
+            -- Find minimum city count among regions with remaining candidates
+            local min_count = math.huge
+            for _, rid in ipairs(c_rids) do
+                if reg_ptr[rid] <= #reg_cands[rid] then
+                    min_count = math.min(min_count, reg_count[rid])
+                end
             end
-            if ok then
-                all_cities[#all_cities+1] = c
-                placed = placed + 1
+            if min_count == math.huge then break end  -- all regions exhausted
+
+            -- Among all regions at the minimum, find the single best unblocked candidate
+            local best_c   = nil
+            local best_rid = nil
+            local best_idx = nil
+            local best_s   = -1
+
+            for _, rid in ipairs(c_rids) do
+                if reg_count[rid] == min_count then
+                    local cands = reg_cands[rid]
+                    for idx = reg_ptr[rid], #cands do
+                        local c = cands[idx]
+                        local ok = true
+                        for _, p2 in ipairs(all_cities) do
+                            local dx, dy = c.x-p2.x, c.y-p2.y
+                            if dx*dx+dy*dy < sq then ok=false; break end
+                        end
+                        if ok then
+                            if c.s > best_s then
+                                best_s = c.s; best_c = c; best_rid = rid; best_idx = idx
+                            end
+                            break  -- candidates sorted; first unblocked is best for this region
+                        end
+                    end
+                end
             end
+
+            if not best_c then break end  -- nothing placeable (min_sep too large)
+
+            reg_ptr[best_rid] = best_idx + 1
+            all_cities[#all_cities+1] = best_c
+            reg_count[best_rid] = reg_count[best_rid] + 1
+            placed = placed + 1
         end
     end
+
     self.city_locations = all_cities
 end
 
