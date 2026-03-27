@@ -92,22 +92,19 @@ end
 
 -- PUBLIC FUNCTION: Generates roads and draws them to the grid
 function ArterialRoadService.generateArterialRoads(city_grid, zone_grid, params)
-    print("ArterialRoadService: Starting arterial road generation")
     local generated_paths = ArterialRoadService._calculateArterialPaths(zone_grid, params)
-    
+    local thickness = (params and params.arterial_thickness) or 1
+
     for _, path in ipairs(generated_paths) do
-        ArterialRoadService._drawArterialToGrid(city_grid, path)
+        ArterialRoadService._drawArterialToGrid(city_grid, path, thickness)
     end
-    
-    print("ArterialRoadService: Arterial road generation complete")
+
     return generated_paths
 end
 
 -- PUBLIC FUNCTION: Only returns the calculated control points
 function ArterialRoadService.getArterialControlPoints(zone_grid, params)
-    print("ArterialRoadService: Getting arterial road control points")
     local generated_paths = ArterialRoadService._calculateArterialPaths(zone_grid, params)
-    print("ArterialRoadService: Arterial control point calculation complete")
     return generated_paths
 end
 
@@ -384,47 +381,82 @@ end
 
 function ArterialRoadService._findArterialPath(cost_grid,start_point,end_point,width,height)
     if not start_point or not end_point then return nil end
-    local open_set={}; local came_from={}; local g_score,f_score={}, {}; local open_hash={}
+    local came_from = {}
+    local g_score, f_score = {}, {}
+    local open_hash = {}
+    local heap = {}  -- min-heap: each entry = {node, priority}
+
     local function node_key(x,y) return y*width+x end
     local function heuristic(x1,y1,x2,y2) return math.abs(x1-x2)+math.abs(y1-y2) end
-    local function reconstruct_path(current) local path={current}; while came_from[node_key(current.x,current.y)] do current=came_from[node_key(current.x,current.y)]; table.insert(path,1,current) end; return path end
-    
-    local start_key = node_key(start_point.x,start_point.y)
+    local function reconstruct_path(current)
+        local path = {}
+        while current do
+            table.insert(path, 1, current)
+            current = came_from[node_key(current.x, current.y)]
+        end
+        return path
+    end
+
+    local function heap_push(node, priority)
+        local n = #heap + 1
+        heap[n] = {node=node, priority=priority}
+        local i = n
+        while i > 1 do
+            local p = math.floor(i / 2)
+            if heap[p].priority > heap[i].priority then
+                heap[p], heap[i] = heap[i], heap[p]
+                i = p
+            else break end
+        end
+    end
+    local function heap_pop()
+        local top = heap[1].node
+        local n = #heap
+        heap[1] = heap[n]
+        heap[n] = nil
+        n = n - 1
+        local i = 1
+        while true do
+            local s, l, r = i, 2*i, 2*i+1
+            if l <= n and heap[l].priority < heap[s].priority then s = l end
+            if r <= n and heap[r].priority < heap[s].priority then s = r end
+            if s == i then break end
+            heap[i], heap[s] = heap[s], heap[i]
+            i = s
+        end
+        return top
+    end
+
+    local start_key = node_key(start_point.x, start_point.y)
     g_score[start_key] = 0
-    f_score[start_key] = heuristic(start_point.x,start_point.y,end_point.x,end_point.y)
-    table.insert(open_set,start_point)
-    open_hash[start_key]=true
-    
-    while #open_set > 0 do
-        local lowest_f_idx=1
-        for i=2,#open_set do 
-            if f_score[node_key(open_set[i].x,open_set[i].y)] < f_score[node_key(open_set[lowest_f_idx].x,open_set[lowest_f_idx].y)] then 
-                lowest_f_idx=i 
-            end 
+    f_score[start_key] = heuristic(start_point.x, start_point.y, end_point.x, end_point.y)
+    heap_push(start_point, f_score[start_key])
+    open_hash[start_key] = true
+
+    while #heap > 0 do
+        local current = heap_pop()
+        local current_key = node_key(current.x, current.y)
+        open_hash[current_key] = nil
+
+        if current.x == end_point.x and current.y == end_point.y then
+            return reconstruct_path(current)
         end
-        local current = table.remove(open_set,lowest_f_idx)
-        local current_key = node_key(current.x,current.y)
-        open_hash[current_key]=nil
-        
-        if current.x == end_point.x and current.y == end_point.y then 
-            return reconstruct_path(current) 
-        end
-        
-        local neighbors={{current.x,current.y-1},{current.x,current.y+1},{current.x-1,current.y},{current.x+1,current.y}}
-        for _,pos in ipairs(neighbors)do 
-            local nx,ny=pos[1],pos[2]
-            if nx>=1 and nx<=width and ny>=1 and ny<=height then
-                local neighbor = {x=nx,y=ny}
+
+        local neighbors = {{current.x,current.y-1},{current.x,current.y+1},{current.x-1,current.y},{current.x+1,current.y}}
+        for _, pos in ipairs(neighbors) do
+            local nx, ny = pos[1], pos[2]
+            if nx >= 1 and nx <= width and ny >= 1 and ny <= height then
+                local neighbor = {x=nx, y=ny}
                 local tentative_g = g_score[current_key] + cost_grid[ny][nx]
-                local neighbor_key = node_key(nx,ny)
-                if not g_score[neighbor_key] or tentative_g < g_score[neighbor_key] then 
+                local neighbor_key = node_key(nx, ny)
+                if not g_score[neighbor_key] or tentative_g < g_score[neighbor_key] then
                     came_from[neighbor_key] = current
                     g_score[neighbor_key] = tentative_g
-                    f_score[neighbor_key] = tentative_g + heuristic(nx,ny,end_point.x,end_point.y)
-                    if not open_hash[neighbor_key] then 
-                        table.insert(open_set,neighbor)
-                        open_hash[neighbor_key]=true 
-                    end 
+                    f_score[neighbor_key] = tentative_g + heuristic(nx, ny, end_point.x, end_point.y)
+                    if not open_hash[neighbor_key] then
+                        heap_push(neighbor, f_score[neighbor_key])
+                        open_hash[neighbor_key] = true
+                    end
                 end
             end
         end
@@ -445,24 +477,33 @@ function ArterialRoadService._smoothPath(path)
     return smoothed
 end
 
-function ArterialRoadService._drawArterialToGrid(city_grid,path)
-    for i=1,#path-1 do 
-        ArterialRoadService._drawLine(city_grid,path[i].x,path[i].y,path[i+1].x,path[i+1].y,"arterial")
+function ArterialRoadService._drawArterialToGrid(city_grid, path, thickness)
+    thickness = thickness or 1
+    for i = 1, #path - 1 do
+        ArterialRoadService._drawLine(city_grid, path[i].x, path[i].y, path[i+1].x, path[i+1].y, "arterial", thickness)
     end
 end
 
-function ArterialRoadService._drawLine(grid,x1,y1,x2,y2,road_type)
-    local dx,dy = math.abs(x2-x1),math.abs(y2-y1)
-    local sx,sy = x1<x2 and 1 or -1, y1<y2 and 1 or -1
-    local err,x,y = dx-dy, x1,y1
-    while true do 
-        if grid[y] and grid[y][x] and grid[y][x].type~="arterial" and grid[y][x].type~="road" then 
-            grid[y][x]={type=road_type}
+function ArterialRoadService._drawLine(grid, x1, y1, x2, y2, road_type, thickness)
+    thickness = thickness or 1
+    local half = math.floor(thickness / 2)
+    local h, w = #grid, #grid[1]
+    local dx, dy = math.abs(x2-x1), math.abs(y2-y1)
+    local sx, sy = x1 < x2 and 1 or -1, y1 < y2 and 1 or -1
+    local err, x, y = dx - dy, x1, y1
+    while true do
+        for oy = -half, half do
+            for ox = -half, half do
+                local nx, ny = x + ox, y + oy
+                if ny >= 1 and ny <= h and nx >= 1 and nx <= w then
+                    grid[ny][nx] = { type = road_type }
+                end
+            end
         end
-        if x==x2 and y==y2 then break end
-        local e2=2*err
-        if e2>-dy then err=err-dy;x=x+sx end
-        if e2<dx then err=err+dx;y=y+sy end
+        if x == x2 and y == y2 then break end
+        local e2 = 2 * err
+        if e2 > -dy then err = err - dy; x = x + sx end
+        if e2 < dx  then err = err + dx; y = y + sy end
     end
 end
 

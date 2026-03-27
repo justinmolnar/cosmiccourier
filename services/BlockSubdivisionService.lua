@@ -34,14 +34,10 @@ function BlockSubdivisionService._getBlockSizeForZone(zone_type, map_width, map_
         min_size = math.max(4, max_size - 4)
     end
     
-    print(string.format("Zone '%s' block size: min=%d, max=%d", zone_type, min_size, max_size))
-
     return { min_size = min_size, max_size = max_size }
 end
 
 function BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, params)
-    print("=== BlockSubdivisionService.generateStreets START ===")
-
     local C_MAP = require("data.constants").MAP
     local width, height = #city_grid[1], #city_grid
 
@@ -55,14 +51,10 @@ function BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_
         y2 = math.floor((height - downtown_h) / 2) + downtown_h
     }
 
-    print("DOWNTOWN DEBUG: District bounds (" .. downtown_district.x1 .. "," .. downtown_district.y1 .. ") to (" .. downtown_district.x2 .. "," .. downtown_district.y2 .. ")")
-    print("DOWNTOWN DEBUG: Size " .. downtown_w .. "x" .. downtown_h .. " = " .. (downtown_w * downtown_h) .. " total tiles")
-
     local all_segments = {}
 
     -- Downtown: small blocks (2–3 cell size) recorded as split-line segments
     BlockSubdivisionService._splitBlocksCollectSegments(downtown_district, 2, 3, 0, all_segments)
-    print("Downtown split-line segments generated")
 
     -- Outer regions: each region processed from its bounding box
     local regions = BlockSubdivisionService._findArterialRegionsExcludeDowntown(city_grid, zone_grid, width, height, downtown_district)
@@ -70,20 +62,20 @@ function BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_
     for region_idx, region in ipairs(regions) do
         local zone_type = region.zone or "residential_north"
         local zone_params = BlockSubdivisionService._getBlockSizeForZone(zone_type, width, height)
+        local min_s = (params.min_block_size and params.min_block_size > 0) and params.min_block_size or zone_params.min_size
+        local max_s = (params.max_block_size and params.max_block_size > 0) and params.max_block_size or zone_params.max_size
         local initial_block = {
             x1 = region.min_x, y1 = region.min_y,
             x2 = region.max_x, y2 = region.max_y
         }
-        BlockSubdivisionService._splitBlocksCollectSegments(initial_block, zone_params.min_size, zone_params.max_size, 0, all_segments)
+        BlockSubdivisionService._splitBlocksCollectSegments(initial_block, min_s, max_s, 0, all_segments)
     end
 
-    BlockSubdivisionService._drawStreetsToGrid(city_grid, all_segments, width, height)
+    BlockSubdivisionService._drawStreetsToGrid(city_grid, all_segments, width, height, params.cell_mask)
 
     Game.street_segments = all_segments
     Game.street_intersections = BlockSubdivisionService._findEdgeIntersections(all_segments)
 
-    print("=== BlockSubdivisionService.generateStreets COMPLETE ===")
-    print("Total segments: " .. #all_segments .. ", Outer regions: " .. #regions)
     return true
 end
 
@@ -180,7 +172,6 @@ end
 
 -- FIXED: Find regions but exclude downtown (proper array indexing)
 function BlockSubdivisionService._findArterialRegionsExcludeDowntown(city_grid, zone_grid, width, height, downtown_district)
-    print("Finding arterial regions (excluding downtown)...")
     local regions = {}
     local visited = {}
     
@@ -210,7 +201,6 @@ function BlockSubdivisionService._findArterialRegionsExcludeDowntown(city_grid, 
         end
     end
     
-    print("Found " .. #regions .. " non-downtown regions to subdivide")
     return regions
 end
 
@@ -262,8 +252,6 @@ function BlockSubdivisionService._floodFillRegionExcludeDowntown(city_grid, zone
 end
 
 function BlockSubdivisionService._generateProperBlocks(region, min_block_size, max_block_size)
-    print("Generating blocks for region: (" .. region.min_x .. "," .. region.min_y .. ") to (" .. region.max_x .. "," .. region.max_y .. ")")
-    
     local blocks = {}
     
     -- Start with the entire region as one block
@@ -274,15 +262,8 @@ function BlockSubdivisionService._generateProperBlocks(region, min_block_size, m
         y2 = region.max_y
     }
     
-    print("Initial block: (" .. initial_block.x1 .. "," .. initial_block.y1 .. ") to (" .. initial_block.x2 .. "," .. initial_block.y2 .. ")")
-    
     -- Recursively split this block into smaller blocks
     BlockSubdivisionService._recursiveSplitBlock(initial_block, min_block_size, max_block_size, 0, blocks)
-    
-    print("Split into " .. #blocks .. " final blocks")
-    for i, block in ipairs(blocks) do
-        print("  Final block " .. i .. ": (" .. block.x1 .. "," .. block.y1 .. ") to (" .. block.x2 .. "," .. block.y2 .. ")")
-    end
     
     return blocks
 end
@@ -291,23 +272,18 @@ function BlockSubdivisionService._recursiveSplitBlock(block, min_block_size, max
     local width = block.x2 - block.x1 + 1
     local height = block.y2 - block.y1 + 1
 
-    print("  Depth " .. depth .. ": Block (" .. block.x1 .. "," .. block.y1 .. ") to (" .. block.x2 .. "," .. block.y2 .. ") size " .. width .. "x" .. height)
-
     -- Stop if block is small enough or we've gone too deep
     if (width <= max_block_size and height <= max_block_size) then
-        print("  Depth " .. depth .. ": KEEPING block (size limit reached)")
         table.insert(blocks, block)
         return
     end
-    
+
     if (width <= min_block_size * 2 or height <= min_block_size * 2) then
-        print("  Depth " .. depth .. ": KEEPING block (too narrow to split: " .. width .. "x" .. height .. ")")
         table.insert(blocks, block)
         return
     end
-    
+
     if depth > 12 then
-        print("  Depth " .. depth .. ": KEEPING block (max depth reached)")
         table.insert(blocks, block)
         return
     end
@@ -319,26 +295,21 @@ function BlockSubdivisionService._recursiveSplitBlock(block, min_block_size, max
     local split_vertical = false
     if width > height * 1.2 then
         split_vertical = true
-        print("  Depth " .. depth .. ": Splitting VERTICALLY (wide block)")
     elseif height > width * 1.2 then
         split_vertical = false
-        print("  Depth " .. depth .. ": Splitting HORIZONTALLY (tall block)")
     else
         split_vertical = love.math.random() < 0.5
-        print("  Depth " .. depth .. ": Splitting " .. (split_vertical and "VERTICALLY" or "HORIZONTALLY") .. " (random)")
     end
 
     if split_vertical then
         local min_split = block.x1 + min_block_size - 1
         local max_split = block.x2 - min_block_size + 1
         if min_split >= max_split then
-            print("  Depth " .. depth .. ": FAILED vertical split (not enough space)")
             table.insert(blocks, block)
             return
         end
 
         local split_x = love.math.random(min_split, max_split)
-        print("  Depth " .. depth .. ": Splitting at x=" .. split_x)
 
         local left_block = {x1 = block.x1, y1 = block.y1, x2 = split_x, y2 = block.y2}
         local right_block = {x1 = split_x + 2, y1 = block.y1, x2 = block.x2, y2 = block.y2}
@@ -350,13 +321,11 @@ function BlockSubdivisionService._recursiveSplitBlock(block, min_block_size, max
         local min_split = block.y1 + min_block_size - 1
         local max_split = block.y2 - min_block_size + 1
         if min_split >= max_split then
-            print("  Depth " .. depth .. ": FAILED horizontal split (not enough space)")
             table.insert(blocks, block)
             return
         end
 
         local split_y = love.math.random(min_split, max_split)
-        print("  Depth " .. depth .. ": Splitting at y=" .. split_y)
 
         local top_block = {x1 = block.x1, y1 = block.y1, x2 = block.x2, y2 = split_y}
         local bottom_block = {x1 = block.x1, y1 = split_y + 2, x2 = block.x2, y2 = block.y2}
@@ -412,8 +381,6 @@ function BlockSubdivisionService._splitBlocksCollectSegments(block, min_block_si
 end
 
 function BlockSubdivisionService._convertBlocksToStreetSegments(blocks, width, height, downtown_district)
-    print("Converting " .. #blocks .. " blocks to street segments...")
-
     local segments = {}
     local dt = downtown_district
 
@@ -429,7 +396,6 @@ function BlockSubdivisionService._convertBlocksToStreetSegments(blocks, width, h
     -- Mark all block cells
     -- Outer-region blocks must NOT mark downtown cells — downtown has its own subdivision.
     -- Only blocks entirely within downtown bounds are allowed to mark downtown cells.
-    print("Marking block cells...")
     for block_idx, block in ipairs(blocks) do
         for y = block.y1, block.y2 do
             for x = block.x1, block.x2 do
@@ -444,7 +410,6 @@ function BlockSubdivisionService._convertBlocksToStreetSegments(blocks, width, h
     end
     
     -- Find horizontal street segments that span the FULL width of street corridors
-    print("Finding full-width horizontal street segments...")
     for y = 1, height do
         local x = 1
         while x <= width do
@@ -490,9 +455,6 @@ function BlockSubdivisionService._convertBlocksToStreetSegments(blocks, width, h
                             y = y
                         }
                         table.insert(segments, segment)
-                        print("  H segment: x=" .. segment.x1 .. " to " .. segment.x2 .. " at y=" .. segment.y)
-                    else
-                        print("  Skipping isolated H corridor at y=" .. y .. " (no connections)")
                     end
                 end
             else
@@ -502,7 +464,6 @@ function BlockSubdivisionService._convertBlocksToStreetSegments(blocks, width, h
     end
     
     -- Find vertical street segments that span the FULL height of street corridors
-    print("Finding full-height vertical street segments...")
     for x = 1, width do
         local y = 1
         while y <= height do
@@ -545,9 +506,6 @@ function BlockSubdivisionService._convertBlocksToStreetSegments(blocks, width, h
                             y2 = segment_end
                         }
                         table.insert(segments, segment)
-                        print("  V segment: y=" .. segment.y1 .. " to " .. segment.y2 .. " at x=" .. segment.x)
-                    else
-                        print("  Skipping isolated V corridor at x=" .. x .. " (no connections)")
                     end
                 end
             else
@@ -556,7 +514,6 @@ function BlockSubdivisionService._convertBlocksToStreetSegments(blocks, width, h
         end
     end
     
-    print("Generated " .. #segments .. " connected street segments (no dead ends, extended to borders)")
     return segments
 end
 
@@ -615,9 +572,8 @@ function BlockSubdivisionService._findEdgeIntersections(street_segments)
     return intersections
 end
 
-function BlockSubdivisionService._drawStreetsToGrid(city_grid, street_segments, width, height)
-    print("Drawing " .. #street_segments .. " street segments onto the main grid...")
-    
+function BlockSubdivisionService._drawStreetsToGrid(city_grid, street_segments, width, height, cell_mask)
+
     -- Calculate downtown bounds
     local C_MAP = require("data.constants").MAP
     local downtown_w = math.min(width, C_MAP.DOWNTOWN_GRID_WIDTH)
@@ -628,16 +584,17 @@ function BlockSubdivisionService._drawStreetsToGrid(city_grid, street_segments, 
         x2 = math.floor((width - downtown_w) / 2) + downtown_w,
         y2 = math.floor((height - downtown_h) / 2) + downtown_h
     }
-    
+
     for _, segment in ipairs(street_segments) do
         if segment.type == "horizontal" then
             for x = segment.x1, segment.x2 do
                 if x >= 1 and x <= width and segment.y >= 1 and segment.y <= height then
                     if city_grid[segment.y][x].type ~= "arterial" then
-                        -- Use downtown_road in downtown area, regular road elsewhere
-                        local is_downtown = (x >= downtown_bounds.x1 and x <= downtown_bounds.x2 and 
-                                           segment.y >= downtown_bounds.y1 and segment.y <= downtown_bounds.y2)
-                        city_grid[segment.y][x] = { type = is_downtown and "downtown_road" or "road" }
+                        if not cell_mask or (cell_mask[segment.y] and cell_mask[segment.y][x]) then
+                            local is_downtown = (x >= downtown_bounds.x1 and x <= downtown_bounds.x2 and
+                                               segment.y >= downtown_bounds.y1 and segment.y <= downtown_bounds.y2)
+                            city_grid[segment.y][x] = { type = is_downtown and "downtown_road" or "road" }
+                        end
                     end
                 end
             end
@@ -645,10 +602,11 @@ function BlockSubdivisionService._drawStreetsToGrid(city_grid, street_segments, 
             for y = segment.y1, segment.y2 do
                 if y >= 1 and y <= height and segment.x >= 1 and segment.x <= width then
                     if city_grid[y][segment.x].type ~= "arterial" then
-                        -- Use downtown_road in downtown area, regular road elsewhere
-                        local is_downtown = (segment.x >= downtown_bounds.x1 and segment.x <= downtown_bounds.x2 and 
-                                           y >= downtown_bounds.y1 and y <= downtown_bounds.y2)
-                        city_grid[y][segment.x] = { type = is_downtown and "downtown_road" or "road" }
+                        if not cell_mask or (cell_mask[y] and cell_mask[y][segment.x]) then
+                            local is_downtown = (segment.x >= downtown_bounds.x1 and segment.x <= downtown_bounds.x2 and
+                                               y >= downtown_bounds.y1 and y <= downtown_bounds.y2)
+                            city_grid[y][segment.x] = { type = is_downtown and "downtown_road" or "road" }
+                        end
                     end
                 end
             end

@@ -302,19 +302,19 @@ function WfcLabController._debugFloodFillRegions(city_grid, zone_grid)
 end
 
 -- New smoothing function specifically for overlay visualization
-function WfcLabController._smoothPathForOverlay(points)
+function WfcLabController._smoothPathForOverlay(points, segments_per_span)
     if not points or #points < 2 then
         return points or {}
     end
-    
+
     -- If we have less than 4 points, use simple linear interpolation
     if #points < 4 then
         return WfcLabController._linearInterpolation(points, 5)
     end
-    
-    -- For 4+ points, use a gentle Catmull-Rom spline with reduced segments
+
+    -- For 4+ points, use a gentle Catmull-Rom spline
     local smooth_points = {}
-    local segments_per_span = 8 -- Reduced from 10 for less jaggedness
+    local segments_per_span = segments_per_span or 8
     
     -- Add the first point
     table.insert(smooth_points, {x = points[1].x, y = points[1].y})

@@ -78,7 +78,7 @@ function love.load()
     local WfcLabController = require("controllers.WfcLabController")
     Game.wfc_lab_controller = WfcLabController:new(Game)
     Game.wfc_lab_hotkeys = Game.wfc_lab_controller:getHandledKeys()
-    
+
     Game.state = require("models.GameState"):new(C, Game)
     
     if save_data then
@@ -97,6 +97,9 @@ function love.load()
     Game.input_controller = InputController:new(Game)
     Game.game_view = GameView:new(Game)
     Game.ui_view = UIView:new(Game)
+    Game.sandbox_controller = require("controllers.SandboxController"):new(Game)
+    Game.sandbox_view = require("views.SandboxView"):new(Game)
+    Game.sandbox_sidebar_view = require("views.SandboxSidebarView"):new(Game)
 
     ErrorService.withErrorHandling(function()
         Game.maps.region:generateRegion()
@@ -136,6 +139,9 @@ end
 
 function love.update(dt)
     Game.game_controller:update(dt)
+    if Game.sandbox_controller then
+        Game.sandbox_controller:update(dt)
+    end
     
     if Game.auto_save_timer then
         Game.auto_save_timer = Game.auto_save_timer - dt
@@ -151,6 +157,12 @@ function love.update(dt)
 end
 
 function love.draw()
+    if Game.sandbox_controller:isActive() then
+        Game.sandbox_sidebar_view:draw()
+        Game.sandbox_view:draw()
+        return
+    end
+
     Game.ui_view:draw()
     Game.game_view:draw()
 
@@ -160,40 +172,64 @@ function love.draw()
 
     Game.zoom_controls:draw(Game)
     Game.ui_manager.modal_manager:draw(Game)
-    
-    if Game.input_controller:isDebugMenuVisible() then
-        Game.input_controller:getDebugMenuView():draw()
-    end
 end
 
 function love.keypressed(key)
-    -- Check if the key belongs to the WFC Lab Controller first
-    if Game.wfc_lab_hotkeys[key] then
-        Game.wfc_lab_controller:keypressed(key)
-        return -- The key has been handled
+    if key == "f9" then
+        Game.sandbox_controller:toggle()
+        return
     end
 
-    -- If not handled by the lab, pass it to the main input controller
+    if Game.sandbox_controller:isActive() then
+        Game.sandbox_controller:handle_keypressed(key)
+        return
+    end
+
+    if Game.wfc_lab_hotkeys[key] then
+        Game.wfc_lab_controller:keypressed(key)
+        return
+    end
+
     Game.input_controller:keypressed(key)
 end
 
 function love.mousewheelmoved(x, y)
+    if Game.sandbox_controller:isActive() then
+        Game.sandbox_controller:handle_mouse_wheel(x, y)
+        return
+    end
     Game.input_controller:mousewheelmoved(x, y)
 end
 
 function love.mousepressed(x, y, button)
+    if Game.sandbox_controller:isActive() then
+        Game.sandbox_controller:handle_mouse_down(x, y, button)
+        return
+    end
     Game.input_controller:mousepressed(x, y, button)
 end
 
 function love.mousereleased(x, y, button)
+    if Game.sandbox_controller:isActive() then
+        Game.sandbox_controller:handle_mouse_up(x, y, button)
+        return
+    end
     Game.input_controller:mousereleased(x, y, button)
 end
 
 function love.mousemoved(x, y, dx, dy)
+    if Game.sandbox_controller:isActive() then
+        Game.sandbox_controller:handle_mouse_moved(x, y, dx, dy)
+        return
+    end
     Game.input_controller:mousemoved(x, y, dx, dy)
 end
 
 function love.textinput(text)
+    if Game.sandbox_controller:isActive() then
+        Game.sandbox_controller:handle_textinput(text)
+        return
+    end
     Game.input_controller:textinput(text)
 end
 

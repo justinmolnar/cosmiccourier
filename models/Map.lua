@@ -44,22 +44,23 @@ function Map:isRoad(tile_type)
 end
 
 local function getTileColor(tile_type, is_in_downtown, C_MAP)
+    if tile_type == "arterial" then
+        return C_MAP.COLORS.ARTERIAL
+    end
     if is_in_downtown then
-        if tile_type == "road" or tile_type == "downtown_road" or 
-           tile_type == "arterial" or tile_type == "highway" or 
-           tile_type == "highway_ring" or tile_type == "highway_ns" or 
-           tile_type == "highway_ew" then
+        if tile_type == "road" or tile_type == "downtown_road" or
+           tile_type == "highway" or tile_type == "highway_ring" or
+           tile_type == "highway_ns" or tile_type == "highway_ew" then
             return C_MAP.COLORS.DOWNTOWN_ROAD
         else
             return C_MAP.COLORS.DOWNTOWN_PLOT
         end
     else
-        if tile_type == "road" or tile_type == "downtown_road" or 
-           tile_type == "arterial" or tile_type == "highway" or 
-           tile_type == "highway_ring" or tile_type == "highway_ns" or 
-           tile_type == "highway_ew" then
+        if tile_type == "road" or tile_type == "downtown_road" or
+           tile_type == "highway" or tile_type == "highway_ring" or
+           tile_type == "highway_ns" or tile_type == "highway_ew" then
             return C_MAP.COLORS.ROAD
-        elseif tile_type == "grass" then 
+        elseif tile_type == "grass" then
             return C_MAP.COLORS.GRASS
         elseif tile_type == "water" then
             return C_MAP.COLORS.WATER
@@ -284,8 +285,26 @@ function Map:getRandomDowntownBuildingPlot()
     if #downtown_plots > 0 then
         return downtown_plots[love.math.random(1, #downtown_plots)]
     end
-    
-    return self:getRandomBuildingPlot() -- Fallback to any plot if none are found
+
+    -- building_plots may not have been populated with downtown tiles yet.
+    -- Scan the grid directly for downtown_plot tiles within bounds.
+    if self.grid and #self.grid > 0 then
+        local direct_plots = {}
+        for y = math.floor(y_min) + 1, math.floor(y_max) do
+            if self.grid[y] then
+                for x = math.floor(x_min) + 1, math.floor(x_max) do
+                    if self.grid[y][x] and self.grid[y][x].type == "downtown_plot" then
+                        table.insert(direct_plots, {x = x, y = y})
+                    end
+                end
+            end
+        end
+        if #direct_plots > 0 then
+            return direct_plots[love.math.random(1, #direct_plots)]
+        end
+    end
+
+    return nil  -- No downtown plots found anywhere
 end
 
 function Map:generateRegion()

@@ -8,17 +8,11 @@ local WFCZoningService = require("services.WFCZoningService")
 local BlockSubdivisionService = require("services.BlockSubdivisionService")
 
 function NewCityGenService.generateDetailedCity(params)
-    print("NewCityGenService: Starting detailed city generation...")
-
     local C_MAP = require("data.constants").MAP
     local width = params.width or C_MAP.CITY_GRID_WIDTH
     local height = params.height or C_MAP.CITY_GRID_HEIGHT
 
     local city_grid = NewCityGenService._createEmptyGrid(width, height)
-    
-    -- DEBUG: Check initial state
-    print("=== DEBUG: After creating empty grid ===")
-    NewCityGenService._debugDowntownArea(city_grid, width, height, "INITIAL")
 
     -- STAGE 1: Zone Generation
     local wfc_params = {
@@ -27,33 +21,25 @@ function NewCityGenService.generateDetailedCity(params)
     }
     local zone_grid = NewCityGenService._generateZonesWithWFC(width, height, wfc_params)
     if not zone_grid then return nil end
-    
-    -- DEBUG: Check after zone generation
-    print("=== DEBUG: After zone generation ===")
-    NewCityGenService._debugDowntownArea(city_grid, width, height, "AFTER_ZONES")
 
     -- STAGE 2: Arterial Road Generation
     local arterial_paths = NewCityGenService._generateArterialsSimple(city_grid, zone_grid, {}, params)
-    
-    -- DEBUG: Check after arterial generation
-    print("=== DEBUG: After arterial generation ===")
-    NewCityGenService._debugDowntownArea(city_grid, width, height, "AFTER_ARTERIALS")
 
     -- STAGE 3: Street Generation (now handles downtown properly)
-    BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, params)
-    
-    -- DEBUG: Check after street generation
-    print("=== DEBUG: After street generation ===")
-    NewCityGenService._debugDowntownArea(city_grid, width, height, "AFTER_STREETS")
+    local algo = params.street_algo or 1
+    if algo == 2 then
+        require("services.streets.OrganicStreetService").generateStreets(city_grid, zone_grid, arterial_paths, params)
+    elseif algo == 3 then
+        require("services.streets.RadialStreetService").generateStreets(city_grid, zone_grid, arterial_paths, params)
+    elseif algo == 4 then
+        require("services.streets.GrowthStreetService").generateStreets(city_grid, zone_grid, arterial_paths, params)
+    else
+        BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, params)
+    end
 
     -- STAGE 4: Fill remaining areas with plots
     NewCityGenService._fillRemainingWithPlots(city_grid, zone_grid, width, height)
-    
-    -- DEBUG: Check after plot filling
-    print("=== DEBUG: After plot filling ===")
-    NewCityGenService._debugDowntownArea(city_grid, width, height, "AFTER_PLOTS")
 
-    print("NewCityGenService: City generation complete")
     return {
         city_grid = city_grid,
         zone_grid = zone_grid,
@@ -103,27 +89,19 @@ function NewCityGenService._debugDowntownArea(city_grid, width, height, stage)
 end
 
 function NewCityGenService.generateMinimalTest(params)
-    print("=== MINIMAL TEST: Only Zones + Arterials ===")
-    
     local C_MAP = require("data.constants").MAP
     local width = params.width or C_MAP.CITY_GRID_WIDTH
     local height = params.height or C_MAP.CITY_GRID_HEIGHT
 
     local city_grid = NewCityGenService._createEmptyGrid(width, height)
-    print("1. Created empty grid (all grass)")
-    
+
     local zone_grid = NewCityGenService._generateZonesWithWFC(width, height, {
         downtown_width = C_MAP.DOWNTOWN_GRID_WIDTH,
         downtown_height = C_MAP.DOWNTOWN_GRID_HEIGHT
     })
-    print("2. Generated zone grid")
-    
+
     local arterial_paths = NewCityGenService._generateArterialsSimple(city_grid, zone_grid, {}, params)
-    print("3. Generated arterials")
-    
-    -- DEBUG: Check what's in downtown now (before any street generation)
-    NewCityGenService._debugDowntownArea(city_grid, width, height, "MINIMAL_TEST_RESULT")
-    
+
     -- DON'T run street generation or plot filling - just return what we have
     return {
         city_grid = city_grid,
@@ -168,7 +146,6 @@ function NewCityGenService._fillRemainingWithPlots(city_grid, zone_grid, width, 
         end
     end
     
-    print("Plot filling complete - all road types preserved")
 end
 
 
@@ -186,38 +163,22 @@ end
 
 -- Generate zones using our custom WFCZoningService
 function NewCityGenService._generateZonesWithWFC(width, height, params)
-    print("NewCityGenService: Using custom WFCZoningService for zone generation")
-    
     -- Calculate downtown center
     local center_x = math.floor(width / 2)
     local center_y = math.floor(height / 2)
-    
-    print(string.format("NewCityGenService: Placing downtown at (%d, %d)", center_x, center_y))
-    
+
     -- Use our custom WFC zoning service that creates proper districts
-    local zone_grid = WFCZoningService.generateCoherentZones(width, height, center_x, center_y)
-    
+    local zone_grid = WFCZoningService.generateCoherentZones(width, height, center_x, center_y, params)
+
     if not zone_grid then
-        print("ERROR: WFCZoningService failed to generate zones!")
         return nil
     end
-    
-    print("NewCityGenService: Custom WFC zone generation successful!")
-    
-    -- Debug: Print zone statistics
-    local stats, total = WFCZoningService.getZoneStats(zone_grid)
-    print("NewCityGenService: Zone distribution:")
-    for zone_name, zone_stats in pairs(stats) do
-        print(string.format("  %s: %d cells (%d%%)", zone_name, zone_stats.count, zone_stats.percentage))
-    end
-    
+
     return zone_grid
 end
 
 -- Simple zone generation (fallback)
 function NewCityGenService._generateZonesSimple(width, height, params)
-    print("NewCityGenService: Using simple zone generation")
-    
     local zone_grid = {}
     for y = 1, height do
         zone_grid[y] = {}
@@ -242,8 +203,6 @@ end
 
 -- Generate arterial roads with A* pathfinding
 function NewCityGenService._generateArterialsSimple(city_grid, zone_grid, highway_connections, params)
-    print("NewCityGenService: Generating arterial roads")
-    
     local arterial_paths = {}
     
     -- Import the arterial road service
@@ -251,21 +210,19 @@ function NewCityGenService._generateArterialsSimple(city_grid, zone_grid, highwa
     
     -- Set up arterial generation parameters
     local arterial_params = {
-        num_arterials = params.num_arterials, -- Let the service calculate if nil
-        min_edge_distance = params.min_edge_distance or 15
+        num_arterials      = params.num_arterials,
+        min_edge_distance  = params.min_edge_distance or 15,
+        arterial_thickness = params.arterial_thickness or 1,
     }
     
     -- Generate arterials and get the paths back
     arterial_paths = ArterialRoadService.generateArterialRoads(city_grid, zone_grid, arterial_params)
-    
-    print("NewCityGenService: Arterial generation complete, generated " .. #arterial_paths .. " paths")
+
     return arterial_paths
 end
 
 -- Generate local details (roads, plots) - simple implementation (DEPRECATED - use BlockSubdivisionService instead)
 function NewCityGenService._generateDetailsSimple(city_grid, zone_grid, params)
-    print("NewCityGenService: Using deprecated simple detail generation")
-    
     local width, height = #zone_grid[1], #zone_grid
     
     for y = 1, height do
@@ -362,15 +319,11 @@ end
 
 -- Simplified arterials-only generation for testing
 function NewCityGenService.generateArterialsOnly(city_grid, zone_grid, params)
-    print("NewCityGenService: Generating arterials only")
-    
     if not city_grid or not zone_grid then
-        print("ERROR: Missing grids for arterial generation")
         return false, nil
     end
-    
+
     -- Clear any existing arterial roads
-    print("NewCityGenService: Clearing existing arterial roads")
     local width, height = #city_grid[1], #city_grid
     for y = 1, height do
         for x = 1, width do
@@ -391,17 +344,13 @@ function NewCityGenService.generateArterialsOnly(city_grid, zone_grid, params)
     
     -- Generate arterials using pathfinding and get the paths back
     local generated_paths = ArterialRoadService.generateArterialRoads(city_grid, zone_grid, arterial_params)
-    
-    print("NewCityGenService: Arterials-only generation complete")
+
     return true, generated_paths
 end
 
 -- New function to generate streets only (after arterials are placed)
 function NewCityGenService.generateStreetsOnly(city_grid, zone_grid, arterial_paths, params)
-    print("NewCityGenService: Generating streets only using recursive subdivision")
-    
     if not city_grid or not zone_grid then
-        print("ERROR: Missing grids for street generation")
         return false
     end
     
@@ -429,11 +378,10 @@ function NewCityGenService.generateStreetsOnly(city_grid, zone_grid, arterial_pa
     
     -- Generate streets using recursive subdivision
     local success = BlockSubdivisionService.generateStreets(city_grid, zone_grid, arterial_paths, street_params)
-    
+
     -- Fill remaining areas with plots
     NewCityGenService._fillRemainingWithPlots(city_grid, zone_grid, width, height)
-    
-    print("NewCityGenService: Streets-only generation complete")
+
     return success
 end
 

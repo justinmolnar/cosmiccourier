@@ -33,7 +33,10 @@ end
 
 function UIManager:handle_scroll(dy)
     local mx, my = love.mouse.getPosition()
-    if self.trips_accordion:handle_scroll(mx, my, dy) then return end
+    if self.trips_accordion:handle_scroll(mx, my, dy)    then return end
+    if self.upgrades_accordion:handle_scroll(mx, my, dy) then return end
+    if self.vehicles_accordion:handle_scroll(mx, my, dy) then return end
+    if self.clients_accordion:handle_scroll(mx, my, dy)  then return end
 end
 
 function UIManager:handle_mouse_down(x, y, button, game)

@@ -27,7 +27,14 @@ function moveAlongPath(dt, vehicle, game)
     local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / game.C.MAP.TILE_SIZE
     local normalized_speed = base_speed / speed_normalization_factor
 
-    -- Step 3: Calculate the distance to travel in world units using the normalized speed
+    -- Step 3: For bikes (downtown-only), scale speed proportionally to downtown size
+    -- so screen-space speed stays constant regardless of how small/large downtown is.
+    -- Camera zoom scales inversely with downtown width, so grid speed must scale with it.
+    if vehicle.type == "bike" then
+        normalized_speed = normalized_speed * (game.C.MAP.DOWNTOWN_GRID_WIDTH / 64)
+    end
+
+    -- Step 4: Calculate the distance to travel in world units using the normalized speed
     local travel_dist = normalized_speed * dt
 
     local dist_x = target_px - vehicle.px

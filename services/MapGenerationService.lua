@@ -42,6 +42,18 @@ function MapGenerationService.generateMap(map)
     if result and result.city_grid then
         -- Replace the map's grid with the newly generated one
         map.grid = result.city_grid
+        map.zone_grid = result.zone_grid  -- store for district detection
+
+        -- Set downtown_offset so drawGrid highlights the correct center region
+        local city_w  = C_MAP.CITY_GRID_WIDTH
+        local city_h  = C_MAP.CITY_GRID_HEIGHT
+        local dt_w    = C_MAP.DOWNTOWN_GRID_WIDTH
+        local dt_h    = C_MAP.DOWNTOWN_GRID_HEIGHT
+        map.downtown_offset = {
+            x = math.floor(city_w / 2) - math.floor(dt_w / 2),
+            y = math.floor(city_h / 2) - math.floor(dt_h / 2),
+        }
+
         print("MapGenerationService: Successfully replaced map grid with new generation.")
     else
         print("ERROR: NewCityGenService failed to return a valid city grid. Falling back to empty grid.")

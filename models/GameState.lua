@@ -69,7 +69,7 @@ function State:update(dt, game)
 
     for i = #self.floating_texts, 1, -1 do
         local text = self.floating_texts[i]
-        text.y = text.y + C.EFFECTS.PAYOUT_TEXT_FLOAT_SPEED * dt
+        text.y = text.y + (C.EFFECTS.PAYOUT_TEXT_FLOAT_SPEED / game.camera.scale) * dt
         text.timer = text.timer - dt
         text.alpha = text.timer / C.EFFECTS.PAYOUT_TEXT_LIFESPAN_SEC
         

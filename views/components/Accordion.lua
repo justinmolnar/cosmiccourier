@@ -129,7 +129,7 @@ end
 function Accordion:handle_scroll(mx, my, dy)
     if not self.is_open then return false end
     
-    if mx > self.x and mx < self.x + self.w and y > self.y + self.header_h and my < self.y + self.header_h + self.content_h then
+    if mx > self.x and mx < self.x + self.w and my > self.y + self.header_h and my < self.y + self.header_h + self.content_h then
         self.scroll_y = self.scroll_y - (dy * 20)
         return true
     end

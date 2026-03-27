@@ -56,28 +56,19 @@ local ADJACENCY = {
 
 function WFCZoningService.generateCoherentZones(width, height, downtown_center_x, downtown_center_y, params)
     params = params or {}
-    print("WFC: Starting two-pass coherent zone generation")
-    
-    -- DEBUG: Check if this function is accidentally modifying a city_grid instead of zone_grid
-    print("WFC DEBUG: This function should ONLY create zone_grid, NOT modify city_grid!")
     
     local coarse_width = math.max(4, math.floor(width / 4))
     local coarse_height = math.max(4, math.floor(height / 4))
     local coarse_downtown_x = math.max(1, math.min(coarse_width, math.floor(downtown_center_x / 4)))
     local coarse_downtown_y = math.max(1, math.min(coarse_height, math.floor(downtown_center_y / 4)))
     
-    print("WFC: Pass 1 - Coarse grid:", coarse_width .. "x" .. coarse_height)
     local coarse_grid = WFCZoningService._generateCoarseZones(coarse_width, coarse_height, coarse_downtown_x, coarse_downtown_y)
-    
-    print("WFC: Pass 2 - Fine grid:", width .. "x" .. height)
+
     local fine_grid = WFCZoningService._generateConstrainedFineGrid(width, height, coarse_grid)
-    
-    print("WFC: Pass 3 - Stamping downtown square")
     local downtown_w = params.downtown_width or 64
     local downtown_h = params.downtown_height or 64
     WFCZoningService._stampDowntownSquare(fine_grid, width, height, downtown_center_x, downtown_center_y, downtown_w, downtown_h)
     
-    print("WFC DEBUG: Returning zone_grid, should NOT affect city_grid!")
     return fine_grid
 end
 
@@ -125,7 +116,6 @@ function WFCZoningService._generateCoarseZones(width, height, downtown_x, downto
             if not grid[y][x] and WFCZoningService._isValidSeedLocation(grid, x, y, specific_zone_to_place, width, height) then
                 grid[y][x] = specific_zone_to_place
                 placed = placed + 1
-                print("WFC: Placed", specific_zone_to_place, "seed at", x, y)
             end
             attempts = attempts + 1
         end
@@ -171,7 +161,6 @@ function WFCZoningService._generateCoarseZones(width, height, downtown_x, downto
     -- CLEANUP: Remove isolated single cells (more aggressive - 3 passes)
     WFCZoningService._cleanupIsolatedCells(grid, width, height, 5) -- Increased from 2 to 5 passes
     
-    print("WFC: Coarse grid completed in", iteration, "iterations")
     return grid
 end
 
@@ -188,7 +177,6 @@ function WFCZoningService._reserveDowntownArea(grid, width, height, center_x, ce
         end
     end
     
-    print("WFC: Reserved 15x15 downtown area - WFC will NOT touch these cells")
 end
 -- NEW: Place guaranteed minimum-sized districts first (SMALLER PARKS)
 function WFCZoningService._placeGuaranteedDistricts(grid, width, height, downtown_x, downtown_y)
@@ -215,9 +203,6 @@ function WFCZoningService._placeGuaranteedDistricts(grid, width, height, downtow
         
         if center_x and center_y then
             WFCZoningService._carveDistrict(grid, width, height, center_x, center_y, req.min_size, req.max_size, req.zone)
-            print("WFC: Placed guaranteed", req.zone, "district at", center_x, center_y, "size", req.min_size, "-", req.max_size)
-        else
-            print("WFC: WARNING - Could not place guaranteed", req.zone, "district")
         end
     end
 end
@@ -378,7 +363,6 @@ function WFCZoningService._carveSquareDistrict(grid, width, height, center_x, ce
         end
     end
     
-    print("WFC: Carved EXACT square", zone_type, "district with", #placed_cells, "cells (", side_length .. "x" .. side_length, ")")
 end
 
 -- UPDATED: Carve out a district with size limits (SKIP RESERVED CELLS)
@@ -421,7 +405,6 @@ function WFCZoningService._carveDistrict(grid, width, height, center_x, center_y
         end
     end
     
-    print("WFC: Carved", zone_type, "district with", #placed_cells, "cells (target:", target_size .. ")")
 end
 function WFCZoningService._growSeedsIntoBlobs(grid, width, height, iterations)
     for iter = 1, iterations do
@@ -463,7 +446,6 @@ function WFCZoningService._growSeedsIntoBlobs(grid, width, height, iterations)
             end
         end
         
-        print("WFC: Growth iteration", iter, "- grew", #growth_candidates, "cells")
     end
 end
 
@@ -522,7 +504,6 @@ function WFCZoningService._cleanupIsolatedCells(grid, width, height, passes)
             end
         end
         
-        print("WFC: Cleanup pass", pass, "- fixed", changes_made, "isolated cells")
         if changes_made == 0 then break end -- No more isolated cells
     end
 end
@@ -601,26 +582,22 @@ function WFCZoningService._getBestZoneForCell(grid, x, y, width, height)
                     if zone_weights[neighbor_zone] then
                         zone_weights[neighbor_zone] = zone_weights[neighbor_zone] + 50
                     end
-                else
-                    print("WFC: WARNING - Unknown neighbor zone:", neighbor_zone)
                 end
             end
         end
     end
     
-    -- Convert weights to selection array
-    local selection_array = {}
-    for zone_name, weight in pairs(zone_weights) do
-        for i = 1, math.max(1, math.floor(weight)) do
-            table.insert(selection_array, zone_name)
-        end
+    -- Weighted random selection
+    local total_weight = 0
+    for _, w in pairs(zone_weights) do total_weight = total_weight + w end
+    if total_weight <= 0 then return "park_central" end
+    local r = love.math.random() * total_weight
+    local cumulative = 0
+    for zone_name, w in pairs(zone_weights) do
+        cumulative = cumulative + w
+        if r <= cumulative then return zone_name end
     end
-    
-    if #selection_array > 0 then
-        return selection_array[love.math.random(1, #selection_array)]
-    else
-        return "park_central" -- Fallback to park
-    end
+    return "park_central"
 end
 
 function WFCZoningService._generateConstrainedFineGrid(width, height, coarse_grid)
@@ -667,7 +644,6 @@ function WFCZoningService._stampDowntownSquare(grid, width, height, center_x, ce
         end
     end
     
-    print(string.format("WFC: Stamped downtown square with %d cells (%dx%d)", stamped_cells, downtown_w, downtown_h))
 end
 
 function WFCZoningService._getCompatibleZone(base_zone)
