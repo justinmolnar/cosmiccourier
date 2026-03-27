@@ -252,10 +252,22 @@ end
 function SandboxController:_buildFloodFill()
     self.flood_fill_regions = {}
     if not self.lab_grid or not self.lab_zone_grid then return end
+    -- _debugFloodFillRegions reads DOWNTOWN_GRID_WIDTH/HEIGHT from global constants to
+    -- determine which cells to exclude as "downtown". Temporarily set sandbox dims so
+    -- flood-fill uses the correct downtown size (not the restored original 64x64).
+    local C = self.game.C
+    local dt_w = math.max(8, math.floor(self.params.downtown_w))
+    local dt_h = math.max(8, math.floor(self.params.downtown_h))
+    local saved_dw = C.MAP.DOWNTOWN_GRID_WIDTH
+    local saved_dh = C.MAP.DOWNTOWN_GRID_HEIGHT
+    C.MAP.DOWNTOWN_GRID_WIDTH  = dt_w
+    C.MAP.DOWNTOWN_GRID_HEIGHT = dt_h
     local WfcLabController = require("controllers.WfcLabController")
     local ok, regions = pcall(function()
         return WfcLabController._debugFloodFillRegions(self.lab_grid, self.lab_zone_grid)
     end)
+    C.MAP.DOWNTOWN_GRID_WIDTH  = saved_dw
+    C.MAP.DOWNTOWN_GRID_HEIGHT = saved_dh
     if ok and regions then
         self.flood_fill_regions = regions
     end
