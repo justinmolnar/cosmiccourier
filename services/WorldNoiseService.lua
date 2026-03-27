@@ -95,12 +95,16 @@ function WorldNoiseService.generate(w, h, p)
 
     -- Pass 2: normalize, apply edge mask, then overlay mountain ridges ONLY on
     -- land cells so island shapes are completely untouched.
+    -- Also capture pre-ridge smooth heights for river flow routing.
     local range = max_h - min_h
     if range < 0.0001 then range = 0.0001 end
 
-    local colormap = {}
+    local colormap  = {}
+    local pre_ridge = {}   -- flat 1-D array of smooth heights (before mountain overlay)
+
     for y = 1, h do
         colormap[y] = {}
+        local base = (y - 1) * w
         for x = 1, w do
             local norm = (heightmap[y][x] - min_h) / range
 
@@ -109,6 +113,10 @@ function WorldNoiseService.generate(w, h, p)
             if norm > p.deep_ocean_max then
                 norm = p.deep_ocean_max + (norm - p.deep_ocean_max) * em
             end
+
+            -- Store smooth height before mountain overlay — used by river routing
+            -- so ridge spikes don't fragment the drainage network.
+            pre_ridge[base + x] = norm
 
             -- Mountain pass: ridge noise added on top of land only.
             -- land_t ramps from 0 at the coastline to 1 at the interior peak,
@@ -123,6 +131,300 @@ function WorldNoiseService.generate(w, h, p)
             heightmap[y][x] = norm
             local moisture = fbm(x, y, p.moisture_scale, p.moisture_octaves, 0.5, 2.0, sx + 5000, sy + 5000)
             colormap[y][x] = biome_color(norm, moisture, p)
+        end
+    end
+
+    -- Pass 3: Source-tracing rivers with fill-and-spill lakes.
+    --
+    -- Pick N well-spaced highland sources.  Trace each downstream via strict
+    -- D8 flow.  When a trace hits a pit (inland depression), flood-fill the
+    -- basin upward until the lowest rim is found, paint the basin as a lake,
+    -- then continue the river from that rim — rivers never end mid-land.
+    -- Two traces that reach the same cell merge naturally.
+    local river_count = math.floor(p.river_count or 0)
+    if river_count > 0 then
+        local D8 = { {-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1} }
+        local D4 = { {0,-1},{-1,0},{1,0},{0,1} }
+
+        -- Mark true ocean: BFS from all 4 map edges expanding through cells at or
+        -- below ocean_max.  Only edge-connected ocean is marked — isolated inland
+        -- depressions are NOT ocean even if their height is below the threshold.
+        -- River/lake painting never touches is_ocean cells.
+        local is_ocean = {}
+        do
+            local q  = {}
+            local qi = 1
+            local function seed(ci)
+                if not is_ocean[ci] then
+                    is_ocean[ci] = true
+                    q[#q + 1]    = ci
+                end
+            end
+            for x = 1, w do seed(x);           seed((h - 1) * w + x) end
+            for y = 1, h do seed((y - 1) * w + 1); seed((y - 1) * w + w) end
+            while qi <= #q do
+                local ci  = q[qi]; qi = qi + 1
+                local cy2 = math.floor((ci - 1) / w) + 1
+                local cx2 = (ci - 1) % w + 1
+                for _, d in ipairs(D4) do
+                    local nx2, ny2 = cx2 + d[1], cy2 + d[2]
+                    if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                        local ni = (ny2 - 1) * w + nx2
+                        if not is_ocean[ni] and pre_ridge[ni] <= p.ocean_max then
+                            is_ocean[ni] = true
+                            q[#q + 1]    = ni
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Box-blur pre_ridge (radius 3) to smooth micro-pits before routing.
+        local SR   = 3
+        local flat = {}
+        for y = 1, h do
+            local base = (y - 1) * w
+            for x = 1, w do
+                local sum, cnt = 0, 0
+                for dy2 = math.max(1, y - SR), math.min(h, y + SR) do
+                    for dx2 = math.max(1, x - SR), math.min(w, x + SR) do
+                        sum = sum + pre_ridge[(dy2 - 1) * w + dx2]
+                        cnt = cnt + 1
+                    end
+                end
+                flat[base + x] = sum / cnt
+            end
+        end
+
+        local meander_strength = p.meander_strength or 0.020
+
+        -- Strict-downhill D8 flow from unperturbed flat[].
+        -- Pits (no lower neighbour) stay flow_to=0.
+        -- Meander noise is NOT baked in here — adding it to flat[] globally creates
+        -- fake pits everywhere so rivers stop after a few steps at high strength.
+        -- Instead, meander is applied per-step during tracing (see choose_next).
+        local flow_to = {}
+        for y = 1, h do
+            local base = (y - 1) * w
+            for x = 1, w do
+                local i     = base + x
+                local min_v = flat[i]
+                local best  = 0
+                for _, d in ipairs(D8) do
+                    local nx2, ny2 = x + d[1], y + d[2]
+                    if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                        local j = (ny2 - 1) * w + nx2
+                        if flat[j] < min_v then min_v = flat[j]; best = j end
+                    end
+                end
+                flow_to[i] = best
+            end
+        end
+
+        -- Source selection: highland land cells with a downhill path, sorted by
+        -- elevation descending, greedy-spaced so sources spread across the map.
+        local min_sep = math.max(6, math.floor(math.min(w, h) / (river_count + 1)))
+        local candidates = {}
+        for y = 1, h do
+            local base = (y - 1) * w
+            for x = 1, w do
+                local i = base + x
+                if not is_ocean[i] and pre_ridge[i] > p.coast_max and flow_to[i] ~= 0 then
+                    candidates[#candidates + 1] = { i = i, x = x, y = y, elev = flat[i] }
+                end
+            end
+        end
+        table.sort(candidates, function(a, b) return a.elev > b.elev end)
+
+        local sources = {}
+        for _, c in ipairs(candidates) do
+            local ok = true
+            for _, s in ipairs(sources) do
+                local ddx = c.x - s.x
+                local ddy = c.y - s.y
+                if ddx * ddx + ddy * ddy < min_sep * min_sep then
+                    ok = false; break
+                end
+            end
+            if ok then
+                sources[#sources + 1] = c
+                if #sources >= river_count then break end
+            end
+        end
+
+        local RIVER_COLOR = { 0.22, 0.52, 0.88 }
+        local LAKE_COLOR  = { 0.07, 0.20, 0.55 }
+        local lake_delta  = p.lake_delta or 0.010
+        local MAX_LAKE    = 150
+
+        local painted = {}   -- river + lake cells; stops river traces from crossing
+        local is_lake = {}   -- lake-only flag so adjacent lakes can merge into each other
+
+        -- Carve step: absolute lowest D8 neighbour, even uphill.
+        -- Fallback when a pit has no valid spillway.
+        local function carve_step(ci)
+            local cy2 = math.floor((ci - 1) / w) + 1
+            local cx2 = (ci - 1) % w + 1
+            local best_h, best_j = math.huge, nil
+            for _, d in ipairs(D8) do
+                local nx2, ny2 = cx2 + d[1], cy2 + d[2]
+                if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                    local j = (ny2 - 1) * w + nx2
+                    if flat[j] < best_h then best_h = flat[j]; best_j = j end
+                end
+            end
+            return best_j
+        end
+
+        -- Stochastic downhill step for river tracing.
+        -- Scores each valid downhill D8 neighbour as (height_drop + noise*meander).
+        -- At meander=0 always picks steepest (straight lines).
+        -- At higher meander, noise competes with drop → winding paths.
+        -- Unlike baking noise into flat[], this never creates fake pits.
+        local MNS = 0.15   -- noise sample scale for meander
+        local function choose_next(ci)
+            local cy2 = math.floor((ci - 1) / w) + 1
+            local cx2 = (ci - 1) % w + 1
+            local cur  = flat[ci]
+            local best_score, best_j = -math.huge, nil
+            for _, d in ipairs(D8) do
+                local nx2, ny2 = cx2 + d[1], cy2 + d[2]
+                if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                    local j = (ny2 - 1) * w + nx2
+                    if flat[j] < cur then
+                        local drop  = cur - flat[j]
+                        local noise = love.math.noise(nx2 * MNS + sx + 8321, ny2 * MNS + sy + 8321)
+                        local score = drop + noise * meander_strength
+                        if score > best_score then
+                            best_score = score
+                            best_j     = j
+                        end
+                    end
+                end
+            end
+            return best_j  -- nil if no downhill neighbour (true pit)
+        end
+
+        -- Fill-and-spill lake.
+        -- Only triggered for lowland pits (pre_ridge < forest_max).
+        -- Lake boundary uses per-cell noise so edges are ragged/organic rather
+        -- than following smooth flat[] contour lines.
+        -- Adjacent lake cells (is_lake) are pulled in to merge overlapping lakes.
+        -- Returns spillway cell, or nil; caller uses carve_step as fallback.
+        local LNS = 0.25   -- noise scale for lake edge irregularity
+        local function fill_and_spill(pit_i)
+            if lake_delta <= 0 then return nil end
+            if pre_ridge[pit_i] >= p.forest_max then return nil end
+
+            local water_flat = flat[pit_i] + lake_delta
+            local in_basin = {}
+            local basin_list = {}
+            local function add(ci)
+                if not in_basin[ci] then
+                    in_basin[ci] = true
+                    basin_list[#basin_list + 1] = ci
+                end
+            end
+            add(pit_i)
+            local qi = 1
+            while qi <= #basin_list and #basin_list < MAX_LAKE do
+                local ci  = basin_list[qi]; qi = qi + 1
+                local cy2 = math.floor((ci - 1) / w) + 1
+                local cx2 = (ci - 1) % w + 1
+                for _, d in ipairs(D8) do
+                    local nx2, ny2 = cx2 + d[1], cy2 + d[2]
+                    if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                        local ni = (ny2 - 1) * w + nx2
+                        if not in_basin[ni] and not is_ocean[ni] then
+                            -- Per-cell noise shifts the threshold independently of
+                            -- lake_delta so the edge is always ragged regardless of size.
+                            local edge_n = love.math.noise(nx2 * LNS + sx + 9001, ny2 * LNS + sy + 9001)
+                            local thresh = water_flat + (edge_n - 0.5) * 0.04
+                            if flat[ni] <= thresh or is_lake[ni] then
+                                add(ni)
+                            end
+                        end
+                    end
+                end
+            end
+            -- Find lowest rim outside basin
+            local best_rim_h, best_rim_i = math.huge, nil
+            for _, ci in ipairs(basin_list) do
+                local cy2 = math.floor((ci - 1) / w) + 1
+                local cx2 = (ci - 1) % w + 1
+                for _, d in ipairs(D8) do
+                    local nx2, ny2 = cx2 + d[1], cy2 + d[2]
+                    if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                        local ni = (ny2 - 1) * w + nx2
+                        if not in_basin[ni] and flat[ni] < best_rim_h then
+                            best_rim_h = flat[ni]
+                            best_rim_i = ni
+                        end
+                    end
+                end
+            end
+            -- Paint basin as lake
+            for _, ci in ipairs(basin_list) do
+                painted[ci] = true
+                is_lake[ci]  = true
+                local cy2 = math.floor((ci - 1) / w) + 1
+                local cx2 = (ci - 1) % w + 1
+                colormap[cy2][cx2] = LAKE_COLOR
+            end
+            return best_rim_i
+        end
+
+        -- Trace each source downstream to the ocean (or merge with existing river/lake).
+        -- Uses choose_next (stochastic downhill) for meandering paths.
+        -- True pits (no downhill neighbour) → fill_and_spill lake → carve fallback.
+        for _, src in ipairs(sources) do
+            local i     = src.i
+            local steps = 0
+            while i and i > 0 and steps < w * h do
+                steps = steps + 1
+                if is_ocean[i]  then break end
+                if painted[i]   then break end
+                painted[i] = true
+                local cy = math.floor((i - 1) / w) + 1
+                local cx = (i - 1) % w + 1
+                colormap[cy][cx] = RIVER_COLOR
+                local nxt = choose_next(i)
+                if nxt == nil then
+                    nxt = fill_and_spill(i)
+                    if nxt == nil then nxt = carve_step(i) end
+                end
+                i = nxt
+            end
+        end
+
+        -- Lake edge smoothing: 2 passes of cellular automaton.
+        -- Land cells surrounded by mostly lake (≥5 of 8 D8 neighbours) get
+        -- absorbed into the lake, rounding concave corners and filling notches.
+        -- This breaks the straight-contour look without needing to restore colours.
+        for _ = 1, 2 do
+            local to_add = {}
+            for y2 = 1, h do
+                for x2 = 1, w do
+                    local ci = (y2 - 1) * w + x2
+                    if not is_lake[ci] and not is_ocean[ci] then
+                        local cnt = 0
+                        for _, d in ipairs(D8) do
+                            local nx2, ny2 = x2 + d[1], y2 + d[2]
+                            if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                                if is_lake[(ny2 - 1) * w + nx2] then cnt = cnt + 1 end
+                            end
+                        end
+                        if cnt >= 5 then to_add[#to_add + 1] = ci end
+                    end
+                end
+            end
+            for _, ci in ipairs(to_add) do
+                is_lake[ci]  = true
+                painted[ci]  = true
+                local cy2 = math.floor((ci - 1) / w) + 1
+                local cx2 = (ci - 1) % w + 1
+                colormap[cy2][cx2] = LAKE_COLOR
+            end
         end
     end
 

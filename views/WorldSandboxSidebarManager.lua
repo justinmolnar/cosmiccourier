@@ -31,8 +31,8 @@ function WorldSandboxSidebarManager:new(wsc, game)
 
     -- World sliders
     inst.world_sliders = {
-        Slider:new("Width",      100, 800,  p.world_w,    true,  function(v) wsc.params.world_w    = v end, game),
-        Slider:new("Height",      50, 600,  p.world_h,    true,  function(v) wsc.params.world_h    = v end, game),
+        Slider:new("Width",      100, 1400, p.world_w,    true,  function(v) wsc.params.world_w    = v end, game),
+        Slider:new("Height",      50, 1000, p.world_h,    true,  function(v) wsc.params.world_h    = v end, game),
         Slider:new("Seed X",       0, 9999, p.seed_x,     true,  function(v) wsc.params.seed_x     = v end, game),
         Slider:new("Seed Y",       0, 9999, p.seed_y,     true,  function(v) wsc.params.seed_y     = v end, game),
         Slider:new("Edge Margin", 0, 0.40,  p.edge_margin,false, function(v) wsc.params.edge_margin = v end, game),
@@ -65,6 +65,9 @@ function WorldSandboxSidebarManager:new(wsc, game)
         Slider:new("Detail Weight", 0,     0.5,   p.detail_weight,     false, function(v) wsc.params.detail_weight     = v end, game),
         Slider:new("Moisture Scale",0.002, 0.030, p.moisture_scale,    false, function(v) wsc.params.moisture_scale    = v end, game),
         Slider:new("Moisture Oct",  1,     4,     p.moisture_octaves,  true,  function(v) wsc.params.moisture_octaves  = v end, game),
+        Slider:new("Rivers",        0,     300,   p.river_count,        true,  function(v) wsc.params.river_count       = v end, game),
+        Slider:new("Meander",       0,     0.15,  p.meander_strength,   false, function(v) wsc.params.meander_strength  = v end, game),
+        Slider:new("Lake Size",     0,     0.05,  p.lake_delta,         false, function(v) wsc.params.lake_delta        = v end, game),
     }
 
     -- Biome threshold sliders (enforce ascending order in on_change).

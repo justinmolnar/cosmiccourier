@@ -52,6 +52,11 @@ function WorldSandboxController:new(game)
         -- Moisture (biome variation at same elevation)
         moisture_scale   = 0.012,
         moisture_octaves = 3,
+        -- Rivers: fraction of total cells needed as upstream catchment to show a river.
+        -- Lower = more rivers; 0 = disabled.
+        river_count      = 30,   -- slider 0-300: number of river sources to trace
+        meander_strength = 0.08,  -- slider 0-0.15: noise perturbation added to flow heights to create winding paths
+        lake_delta       = 0.010, -- slider 0-0.05: how far above a pit floor cells are included in the lake basin
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
