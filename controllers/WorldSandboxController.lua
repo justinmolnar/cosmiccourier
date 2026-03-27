@@ -34,12 +34,17 @@ function WorldSandboxController:new(game)
         continental_scale   = 0.004,
         continental_octaves = 4,
         continental_weight  = 0.70,
-        -- Terrain layer (internal ridges; keep weight low or it fragments islands)
+        -- Terrain layer (smooth FBM — internal elevation variation within islands)
         terrain_scale   = 0.015,
         terrain_octaves = 3,
         terrain_weight  = 0.25,
         persistence     = 0.50,
         lacunarity      = 2.00,
+        -- Mountain layer (ridge FBM — applied on top of land only, never affects coastlines).
+        -- scale=0.025 → ridge every ~40px → 2-4 ranges per island.
+        mountain_scale    = 0.025,
+        mountain_octaves  = 3,
+        mountain_strength = 0.35,
         -- Detail layer (coastline roughness only)
         detail_scale   = 0.050,
         detail_octaves = 2,

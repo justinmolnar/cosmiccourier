@@ -18,7 +18,7 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.world_acc       = Accordion:new("World",           true,  172)
     inst.continental_acc = Accordion:new("Continental",     true,  110)
     inst.terrain_acc     = Accordion:new("Terrain",         true,  175)
-    inst.detail_acc      = Accordion:new("Detail & Moisture", false, 175)
+    inst.detail_acc      = Accordion:new("Mountains & Detail", false, 240)
     inst.biomes_acc      = Accordion:new("Biome Heights",   false, 240)
     inst.actions_acc     = Accordion:new("Actions",         true,  110)
 
@@ -56,13 +56,15 @@ function WorldSandboxSidebarManager:new(wsc, game)
         Slider:new("Lacunarity", 1.0,   4.0,   p.lacunarity,      false, function(v) wsc.params.lacunarity     = v end, game),
     }
 
-    -- Detail & Moisture sliders
+    -- Detail, Mountain & Moisture sliders
     inst.detail_sliders = {
-        Slider:new("Detail Scale",  0.01,  0.20,  p.detail_scale,    false, function(v) wsc.params.detail_scale     = v end, game),
-        Slider:new("Detail Octaves",1,     4,     p.detail_octaves,  true,  function(v) wsc.params.detail_octaves   = v end, game),
-        Slider:new("Detail Weight", 0,     0.5,   p.detail_weight,   false, function(v) wsc.params.detail_weight    = v end, game),
-        Slider:new("Moisture Scale",0.002, 0.030, p.moisture_scale,  false, function(v) wsc.params.moisture_scale   = v end, game),
-        Slider:new("Moisture Oct",  1,     4,     p.moisture_octaves,true,  function(v) wsc.params.moisture_octaves = v end, game),
+        Slider:new("Mtn Scale",     0.005, 0.060, p.mountain_scale,    false, function(v) wsc.params.mountain_scale    = v end, game),
+        Slider:new("Mtn Octaves",   1,     5,     p.mountain_octaves,  true,  function(v) wsc.params.mountain_octaves  = v end, game),
+        Slider:new("Mtn Strength",  0,     0.8,   p.mountain_strength, false, function(v) wsc.params.mountain_strength = v end, game),
+        Slider:new("Detail Scale",  0.01,  0.20,  p.detail_scale,      false, function(v) wsc.params.detail_scale      = v end, game),
+        Slider:new("Detail Weight", 0,     0.5,   p.detail_weight,     false, function(v) wsc.params.detail_weight     = v end, game),
+        Slider:new("Moisture Scale",0.002, 0.030, p.moisture_scale,    false, function(v) wsc.params.moisture_scale    = v end, game),
+        Slider:new("Moisture Oct",  1,     4,     p.moisture_octaves,  true,  function(v) wsc.params.moisture_octaves  = v end, game),
     }
 
     -- Biome threshold sliders (enforce ascending order in on_change).

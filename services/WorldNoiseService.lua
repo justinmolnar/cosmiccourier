@@ -5,12 +5,27 @@
 
 local WorldNoiseService = {}
 
--- Raw pixel coordinates as noise input so scale has intuitive meaning:
--- scale=0.008 → one feature per ~125px → ~3 features across a 400px map.
+-- Standard FBM — smooth hills, used for continental shape and moisture.
 local function fbm(px, py, scale, octaves, persistence, lacunarity, ox, oy)
     local val, amp, freq, total = 0, 1, scale, 0
     for _ = 1, math.floor(octaves) do
         val   = val + amp * love.math.noise(px * freq + ox, py * freq + oy)
+        total = total + amp
+        amp   = amp * persistence
+        freq  = freq * lacunarity
+    end
+    return val / total
+end
+
+-- Ridged FBM — sharp peaks instead of smooth domes, used for mountain ranges.
+-- Each octave is inverted so valleys become ridges; squaring sharpens the peaks.
+local function ridge_fbm(px, py, scale, octaves, persistence, lacunarity, ox, oy)
+    local val, amp, freq, total = 0, 1, scale, 0
+    for _ = 1, math.floor(octaves) do
+        local n = love.math.noise(px * freq + ox, py * freq + oy)
+        n = 1 - 2 * math.abs(n - 0.5)   -- flip: valleys → peaks
+        n = n * n                          -- square: sharpens ridges
+        val   = val + amp * n
         total = total + amp
         amp   = amp * persistence
         freq  = freq * lacunarity
@@ -56,11 +71,13 @@ end
 function WorldNoiseService.generate(w, h, p)
     local sx = p.seed_x or 0
     local sy = p.seed_y or 0
+    local margin = p.edge_margin or 0.22
 
+    -- Pass 1: island shapes via smooth FBM only.
+    -- Terrain layer is plain FBM here — ridge noise is NOT mixed in so it
+    -- doesn't fragment coastlines.
     local heightmap = {}
     local min_h, max_h = math.huge, -math.huge
-
-    -- First pass: raw FBM heights
     for y = 1, h do
         heightmap[y] = {}
         for x = 1, w do
@@ -76,23 +93,33 @@ function WorldNoiseService.generate(w, h, p)
         end
     end
 
-    -- Second pass: normalize to [0,1] then color
+    -- Pass 2: normalize, apply edge mask, then overlay mountain ridges ONLY on
+    -- land cells so island shapes are completely untouched.
     local range = max_h - min_h
     if range < 0.0001 then range = 0.0001 end
-
-    local margin = p.edge_margin or 0.15
 
     local colormap = {}
     for y = 1, h do
         colormap[y] = {}
         for x = 1, w do
             local norm = (heightmap[y][x] - min_h) / range
-            -- Edge mask: suppresses heights above deep_ocean_max so land can't
-            -- form near borders. Ocean floor cells are left untouched.
-            local m = edge_mask(x, y, w, h, margin)
+
+            -- Edge mask: suppress land near map borders
+            local em = edge_mask(x, y, w, h, margin)
             if norm > p.deep_ocean_max then
-                norm = p.deep_ocean_max + (norm - p.deep_ocean_max) * m
+                norm = p.deep_ocean_max + (norm - p.deep_ocean_max) * em
             end
+
+            -- Mountain pass: ridge noise added on top of land only.
+            -- land_t ramps from 0 at the coastline to 1 at the interior peak,
+            -- so mountains concentrate inland and fade to zero at the shore.
+            if norm > p.coast_max then
+                local land_t  = (norm - p.coast_max) / (1.0 - p.coast_max)
+                local ridge   = ridge_fbm(x, y, p.mountain_scale, p.mountain_octaves, 0.5, 2.0, sx + 3000, sy + 3000)
+                norm = norm + ridge * p.mountain_strength * land_t
+                norm = math.min(1.0, norm)
+            end
+
             heightmap[y][x] = norm
             local moisture = fbm(x, y, p.moisture_scale, p.moisture_octaves, 0.5, 2.0, sx + 5000, sy + 5000)
             colormap[y][x] = biome_color(norm, moisture, p)
