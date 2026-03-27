@@ -27,6 +27,7 @@ function WorldSandboxController:new(game)
     inst.region_map            = nil
     inst.regions_list          = nil
     inst.city_locations        = nil
+    inst.highway_map           = nil
     inst.world_image           = nil
     inst.world_w        = 0
     inst.world_h        = 0
@@ -87,6 +88,11 @@ function WorldSandboxController:new(game)
         region_mountain_cost = 8,  -- slider 0-20: extra crossing cost per unit highland fraction
         region_river_cost    = 4,  -- slider 0-20: extra crossing cost for river/lake cells
         region_min_sep       = 20, -- slider 5-80: min cell distance between region seed points
+        -- Highway network (A* between cities, MST + extra links)
+        highway_mountain_cost = 10, -- slider 1-30: crossing cost multiplier for mountain terrain
+        highway_river_cost    = 3,  -- slider 0-15: extra cost to cross a river or lake cell
+        highway_slope_cost    = 15, -- slider 0-40: cost per unit of elevation change (makes roads contour)
+        highway_links_per_city = 3, -- slider 1-6: how many nearest-neighbor connections each city gets
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
@@ -155,6 +161,7 @@ function WorldSandboxController:generate()
         self.region_map           = result.region_map
         self.regions_list         = result.regions_list
         self.city_locations       = nil   -- cleared on each regenerate
+        self.highway_map          = nil
         self.world_w              = w
         self.world_h              = h
         self:_buildImage()
@@ -171,11 +178,17 @@ function WorldSandboxController:_buildImage()
                or  (self.view_mode == "continents"   and self.continent_colormap)
                or  (self.view_mode == "regions"      and self.region_colormap)
                or   self.colormap
-    local imgdata = love.image.newImageData(self.world_w, self.world_h)
-    for y = 1, self.world_h do
-        for x = 1, self.world_w do
-            local c = active[y][x]
-            imgdata:setPixel(x - 1, y - 1, c[1], c[2], c[3], 1.0)
+    local w, h    = self.world_w, self.world_h
+    local hways   = self.highway_map
+    local imgdata = love.image.newImageData(w, h)
+    for y = 1, h do
+        for x = 1, w do
+            if hways and hways[(y-1)*w + x] then
+                imgdata:setPixel(x-1, y-1, 0.95, 0.78, 0.08, 1.0)  -- golden highway
+            else
+                local c = active[y][x]
+                imgdata:setPixel(x-1, y-1, c[1], c[2], c[3], 1.0)
+            end
         end
     end
     self.world_image = love.graphics.newImage(imgdata)
@@ -335,6 +348,191 @@ function WorldSandboxController:place_cities()
     end
 
     self.city_locations = all_cities
+end
+
+function WorldSandboxController:build_highways()
+    if not self.city_locations or #self.city_locations == 0 then return end
+    if not self.heightmap or not self.continent_map then return end
+
+    local p        = self.params
+    local w, h     = self.world_w, self.world_h
+    local cities   = self.city_locations
+    local cont_map = self.continent_map
+    local hmap     = self.heightmap
+    local bdata    = self.biome_data
+    local mtn_cost   = math.max(1, p.highway_mountain_cost or 10)
+    local riv_cost   = math.max(0, p.highway_river_cost    or 3)
+    local slope_cost = math.max(0, p.highway_slope_cost    or 15)
+    local links_k    = math.max(1, math.floor(p.highway_links_per_city or 3))
+
+    local highway_map = {}
+
+    -- Terrain crossing cost for entering cell ni from a cell with elevation from_elev.
+    -- Slope penalty makes roads naturally contour around terrain rather than going straight over.
+    -- Existing highway cells are nearly free to encourage route sharing.
+    local function cell_cost(ni, from_elev)
+        local ny   = math.floor((ni-1)/w) + 1
+        local nx   = (ni-1) % w + 1
+        local elev = hmap[ny][nx]
+        if elev <= p.ocean_max then return math.huge, elev end
+
+        local base
+        if     elev <= p.coast_max    then base = 1.0
+        elseif elev <= p.plains_max   then base = 1.0
+        elseif elev <= p.forest_max   then base = 1.4
+        elseif elev <= p.highland_max then base = 1.0 + mtn_cost * 0.25
+        elseif elev <= p.mountain_max then base = mtn_cost
+        else                               base = mtn_cost * 1.5 end
+
+        base = base + math.abs(elev - from_elev) * slope_cost
+
+        local bd = bdata and bdata[ni]
+        if bd and (bd.is_river or bd.is_lake) then base = base + riv_cost end
+        if highway_map[ni] then base = base * 0.05 end  -- follow existing roads
+
+        return base, elev
+    end
+
+    -- A* between two cell indices; returns list of cell indices or nil.
+    local function astar(src, dst)
+        if src == dst then return {src} end
+        local dx_dst = (dst-1) % w
+        local dy_dst = math.floor((dst-1) / w)
+        local function heur(i)
+            local dx = (i-1) % w - dx_dst
+            local dy = math.floor((i-1) / w) - dy_dst
+            return math.sqrt(dx*dx + dy*dy)
+        end
+
+        local g, came, closed, heap = {}, {}, {}, {}
+        local function hpush(f, i)
+            heap[#heap+1] = {f, i}
+            local pos = #heap
+            while pos > 1 do
+                local par = math.floor(pos/2)
+                if heap[par][1] > heap[pos][1] then
+                    heap[par], heap[pos] = heap[pos], heap[par]; pos = par
+                else break end
+            end
+        end
+        local function hpop()
+            local top = heap[1]; local n2 = #heap
+            heap[1] = heap[n2]; heap[n2] = nil
+            local pos = 1
+            while true do
+                local l, r, s = pos*2, pos*2+1, pos
+                if l <= #heap and heap[l][1] < heap[s][1] then s = l end
+                if r <= #heap and heap[r][1] < heap[s][1] then s = r end
+                if s == pos then break end
+                heap[pos], heap[s] = heap[s], heap[pos]; pos = s
+            end
+            return top
+        end
+
+        -- Store per-cell elevation so slope cost can be computed edge-by-edge
+        local cell_elev = {}
+        local src_ny = math.floor((src-1)/w) + 1
+        local src_nx = (src-1) % w + 1
+        cell_elev[src] = hmap[src_ny][src_nx]
+
+        g[src] = 0
+        hpush(heur(src), src)
+        local dirs = {-1, 1, -w, w}
+
+        while #heap > 0 do
+            local node = hpop()
+            local ci   = node[2]
+            if not closed[ci] then
+                if ci == dst then
+                    local path, cur = {}, dst
+                    while cur do path[#path+1] = cur; cur = came[cur] end
+                    return path
+                end
+                closed[ci] = true
+                local cx       = (ci-1) % w
+                local cy       = math.floor((ci-1) / w)
+                local from_e   = cell_elev[ci] or 0
+                for _, d in ipairs(dirs) do
+                    local ni = ci + d
+                    if ni >= 1 and ni <= w*h and not closed[ni] then
+                        local nx2 = (ni-1) % w
+                        local ny2 = math.floor((ni-1) / w)
+                        local valid = (d==-1 and nx2==cx-1) or (d==1 and nx2==cx+1) or
+                                      (d==-w and ny2==cy-1) or (d==w  and ny2==cy+1)
+                        if valid then
+                            local cost, to_e = cell_cost(ni, from_e)
+                            if cost < math.huge then
+                                local ng = g[ci] + cost
+                                if not g[ni] or ng < g[ni] then
+                                    g[ni] = ng; came[ni] = ci
+                                    cell_elev[ni] = to_e
+                                    hpush(ng + heur(ni), ni)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    -- Group cities by continent id
+    local cont_cities = {}
+    for _, city in ipairs(cities) do
+        local cid = cont_map[(city.y-1)*w + city.x] or 0
+        if cid > 0 then
+            if not cont_cities[cid] then cont_cities[cid] = {} end
+            cont_cities[cid][#cont_cities[cid]+1] = city
+        end
+    end
+
+    -- Per-continent: build MST (Prim's) + extra shortest non-MST links, then A* each edge
+    for _, cits in pairs(cont_cities) do
+        local n = #cits
+        if n >= 2 then
+            -- K-nearest neighbor graph: each city connects to its links_k nearest others.
+            -- Deduplicating gives a lattice-like network rather than a bare tree.
+            local edges_set = {}
+            local edges     = {}
+            for a = 1, n do
+                local dists = {}
+                for b = 1, n do
+                    if b ~= a then
+                        local dx = cits[a].x - cits[b].x
+                        local dy = cits[a].y - cits[b].y
+                        dists[#dists+1] = {b, dx*dx+dy*dy}
+                    end
+                end
+                table.sort(dists, function(u, v) return u[2] < v[2] end)
+                for k = 1, math.min(links_k, #dists) do
+                    local b  = dists[k][1]
+                    local ea = math.min(a, b)
+                    local eb = math.max(a, b)
+                    local key = ea * 10000 + eb
+                    if not edges_set[key] then
+                        edges_set[key] = true
+                        edges[#edges+1] = {ea, eb}
+                    end
+                end
+            end
+
+            -- Run A* for each edge and stamp highway cells
+            for _, edge in ipairs(edges) do
+                local a   = cits[edge[1]]
+                local b   = cits[edge[2]]
+                local src = (a.y-1)*w + a.x
+                local dst = (b.y-1)*w + b.x
+                local path = astar(src, dst)
+                if path then
+                    for _, ci in ipairs(path) do highway_map[ci] = true end
+                end
+            end
+        end
+    end
+
+    self.highway_map = highway_map
+    self:_buildImage()
 end
 
 function WorldSandboxController:_centerCamera()

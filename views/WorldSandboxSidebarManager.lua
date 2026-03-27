@@ -22,12 +22,13 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.biomes_acc       = Accordion:new("Biome Heights",      false, 240)
     inst.suitability_acc  = Accordion:new("Suitability",        false, 240)
     inst.regions_acc      = Accordion:new("Regions",            false, 150)
-    inst.actions_acc      = Accordion:new("Actions",            true,  270)
+    inst.highways_acc     = Accordion:new("Highways",           false, 120)
+    inst.actions_acc      = Accordion:new("Actions",            true,  340)
 
     inst.accordions = {
         inst.world_acc, inst.continental_acc, inst.terrain_acc,
         inst.detail_acc, inst.biomes_acc, inst.suitability_acc,
-        inst.regions_acc, inst.actions_acc,
+        inst.regions_acc, inst.highways_acc, inst.actions_acc,
     }
 
     local p = wsc.params
@@ -108,6 +109,14 @@ function WorldSandboxSidebarManager:new(wsc, game)
         Slider:new("City Spacing",   5,   100,  p.city_min_sep,        true,  function(v) wsc.params.city_min_sep        = v end, game),
     }
 
+    -- Highway sliders
+    inst.highway_sliders = {
+        Slider:new("Mtn Cost",    1,  30,  p.highway_mountain_cost, false, function(v) wsc.params.highway_mountain_cost = v end, game),
+        Slider:new("River Cross", 0,  15,  p.highway_river_cost,    false, function(v) wsc.params.highway_river_cost    = v end, game),
+        Slider:new("Slope Cost",  0,  40,  p.highway_slope_cost,    false, function(v) wsc.params.highway_slope_cost    = v end, game),
+        Slider:new("Links/City",  1,  6,   p.highway_links_per_city, true,  function(v) wsc.params.highway_links_per_city = v end, game),
+    }
+
     -- Region sliders
     inst.region_sliders = {
         Slider:new("Region Count",  1,  80,   p.region_count,         true,  function(v) wsc.params.region_count         = v end, game),
@@ -116,7 +125,7 @@ function WorldSandboxSidebarManager:new(wsc, game)
         Slider:new("Seed Spacing",  5,  80,   p.region_min_sep,       true,  function(v) wsc.params.region_min_sep       = v end, game),
     }
 
-    -- Panel widget lists aligned with accordions (index 8 = actions, handled directly)
+    -- Panel widget lists aligned with accordions (index 9 = actions, handled directly)
     inst.panel_widgets = {
         inst.world_sliders,
         inst.continental_sliders,
@@ -125,6 +134,7 @@ function WorldSandboxSidebarManager:new(wsc, game)
         inst.biome_sliders,
         inst.suitability_sliders,
         inst.region_sliders,
+        inst.highway_sliders,
         {},
     }
 
@@ -135,8 +145,9 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.btn_view_biome   = { x = 0, y = 0, w = 0, h = 32 }
     inst.btn_view_suit    = { x = 0, y = 0, w = 0, h = 32 }
     inst.btn_view_conts   = { x = 0, y = 0, w = 0, h = 32 }
-    inst.btn_view_regions = { x = 0, y = 0, w = 0, h = 32 }
-    inst.btn_place_cities = { x = 0, y = 0, w = 0, h = 34 }
+    inst.btn_view_regions   = { x = 0, y = 0, w = 0, h = 32 }
+    inst.btn_place_cities   = { x = 0, y = 0, w = 0, h = 34 }
+    inst.btn_build_highways = { x = 0, y = 0, w = 0, h = 34 }
 
     return inst
 end
@@ -154,12 +165,12 @@ function WorldSandboxSidebarManager:_doLayout()
     for i, acc in ipairs(self.accordions) do
         local panel = self.panel_widgets[i]
         local total_h = 4
-        if i == 8 then
-            -- Actions: randomize + generate + 2×2 view grid + regions row + place cities
+        if i == 9 then
+            -- Actions: randomize + generate + view grid + place cities + build highways
             total_h = self.btn_randomize.h + self.btn_generate.h
-                    + self.btn_view_height.h + self.btn_view_suit.h  -- two view rows
-                    + self.btn_view_regions.h                         -- regions row
-                    + self.btn_place_cities.h + 80
+                    + self.btn_view_height.h + self.btn_view_suit.h   -- two 2-col rows
+                    + self.btn_view_regions.h                          -- regions full row
+                    + self.btn_place_cities.h + self.btn_build_highways.h + 100
         else
             for _, w in ipairs(panel) do
                 total_h = total_h + w.h
@@ -182,7 +193,7 @@ function WorldSandboxSidebarManager:_doLayout()
 
     -- Position widgets inside open accordions
     for i, acc in ipairs(self.accordions) do
-        if i == 8 then break end
+        if i == 9 then break end
         local panel = self.panel_widgets[i]
         local wy    = acc.y + acc.header_h
         for _, w in ipairs(panel) do
@@ -214,9 +225,8 @@ function WorldSandboxSidebarManager:_doLayout()
     local view_y3 = view_y2 + self.btn_view_suit.h + 4
     self.btn_view_regions.x = bx; self.btn_view_regions.y = view_y3; self.btn_view_regions.w = ww
     local city_y = view_y3 + self.btn_view_regions.h + 8
-    self.btn_place_cities.x = bx
-    self.btn_place_cities.y = city_y
-    self.btn_place_cities.w = ww
+    self.btn_place_cities.x   = bx; self.btn_place_cities.y   = city_y;                              self.btn_place_cities.w   = ww
+    self.btn_build_highways.x = bx; self.btn_build_highways.y = city_y + self.btn_place_cities.h + 4; self.btn_build_highways.w = ww
 end
 
 -- ── Draw ─────────────────────────────────────────────────────────────────────
@@ -261,16 +271,17 @@ function WorldSandboxSidebarManager:draw()
     for i, acc in ipairs(self.accordions) do
         acc:beginDraw()
         if acc.is_open then
-            if i == 8 then
-                draw_button(self.btn_randomize,    "Randomize Seed",  false, game)
-                draw_button(self.btn_generate,     "Generate",        true,  game)
-                draw_button(self.btn_view_height,  "Height",      self.wsc.view_mode == "height",      game)
-                draw_button(self.btn_view_biome,   "Biome",       self.wsc.view_mode == "biome",       game)
-                draw_button(self.btn_view_suit,    "Suitability", self.wsc.view_mode == "suitability", game)
-                draw_button(self.btn_view_conts,   "Continents",  self.wsc.view_mode == "continents",  game)
-                draw_button(self.btn_view_regions, "Regions",     self.wsc.view_mode == "regions",     game)
+            if i == 9 then
+                draw_button(self.btn_randomize,      "Randomize Seed",  false, game)
+                draw_button(self.btn_generate,       "Generate",        true,  game)
+                draw_button(self.btn_view_height,    "Height",      self.wsc.view_mode == "height",      game)
+                draw_button(self.btn_view_biome,     "Biome",       self.wsc.view_mode == "biome",       game)
+                draw_button(self.btn_view_suit,      "Suitability", self.wsc.view_mode == "suitability", game)
+                draw_button(self.btn_view_conts,     "Continents",  self.wsc.view_mode == "continents",  game)
+                draw_button(self.btn_view_regions,   "Regions",     self.wsc.view_mode == "regions",     game)
                 local has_suit = self.wsc.suitability_scores ~= nil
-                draw_button(self.btn_place_cities, "Place Cities", has_suit and self.wsc.city_locations ~= nil, game)
+                draw_button(self.btn_place_cities,   "Place Cities",   has_suit and self.wsc.city_locations ~= nil, game)
+                draw_button(self.btn_build_highways, "Build Highways", self.wsc.highway_map ~= nil, game)
             else
                 for _, w in ipairs(self.panel_widgets[i]) do
                     w:draw()
@@ -297,7 +308,7 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
         if acc.is_open and acc:handle_mouse_down(x, y, button) then return true end
     end
 
-    -- 3. Actions buttons (accordion index 8)
+    -- 3. Actions buttons (accordion index 9)
     if self.actions_acc.is_open and button == 1 then
         local sy = y + self.actions_acc.scroll_y
         if point_in_rect(x, sy, self.btn_randomize) then
@@ -337,11 +348,15 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
             self.wsc:place_cities()
             return true
         end
+        if point_in_rect(x, sy, self.btn_build_highways) and self.wsc.city_locations then
+            self.wsc:build_highways()
+            return true
+        end
     end
 
     -- 4. Widgets in open accordions
     for i, acc in ipairs(self.accordions) do
-        if i == 8 then break end
+        if i == 9 then break end
         if acc.is_open then
             local content_top    = acc.y + acc.header_h
             local content_bottom = content_top + acc.content_h
@@ -363,7 +378,7 @@ function WorldSandboxSidebarManager:handle_mouse_up(x, y, button)
     for _, acc in ipairs(self.accordions) do
         acc:handle_mouse_up(x, y, button)
     end
-    for i = 1, 7 do
+    for i = 1, 8 do
         for _, w in ipairs(self.panel_widgets[i]) do
             if w.handle_mouse_up then w:handle_mouse_up(x, y, button) end
         end
@@ -372,7 +387,7 @@ end
 
 function WorldSandboxSidebarManager:handle_mouse_moved(x, y, dx, dy)
     local _, my = love.mouse.getPosition()
-    for i = 1, 7 do
+    for i = 1, 8 do
         for _, w in ipairs(self.panel_widgets[i]) do
             if w.handle_mouse_moved then w:handle_mouse_moved(x, my, dx, dy) end
         end
