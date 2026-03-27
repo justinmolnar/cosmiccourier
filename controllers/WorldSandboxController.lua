@@ -14,12 +14,14 @@ function WorldSandboxController:new(game)
     inst.camera_drag_sx  = 0
     inst.camera_drag_sy  = 0
 
-    inst.heightmap   = nil
-    inst.colormap    = nil
-    inst.world_image = nil
-    inst.world_w     = 0
-    inst.world_h     = 0
-    inst.status_text = ""
+    inst.heightmap      = nil
+    inst.colormap       = nil
+    inst.biome_colormap = nil
+    inst.world_image    = nil
+    inst.world_w        = 0
+    inst.world_h        = 0
+    inst.view_mode      = "height"   -- "height" | "biome"
+    inst.status_text    = ""
 
     inst.sidebar_manager = nil
 
@@ -57,6 +59,7 @@ function WorldSandboxController:new(game)
         river_count      = 30,   -- slider 0-300: number of river sources to trace
         meander_strength = 0.08,  -- slider 0-0.15: noise perturbation added to flow heights to create winding paths
         lake_delta       = 0.010, -- slider 0-0.05: how far above a pit floor cells are included in the lake basin
+        river_influence  = 50,   -- slider 0-100: BFS radius (cells) that rivers fertilize in biome view
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
@@ -112,10 +115,11 @@ function WorldSandboxController:generate()
     end)
 
     if ok then
-        self.heightmap = result.heightmap
-        self.colormap  = result.colormap
-        self.world_w   = w
-        self.world_h   = h
+        self.heightmap      = result.heightmap
+        self.colormap       = result.colormap
+        self.biome_colormap = result.biome_colormap
+        self.world_w        = w
+        self.world_h        = h
         self:_buildImage()
         self:_centerCamera()
         self.status_text = string.format("Generated %dx%d  |  F8 close  |  RMB pan  |  Wheel zoom", w, h)
@@ -125,15 +129,21 @@ function WorldSandboxController:generate()
 end
 
 function WorldSandboxController:_buildImage()
+    local active = (self.view_mode == "biome" and self.biome_colormap) or self.colormap
     local imgdata = love.image.newImageData(self.world_w, self.world_h)
     for y = 1, self.world_h do
         for x = 1, self.world_w do
-            local c = self.colormap[y][x]
+            local c = active[y][x]
             imgdata:setPixel(x - 1, y - 1, c[1], c[2], c[3], 1.0)
         end
     end
     self.world_image = love.graphics.newImage(imgdata)
     self.world_image:setFilter("nearest", "nearest")
+end
+
+function WorldSandboxController:set_view(mode)
+    self.view_mode = mode
+    if self.colormap then self:_buildImage() end
 end
 
 function WorldSandboxController:_centerCamera()

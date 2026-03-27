@@ -46,6 +46,30 @@ local function edge_mask(x, y, w, h, margin)
     return fx * fy
 end
 
+-- Biome colors influenced by water proximity.
+-- fertility=1 near rivers/lakes (lush), fertility=0 far away (arid).
+-- Ocean/coast bands are unchanged; land blends between arid and fertile anchors.
+local function biome_color_fertile(h, fertility, p)
+    if h < p.deep_ocean_max then return { 0.04, 0.08, 0.30 } end
+    if h < p.ocean_max      then return { 0.07, 0.15, 0.45 } end
+    if h < p.coast_max      then return { 0.76, 0.70, 0.48 } end
+    local f = fertility
+    if h < p.plains_max then
+        -- arid: dry tan/yellow   fertile: lush grassland
+        return { 0.72 - f*0.44, 0.58 + f*0.10, 0.22 - f*0.04 }
+    elseif h < p.forest_max then
+        -- arid: scrubland olive  fertile: dense forest green
+        return { 0.50 - f*0.36, 0.42 + f*0.04, 0.16 - f*0.06 }
+    elseif h < p.highland_max then
+        -- arid: barren brown     fertile: highland meadow
+        return { 0.48 - f*0.10, 0.38 + f*0.10, 0.20 + f*0.06 }
+    elseif h < p.mountain_max then
+        return { 0.52, 0.48, 0.42 }
+    else
+        return { 0.88, 0.90, 0.95 }
+    end
+end
+
 -- Discrete biome colors — flat per band, no lerp between biomes.
 -- This gives crisp colour bands like a classic tile map, not a smooth haze.
 local function biome_color(h, m, p)
@@ -141,6 +165,12 @@ function WorldNoiseService.generate(w, h, p)
     -- basin upward until the lowest rim is found, paint the basin as a lake,
     -- then continue the river from that rim — rivers never end mid-land.
     -- Two traces that reach the same cell merge naturally.
+    -- Hoisted so Pass 4 (biome map) can read which cells are water.
+    local RIVER_COLOR = { 0.22, 0.52, 0.88 }
+    local LAKE_COLOR  = { 0.07, 0.20, 0.55 }
+    local painted = {}   -- river + lake cell indices
+    local is_lake = {}   -- lake-only subset for merging
+
     local river_count = math.floor(p.river_count or 0)
     if river_count > 0 then
         local D8 = { {-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1} }
@@ -252,13 +282,8 @@ function WorldNoiseService.generate(w, h, p)
             end
         end
 
-        local RIVER_COLOR = { 0.22, 0.52, 0.88 }
-        local LAKE_COLOR  = { 0.07, 0.20, 0.55 }
         local lake_delta  = p.lake_delta or 0.010
         local MAX_LAKE    = 150
-
-        local painted = {}   -- river + lake cells; stops river traces from crossing
-        local is_lake = {}   -- lake-only flag so adjacent lakes can merge into each other
 
         -- Carve step: absolute lowest D8 neighbour, even uphill.
         -- Fallback when a pit has no valid spillway.
@@ -428,7 +453,58 @@ function WorldNoiseService.generate(w, h, p)
         end
     end
 
-    return { heightmap = heightmap, colormap = colormap }
+    -- Pass 4: Water-proximity biome map.
+    -- Multi-source BFS from all river/lake cells.  Cells close to water get
+    -- high fertility (lush green); cells far away get low fertility (arid brown).
+    -- Ocean and coast bands are rendered identically to the height view.
+    local river_influence = math.max(1, p.river_influence or 30)
+    local biome_colormap  = {}
+    do
+        local D4b = { {0,-1},{-1,0},{1,0},{0,1} }
+        local wdist = {}
+        local bq, bqi = {}, 1
+        for i = 1, w * h do
+            if painted[i] then
+                wdist[i] = 0
+                bq[#bq + 1] = i
+            end
+        end
+        while bqi <= #bq do
+            local ci  = bq[bqi]; bqi = bqi + 1
+            local nd  = wdist[ci] + 1
+            if nd <= river_influence then
+                local cy2 = math.floor((ci - 1) / w) + 1
+                local cx2 = (ci - 1) % w + 1
+                for _, d in ipairs(D4b) do
+                    local nx2, ny2 = cx2 + d[1], cy2 + d[2]
+                    if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                        local ni = (ny2 - 1) * w + nx2
+                        if not wdist[ni] then
+                            wdist[ni] = nd
+                            bq[#bq + 1] = ni
+                        end
+                    end
+                end
+            end
+        end
+
+        for y = 1, h do
+            biome_colormap[y] = {}
+            local base = (y - 1) * w
+            for x = 1, w do
+                local i = base + x
+                if painted[i] then
+                    biome_colormap[y][x] = is_lake[i] and LAKE_COLOR or RIVER_COLOR
+                else
+                    local dist    = wdist[i] or (river_influence + 1)
+                    local fert    = math.max(0, 1 - dist / river_influence)
+                    biome_colormap[y][x] = biome_color_fertile(heightmap[y][x], fert, p)
+                end
+            end
+        end
+    end
+
+    return { heightmap = heightmap, colormap = colormap, biome_colormap = biome_colormap }
 end
 
 return WorldNoiseService

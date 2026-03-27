@@ -18,9 +18,9 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.world_acc       = Accordion:new("World",           true,  172)
     inst.continental_acc = Accordion:new("Continental",     true,  110)
     inst.terrain_acc     = Accordion:new("Terrain",         true,  175)
-    inst.detail_acc      = Accordion:new("Mountains & Detail", false, 240)
+    inst.detail_acc      = Accordion:new("Mountains & Detail", false, 276)
     inst.biomes_acc      = Accordion:new("Biome Heights",   false, 240)
-    inst.actions_acc     = Accordion:new("Actions",         true,  110)
+    inst.actions_acc     = Accordion:new("Actions",         true,  190)
 
     inst.accordions = {
         inst.world_acc, inst.continental_acc, inst.terrain_acc,
@@ -68,6 +68,7 @@ function WorldSandboxSidebarManager:new(wsc, game)
         Slider:new("Rivers",        0,     300,   p.river_count,        true,  function(v) wsc.params.river_count       = v end, game),
         Slider:new("Meander",       0,     0.15,  p.meander_strength,   false, function(v) wsc.params.meander_strength  = v end, game),
         Slider:new("Lake Size",     0,     0.05,  p.lake_delta,         false, function(v) wsc.params.lake_delta        = v end, game),
+        Slider:new("River Influence", 0,  100,   p.river_influence,    true,  function(v) wsc.params.river_influence   = v end, game),
     }
 
     -- Biome threshold sliders (enforce ascending order in on_change).
@@ -101,8 +102,10 @@ function WorldSandboxSidebarManager:new(wsc, game)
     }
 
     -- Action button rects (set in _doLayout)
-    inst.btn_randomize = { x = 0, y = 0, w = 0, h = 34 }
-    inst.btn_generate  = { x = 0, y = 0, w = 0, h = 38 }
+    inst.btn_randomize   = { x = 0, y = 0, w = 0, h = 34 }
+    inst.btn_generate    = { x = 0, y = 0, w = 0, h = 38 }
+    inst.btn_view_height = { x = 0, y = 0, w = 0, h = 32 }
+    inst.btn_view_biome  = { x = 0, y = 0, w = 0, h = 32 }
 
     return inst
 end
@@ -121,8 +124,9 @@ function WorldSandboxSidebarManager:_doLayout()
         local panel = self.panel_widgets[i]
         local total_h = 4
         if i == 6 then
-            -- Actions: two buttons + spacing
-            total_h = self.btn_randomize.h + self.btn_generate.h + 24
+            -- Actions: four buttons + spacing
+            total_h = self.btn_randomize.h + self.btn_generate.h
+                    + self.btn_view_height.h + self.btn_view_biome.h + 36
         else
             for _, w in ipairs(panel) do
                 total_h = total_h + w.h
@@ -160,12 +164,20 @@ function WorldSandboxSidebarManager:_doLayout()
     local aa  = self.actions_acc
     local bx  = pad
     local btn_y = aa.y + aa.header_h + 6
+    local half_w = math.floor((ww - 4) / 2)
     self.btn_randomize.x = bx
     self.btn_randomize.y = btn_y
     self.btn_randomize.w = ww
     self.btn_generate.x  = bx
     self.btn_generate.y  = btn_y + self.btn_randomize.h + 6
     self.btn_generate.w  = ww
+    local view_y = self.btn_generate.y + self.btn_generate.h + 10
+    self.btn_view_height.x = bx
+    self.btn_view_height.y = view_y
+    self.btn_view_height.w = half_w
+    self.btn_view_biome.x  = bx + half_w + 4
+    self.btn_view_biome.y  = view_y
+    self.btn_view_biome.w  = half_w
 end
 
 -- ── Draw ─────────────────────────────────────────────────────────────────────
@@ -211,8 +223,10 @@ function WorldSandboxSidebarManager:draw()
         acc:beginDraw()
         if acc.is_open then
             if i == 6 then
-                draw_button(self.btn_randomize, "Randomize Seed", false, game)
-                draw_button(self.btn_generate,  "Generate",       true,  game)
+                draw_button(self.btn_randomize,   "Randomize Seed", false, game)
+                draw_button(self.btn_generate,    "Generate",       true,  game)
+                draw_button(self.btn_view_height, "Height",  self.wsc.view_mode == "height", game)
+                draw_button(self.btn_view_biome,  "Biome",   self.wsc.view_mode == "biome",  game)
             else
                 for _, w in ipairs(self.panel_widgets[i]) do
                     w:draw()
@@ -253,6 +267,14 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
         end
         if point_in_rect(x, sy, self.btn_generate) then
             self.wsc:generate()
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_view_height) then
+            self.wsc:set_view("height")
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_view_biome) then
+            self.wsc:set_view("biome")
             return true
         end
     end
