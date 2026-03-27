@@ -101,6 +101,10 @@ function love.load()
     Game.sandbox_view = require("views.SandboxView"):new(Game)
     Game.sandbox_sidebar_view = require("views.SandboxSidebarView"):new(Game)
 
+    Game.world_sandbox_controller = require("controllers.WorldSandboxController"):new(Game)
+    Game.world_sandbox_view        = require("views.WorldSandboxView"):new(Game)
+    Game.world_sandbox_sidebar_view = require("views.WorldSandboxSidebarView"):new(Game)
+
     ErrorService.withErrorHandling(function()
         Game.maps.region:generateRegion()
     end, "Region Map Generation")
@@ -157,6 +161,12 @@ function love.update(dt)
 end
 
 function love.draw()
+    if Game.world_sandbox_controller:isActive() then
+        Game.world_sandbox_sidebar_view:draw()
+        Game.world_sandbox_view:draw()
+        return
+    end
+
     if Game.sandbox_controller:isActive() then
         Game.sandbox_sidebar_view:draw()
         Game.sandbox_view:draw()
@@ -175,6 +185,16 @@ function love.draw()
 end
 
 function love.keypressed(key)
+    if key == "f8" then
+        Game.world_sandbox_controller:toggle()
+        return
+    end
+
+    if Game.world_sandbox_controller:isActive() then
+        Game.world_sandbox_controller:handle_keypressed(key)
+        return
+    end
+
     if key == "f9" then
         Game.sandbox_controller:toggle()
         return
@@ -194,6 +214,10 @@ function love.keypressed(key)
 end
 
 function love.mousewheelmoved(x, y)
+    if Game.world_sandbox_controller:isActive() then
+        Game.world_sandbox_controller:handle_mouse_wheel(x, y)
+        return
+    end
     if Game.sandbox_controller:isActive() then
         Game.sandbox_controller:handle_mouse_wheel(x, y)
         return
@@ -202,6 +226,10 @@ function love.mousewheelmoved(x, y)
 end
 
 function love.mousepressed(x, y, button)
+    if Game.world_sandbox_controller:isActive() then
+        Game.world_sandbox_controller:handle_mouse_down(x, y, button)
+        return
+    end
     if Game.sandbox_controller:isActive() then
         Game.sandbox_controller:handle_mouse_down(x, y, button)
         return
@@ -210,6 +238,10 @@ function love.mousepressed(x, y, button)
 end
 
 function love.mousereleased(x, y, button)
+    if Game.world_sandbox_controller:isActive() then
+        Game.world_sandbox_controller:handle_mouse_up(x, y, button)
+        return
+    end
     if Game.sandbox_controller:isActive() then
         Game.sandbox_controller:handle_mouse_up(x, y, button)
         return
@@ -218,6 +250,10 @@ function love.mousereleased(x, y, button)
 end
 
 function love.mousemoved(x, y, dx, dy)
+    if Game.world_sandbox_controller:isActive() then
+        Game.world_sandbox_controller:handle_mouse_moved(x, y, dx, dy)
+        return
+    end
     if Game.sandbox_controller:isActive() then
         Game.sandbox_controller:handle_mouse_moved(x, y, dx, dy)
         return
@@ -226,6 +262,10 @@ function love.mousemoved(x, y, dx, dy)
 end
 
 function love.textinput(text)
+    if Game.world_sandbox_controller:isActive() then
+        Game.world_sandbox_controller:handle_textinput(text)
+        return
+    end
     if Game.sandbox_controller:isActive() then
         Game.sandbox_controller:handle_textinput(text)
         return
