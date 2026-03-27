@@ -92,7 +92,7 @@ function WorldSandboxController:new(game)
         highway_mountain_cost = 10, -- slider 1-30: crossing cost multiplier for mountain terrain
         highway_river_cost    = 3,  -- slider 0-15: extra cost to cross a river or lake cell
         highway_slope_cost    = 15, -- slider 0-40: cost per unit of elevation change (makes roads contour)
-        highway_links_per_city = 3, -- slider 1-6: how many nearest-neighbor connections each city gets
+        highway_budget_scale   = 800, -- slider 100-3000: budget per unit of suitability² (larger = more roads)
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
@@ -363,7 +363,7 @@ function WorldSandboxController:build_highways()
     local mtn_cost   = math.max(1, p.highway_mountain_cost or 10)
     local riv_cost   = math.max(0, p.highway_river_cost    or 3)
     local slope_cost = math.max(0, p.highway_slope_cost    or 15)
-    local links_k    = math.max(1, math.floor(p.highway_links_per_city or 3))
+    local budget_scale = math.max(1, p.highway_budget_scale or 800)
 
     local highway_map = {}
 
@@ -446,7 +446,7 @@ function WorldSandboxController:build_highways()
                 if ci == dst then
                     local path, cur = {}, dst
                     while cur do path[#path+1] = cur; cur = came[cur] end
-                    return path
+                    return path, g[dst]
                 end
                 closed[ci] = true
                 local cx       = (ci-1) % w
@@ -487,45 +487,47 @@ function WorldSandboxController:build_highways()
         end
     end
 
-    -- Per-continent: build MST (Prim's) + extra shortest non-MST links, then A* each edge
+    -- Per-continent: gravity model + budget constraints.
+    -- City size = suitability². Budget = size * budget_scale.
+    -- Pairs are sorted by gravity (size_a * size_b / dist²) — large nearby cities
+    -- connect first. A road is built when combined budget ≥ A* terrain cost;
+    -- each city pays proportional to its budget share.
     for _, cits in pairs(cont_cities) do
         local n = #cits
         if n >= 2 then
-            -- K-nearest neighbor graph: each city connects to its links_k nearest others.
-            -- Deduplicating gives a lattice-like network rather than a bare tree.
-            local edges_set = {}
-            local edges     = {}
+            local budget = {}
             for a = 1, n do
-                local dists = {}
-                for b = 1, n do
-                    if b ~= a then
-                        local dx = cits[a].x - cits[b].x
-                        local dy = cits[a].y - cits[b].y
-                        dists[#dists+1] = {b, dx*dx+dy*dy}
-                    end
-                end
-                table.sort(dists, function(u, v) return u[2] < v[2] end)
-                for k = 1, math.min(links_k, #dists) do
-                    local b  = dists[k][1]
-                    local ea = math.min(a, b)
-                    local eb = math.max(a, b)
-                    local key = ea * 10000 + eb
-                    if not edges_set[key] then
-                        edges_set[key] = true
-                        edges[#edges+1] = {ea, eb}
-                    end
-                end
+                budget[a] = (cits[a].s or 0.5) ^ 2 * budget_scale
             end
 
-            -- Run A* for each edge and stamp highway cells
-            for _, edge in ipairs(edges) do
-                local a   = cits[edge[1]]
-                local b   = cits[edge[2]]
-                local src = (a.y-1)*w + a.x
-                local dst = (b.y-1)*w + b.x
-                local path = astar(src, dst)
-                if path then
-                    for _, ci in ipairs(path) do highway_map[ci] = true end
+            -- All pairs sorted by gravity (descending)
+            local pairs_list = {}
+            for a = 1, n do
+                for b = a+1, n do
+                    local dx = cits[a].x - cits[b].x
+                    local dy = cits[a].y - cits[b].y
+                    local dist_sq = math.max(1, dx*dx + dy*dy)
+                    local gravity = (cits[a].s or 0.5) * (cits[b].s or 0.5) / dist_sq
+                    pairs_list[#pairs_list+1] = {a, b, gravity}
+                end
+            end
+            table.sort(pairs_list, function(u, v) return u[3] > v[3] end)
+
+            for _, pair in ipairs(pairs_list) do
+                local ai, bi    = pair[1], pair[2]
+                local combined  = budget[ai] + budget[bi]
+                if combined > 0 then
+                    local a   = cits[ai]
+                    local b   = cits[bi]
+                    local src = (a.y-1)*w + a.x
+                    local dst = (b.y-1)*w + b.x
+                    local path, path_cost = astar(src, dst)
+                    if path and path_cost and path_cost <= combined then
+                        for _, ci in ipairs(path) do highway_map[ci] = true end
+                        local fa = budget[ai] / combined
+                        budget[ai] = math.max(0, budget[ai] - path_cost * fa)
+                        budget[bi] = math.max(0, budget[bi] - path_cost * (1 - fa))
+                    end
                 end
             end
         end

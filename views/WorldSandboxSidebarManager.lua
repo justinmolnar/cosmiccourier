@@ -114,7 +114,7 @@ function WorldSandboxSidebarManager:new(wsc, game)
         Slider:new("Mtn Cost",    1,  30,  p.highway_mountain_cost, false, function(v) wsc.params.highway_mountain_cost = v end, game),
         Slider:new("River Cross", 0,  15,  p.highway_river_cost,    false, function(v) wsc.params.highway_river_cost    = v end, game),
         Slider:new("Slope Cost",  0,  40,  p.highway_slope_cost,    false, function(v) wsc.params.highway_slope_cost    = v end, game),
-        Slider:new("Links/City",  1,  6,   p.highway_links_per_city, true,  function(v) wsc.params.highway_links_per_city = v end, game),
+        Slider:new("City Budget", 100, 3000, p.highway_budget_scale,  true,  function(v) wsc.params.highway_budget_scale  = v end, game),
     }
 
     -- Region sliders

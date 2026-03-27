@@ -73,7 +73,18 @@ function WorldSandboxView:draw()
         local C  = self.game.C
         local ts = C.MAP.TILE_SIZE
         love.graphics.setScissor(sidebar_w, 0, vw, sh)
+
+        -- Normalise suitability scores so radius spans the full range
+        local min_s, max_s = math.huge, -math.huge
         for _, city in ipairs(wsc.city_locations) do
+            if city.s < min_s then min_s = city.s end
+            if city.s > max_s then max_s = city.s end
+        end
+        local s_range = math.max(max_s - min_s, 0.001)
+
+        for _, city in ipairs(wsc.city_locations) do
+            local t   = (city.s - min_s) / s_range   -- 0 = smallest, 1 = largest
+            local rad = 3.5 + t * 8.5                 -- 3.5 px (hamlet) → 12 px (capital)
             -- Cell centre in world space
             local wpx = (city.x - 0.5) * ts
             local wpy = (city.y - 0.5) * ts
@@ -81,18 +92,14 @@ function WorldSandboxView:draw()
             local sx = sidebar_w + vw / 2 + (wpx - wsc.camera.x) * wsc.camera.scale
             local sy = sh / 2 + (wpy - wsc.camera.y) * wsc.camera.scale
             if sx > sidebar_w and sx < sw and sy > 0 and sy < sh then
-                -- Drop shadow
                 love.graphics.setColor(0, 0, 0, 0.6)
-                love.graphics.circle("fill", sx + 1, sy + 1, 7)
-                -- Outer ring
+                love.graphics.circle("fill", sx + 1, sy + 1, rad + 1.5)
                 love.graphics.setColor(0.10, 0.08, 0.04)
-                love.graphics.circle("fill", sx, sy, 7)
-                -- Gold fill
+                love.graphics.circle("fill", sx, sy, rad + 1.5)
                 love.graphics.setColor(1.0, 0.85, 0.15)
-                love.graphics.circle("fill", sx, sy, 5.5)
-                -- Centre dot
+                love.graphics.circle("fill", sx, sy, rad)
                 love.graphics.setColor(0.15, 0.10, 0.02)
-                love.graphics.circle("fill", sx, sy, 2)
+                love.graphics.circle("fill", sx, sy, math.max(1.5, rad * 0.35))
             end
         end
     end
