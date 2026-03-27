@@ -773,10 +773,120 @@ function WorldNoiseService.generate(w, h, p)
         end
     end
 
+    -- Pass 6: Continent detection via BFS flood fill.
+    -- Every connected land component (pre_ridge > ocean_max) is one continent.
+    -- Components whose land fraction is below island_threshold are "islands".
+    -- Major continents get distinct palette colours; islands share a neutral tone.
+    -- Brightness is modulated by elevation so terrain relief remains visible.
+    local continent_colormap = {}
+    local continent_map      = {}   -- flat [i] = component id (0 = ocean)
+    local continents         = {}   -- list of { id, size, frac, is_island, color }
+    do
+        local PALETTE = {
+            { 0.85, 0.20, 0.20 }, { 0.20, 0.52, 0.90 }, { 0.15, 0.75, 0.30 },
+            { 0.92, 0.78, 0.10 }, { 0.65, 0.20, 0.88 }, { 0.92, 0.45, 0.10 },
+            { 0.15, 0.80, 0.78 }, { 0.90, 0.28, 0.65 }, { 0.58, 0.88, 0.14 },
+            { 0.30, 0.35, 0.90 },
+        }
+        local ISLAND_COLOR = { 0.55, 0.52, 0.48 }
+        local D4c = { {0,-1},{-1,0},{1,0},{0,1} }
+
+        -- BFS flood fill: label each connected land component
+        local cell_comp = {}   -- flat [i] -> component id
+        local comp_sizes = {}
+        local comp_id   = 0
+        for y = 1, h do
+            for x = 1, w do
+                local i = (y - 1) * w + x
+                if pre_ridge[i] > p.ocean_max and not cell_comp[i] then
+                    comp_id = comp_id + 1
+                    local size = 0
+                    local bq, bqi = { i }, 1
+                    cell_comp[i] = comp_id
+                    while bqi <= #bq do
+                        local ci  = bq[bqi]; bqi = bqi + 1
+                        size = size + 1
+                        local cy2 = math.floor((ci - 1) / w) + 1
+                        local cx2 = (ci - 1) % w + 1
+                        for _, d in ipairs(D4c) do
+                            local nx2, ny2 = cx2 + d[1], cy2 + d[2]
+                            if nx2 >= 1 and nx2 <= w and ny2 >= 1 and ny2 <= h then
+                                local ni = (ny2 - 1) * w + nx2
+                                if pre_ridge[ni] > p.ocean_max and not cell_comp[ni] then
+                                    cell_comp[ni] = comp_id
+                                    bq[#bq + 1]   = ni
+                                end
+                            end
+                        end
+                    end
+                    comp_sizes[comp_id] = size
+                end
+            end
+        end
+
+        -- Sort components by size descending, classify continent vs island
+        local total_land = 0
+        for _, sz in pairs(comp_sizes) do total_land = total_land + sz end
+
+        local sorted = {}
+        for id, sz in pairs(comp_sizes) do
+            sorted[#sorted + 1] = { id = id, size = sz, frac = sz / math.max(1, total_land) }
+        end
+        table.sort(sorted, function(a, b) return a.size > b.size end)
+
+        local island_threshold = p.island_threshold or 0.03
+        local color_by_comp    = {}
+        local palette_idx      = 0
+        for _, comp in ipairs(sorted) do
+            local is_island = comp.frac < island_threshold
+            local col
+            if is_island then
+                col = ISLAND_COLOR
+            else
+                palette_idx = palette_idx + 1
+                col = PALETTE[((palette_idx - 1) % #PALETTE) + 1]
+            end
+            color_by_comp[comp.id] = col
+            continents[#continents + 1] = {
+                id       = comp.id,
+                size     = comp.size,
+                frac     = comp.frac,
+                is_island = is_island,
+                color    = col,
+            }
+        end
+
+        -- Build per-cell outputs
+        for y = 1, h do
+            continent_colormap[y] = {}
+            local base = (y - 1) * w
+            for x = 1, w do
+                local i   = base + x
+                local cid = cell_comp[i]
+                continent_map[i] = cid or 0
+                local hv = heightmap[y][x]
+                if cid and color_by_comp[cid] then
+                    local c   = color_by_comp[cid]
+                    -- Modulate brightness with elevation so terrain stays readable
+                    local rel = math.max(0, (hv - p.ocean_max) / math.max(0.001, 1 - p.ocean_max))
+                    local br  = 0.55 + 0.45 * rel
+                    continent_colormap[y][x] = { c[1] * br, c[2] * br, c[3] * br }
+                elseif hv <= p.ocean_max then
+                    continent_colormap[y][x] = { 0.04, 0.08, 0.30 }
+                else
+                    continent_colormap[y][x] = { 0.08, 0.12, 0.42 }
+                end
+            end
+        end
+    end
+
     return { heightmap = heightmap, colormap = colormap,
              biome_colormap = biome_colormap, biome_data = biome_data,
              suitability_colormap = suitability_colormap,
-             suitability_scores   = raw_suit }
+             suitability_scores   = raw_suit,
+             continent_colormap   = continent_colormap,
+             continent_map        = continent_map,
+             continents           = continents }
 end
 
 return WorldNoiseService

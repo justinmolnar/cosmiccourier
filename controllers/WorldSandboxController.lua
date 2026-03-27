@@ -20,6 +20,9 @@ function WorldSandboxController:new(game)
     inst.biome_data            = nil
     inst.suitability_colormap  = nil
     inst.suitability_scores    = nil
+    inst.continent_colormap    = nil
+    inst.continent_map         = nil
+    inst.continents            = nil
     inst.city_locations        = nil
     inst.world_image           = nil
     inst.world_w        = 0
@@ -73,8 +76,9 @@ function WorldSandboxController:new(game)
         suit_river_weight   = 0.65, -- slider 0-1: river proximity weight (rivers are primary)
         suit_climate_weight = 0.20, -- slider 0-1: climate modifier weight
         -- City placement
-        city_count   = 12, -- slider 1-50: how many cities to place
-        city_min_sep = 30, -- slider 5-100: minimum cell distance between cities
+        city_count        = 12,   -- slider 1-50: how many cities to place
+        city_min_sep      = 30,   -- slider 5-100: minimum cell distance between cities
+        island_threshold  = 0.03, -- slider 0-0.15: land fraction below which a landmass is an island
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
@@ -136,6 +140,9 @@ function WorldSandboxController:generate()
         self.biome_data           = result.biome_data
         self.suitability_colormap = result.suitability_colormap
         self.suitability_scores   = result.suitability_scores
+        self.continent_colormap   = result.continent_colormap
+        self.continent_map        = result.continent_map
+        self.continents           = result.continents
         self.city_locations       = nil   -- cleared on each regenerate
         self.world_w              = w
         self.world_h              = h
@@ -150,6 +157,7 @@ end
 function WorldSandboxController:_buildImage()
     local active = (self.view_mode == "biome"        and self.biome_colormap)
                or  (self.view_mode == "suitability"  and self.suitability_colormap)
+               or  (self.view_mode == "continents"   and self.continent_colormap)
                or   self.colormap
     local imgdata = love.image.newImageData(self.world_w, self.world_h)
     for y = 1, self.world_h do
@@ -169,41 +177,93 @@ end
 
 function WorldSandboxController:place_cities()
     if not self.suitability_scores then return end
-    local count   = math.max(1, math.floor(self.params.city_count  or 12))
-    local min_sep = math.max(1, math.floor(self.params.city_min_sep or 30))
-    local w, h    = self.world_w, self.world_h
-    local scores  = self.suitability_scores
+    local total_count = math.max(1, math.floor(self.params.city_count  or 12))
+    local min_sep     = math.max(1, math.floor(self.params.city_min_sep or 30))
+    local w, h        = self.world_w, self.world_h
+    local scores      = self.suitability_scores
+    local cont_map    = self.continent_map
+    local conts       = self.continents
 
-    -- Build sorted candidate list (land cells with non-zero score)
-    local candidates = {}
+    -- If no continent data, fall back to simple global greedy selection
+    if not cont_map or not conts or #conts == 0 then
+        local cands = {}
+        for i = 1, w * h do
+            local s = scores[i] or 0
+            if s > 0 then
+                cands[#cands + 1] = { i=i, x=(i-1)%w+1, y=math.floor((i-1)/w)+1, s=s }
+            end
+        end
+        table.sort(cands, function(a, b) return a.s > b.s end)
+        local cities, sq = {}, min_sep * min_sep
+        for _, c in ipairs(cands) do
+            local ok = true
+            for _, p2 in ipairs(cities) do
+                local dx, dy = c.x-p2.x, c.y-p2.y
+                if dx*dx+dy*dy < sq then ok=false; break end
+            end
+            if ok then cities[#cities+1]=c end
+            if #cities >= total_count then break end
+        end
+        self.city_locations = cities
+        return
+    end
+
+    -- Proportional allocation per continent (largest-remainder method)
+    local total_land = 0
+    for _, c in ipairs(conts) do total_land = total_land + c.size end
+    if total_land == 0 then return end
+
+    local allocs    = {}
+    local alloc_sum = 0
+    local remainders = {}
+    for i, c in ipairs(conts) do
+        local exact   = total_count * c.size / total_land
+        local floor_v = math.floor(exact)
+        allocs[i]     = floor_v
+        alloc_sum     = alloc_sum + floor_v
+        remainders[i] = { idx = i, rem = exact - floor_v }
+    end
+    table.sort(remainders, function(a, b) return a.rem > b.rem end)
+    for k = 1, math.min(total_count - alloc_sum, #remainders) do
+        allocs[remainders[k].idx] = allocs[remainders[k].idx] + 1
+    end
+
+    -- Build sorted candidate list per continent
+    local cont_id_to_idx = {}
+    for i, c in ipairs(conts) do cont_id_to_idx[c.id] = i end
+    local cont_cands = {}
+    for i = 1, #conts do cont_cands[i] = {} end
     for i = 1, w * h do
-        local s = scores[i] or 0
-        if s > 0 then
-            candidates[#candidates + 1] = {
-                i = i,
-                x = (i - 1) % w + 1,
-                y = math.floor((i - 1) / w) + 1,
-                s = s,
-            }
+        local s   = scores[i] or 0
+        local idx = cont_id_to_idx[cont_map[i] or 0]
+        if s > 0 and idx then
+            cont_cands[idx][#cont_cands[idx]+1] = { i=i, x=(i-1)%w+1, y=math.floor((i-1)/w)+1, s=s }
         end
     end
-    table.sort(candidates, function(a, b) return a.s > b.s end)
+    for i = 1, #conts do
+        table.sort(cont_cands[i], function(a, b) return a.s > b.s end)
+    end
 
-    -- Greedy selection: pick highest scorer, suppress cells within min_sep
-    local cities = {}
-    local min_sep_sq = min_sep * min_sep
-    for _, c in ipairs(candidates) do
-        local ok = true
-        for _, city in ipairs(cities) do
-            local dx, dy = c.x - city.x, c.y - city.y
-            if dx * dx + dy * dy < min_sep_sq then ok = false; break end
-        end
-        if ok then
-            cities[#cities + 1] = c
-            if #cities >= count then break end
+    -- Greedy placement per continent; global min_sep enforced across all cities
+    local all_cities = {}
+    local sq         = min_sep * min_sep
+    for ci = 1, #conts do
+        local want = allocs[ci]
+        local placed = 0
+        for _, c in ipairs(cont_cands[ci]) do
+            if placed >= want then break end
+            local ok = true
+            for _, p2 in ipairs(all_cities) do
+                local dx, dy = c.x-p2.x, c.y-p2.y
+                if dx*dx+dy*dy < sq then ok=false; break end
+            end
+            if ok then
+                all_cities[#all_cities+1] = c
+                placed = placed + 1
+            end
         end
     end
-    self.city_locations = cities
+    self.city_locations = all_cities
 end
 
 function WorldSandboxController:_centerCamera()

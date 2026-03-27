@@ -101,6 +101,7 @@ function WorldSandboxSidebarManager:new(wsc, game)
         Slider:new("Coast Weight",   0,   1,    p.suit_coast_weight,   false, function(v) wsc.params.suit_coast_weight   = v end, game),
         Slider:new("River Weight",   0,   1,    p.suit_river_weight,   false, function(v) wsc.params.suit_river_weight   = v end, game),
         Slider:new("Climate Weight", 0,   1,    p.suit_climate_weight, false, function(v) wsc.params.suit_climate_weight = v end, game),
+        Slider:new("Island Thresh.", 0,   0.15, p.island_threshold,    false, function(v) wsc.params.island_threshold    = v end, game),
         Slider:new("City Count",     1,   50,   p.city_count,          true,  function(v) wsc.params.city_count          = v end, game),
         Slider:new("City Spacing",   5,   100,  p.city_min_sep,        true,  function(v) wsc.params.city_min_sep        = v end, game),
     }
@@ -122,6 +123,7 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.btn_view_height  = { x = 0, y = 0, w = 0, h = 32 }
     inst.btn_view_biome   = { x = 0, y = 0, w = 0, h = 32 }
     inst.btn_view_suit    = { x = 0, y = 0, w = 0, h = 32 }
+    inst.btn_view_conts   = { x = 0, y = 0, w = 0, h = 32 }
     inst.btn_place_cities = { x = 0, y = 0, w = 0, h = 34 }
 
     return inst
@@ -141,9 +143,9 @@ function WorldSandboxSidebarManager:_doLayout()
         local panel = self.panel_widgets[i]
         local total_h = 4
         if i == 7 then
-            -- Actions: six buttons + spacing
+            -- Actions: randomize + generate + 2×2 view grid + place cities
             total_h = self.btn_randomize.h + self.btn_generate.h
-                    + self.btn_view_height.h + self.btn_view_biome.h + self.btn_view_suit.h
+                    + self.btn_view_height.h + self.btn_view_suit.h  -- two view rows
                     + self.btn_place_cities.h + 60
         else
             for _, w in ipairs(panel) do
@@ -179,27 +181,24 @@ function WorldSandboxSidebarManager:_doLayout()
     end
 
     -- Actions accordion buttons
-    local aa     = self.actions_acc
-    local bx     = pad
-    local btn_y  = aa.y + aa.header_h + 6
-    local third_w = math.floor((ww - 8) / 3)
+    local aa    = self.actions_acc
+    local bx    = pad
+    local btn_y = aa.y + aa.header_h + 6
+    local half_w = math.floor((ww - 4) / 2)
     self.btn_randomize.x = bx
     self.btn_randomize.y = btn_y
     self.btn_randomize.w = ww
     self.btn_generate.x  = bx
     self.btn_generate.y  = btn_y + self.btn_randomize.h + 6
     self.btn_generate.w  = ww
-    local view_y = self.btn_generate.y + self.btn_generate.h + 10
-    self.btn_view_height.x = bx
-    self.btn_view_height.y = view_y
-    self.btn_view_height.w = third_w
-    self.btn_view_biome.x  = bx + third_w + 4
-    self.btn_view_biome.y  = view_y
-    self.btn_view_biome.w  = third_w
-    self.btn_view_suit.x   = bx + (third_w + 4) * 2
-    self.btn_view_suit.y   = view_y
-    self.btn_view_suit.w   = third_w
-    local city_y = view_y + self.btn_view_height.h + 8
+    -- View buttons: 2×2 grid (Height|Biome / Suitability|Continents)
+    local view_y1 = self.btn_generate.y + self.btn_generate.h + 10
+    local view_y2 = view_y1 + self.btn_view_height.h + 4
+    self.btn_view_height.x = bx;              self.btn_view_height.y = view_y1; self.btn_view_height.w = half_w
+    self.btn_view_biome.x  = bx + half_w + 4; self.btn_view_biome.y  = view_y1; self.btn_view_biome.w  = half_w
+    self.btn_view_suit.x   = bx;              self.btn_view_suit.y   = view_y2; self.btn_view_suit.w   = half_w
+    self.btn_view_conts.x  = bx + half_w + 4; self.btn_view_conts.y  = view_y2; self.btn_view_conts.w  = half_w
+    local city_y = view_y2 + self.btn_view_suit.h + 8
     self.btn_place_cities.x = bx
     self.btn_place_cities.y = city_y
     self.btn_place_cities.w = ww
@@ -250,9 +249,10 @@ function WorldSandboxSidebarManager:draw()
             if i == 7 then
                 draw_button(self.btn_randomize,   "Randomize Seed",  false, game)
                 draw_button(self.btn_generate,    "Generate",        true,  game)
-                draw_button(self.btn_view_height, "Height",     self.wsc.view_mode == "height",      game)
-                draw_button(self.btn_view_biome,  "Biome",      self.wsc.view_mode == "biome",       game)
-                draw_button(self.btn_view_suit,   "Suitability",self.wsc.view_mode == "suitability", game)
+                draw_button(self.btn_view_height, "Height",      self.wsc.view_mode == "height",      game)
+                draw_button(self.btn_view_biome,  "Biome",       self.wsc.view_mode == "biome",       game)
+                draw_button(self.btn_view_suit,   "Suitability", self.wsc.view_mode == "suitability", game)
+                draw_button(self.btn_view_conts,  "Continents",  self.wsc.view_mode == "continents",  game)
                 local has_suit = self.wsc.suitability_scores ~= nil
                 draw_button(self.btn_place_cities, "Place Cities", has_suit and self.wsc.city_locations ~= nil, game)
             else
@@ -307,6 +307,10 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
         end
         if point_in_rect(x, sy, self.btn_view_suit) then
             self.wsc:set_view("suitability")
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_view_conts) then
+            self.wsc:set_view("continents")
             return true
         end
         if point_in_rect(x, sy, self.btn_place_cities) and self.wsc.suitability_scores then
