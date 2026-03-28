@@ -162,9 +162,11 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.btn_scope_cont     = { x = 0, y = 0, w = 0, h = 30 }
     inst.btn_scope_region   = { x = 0, y = 0, w = 0, h = 30 }
     inst.btn_scope_city     = { x = 0, y = 0, w = 0, h = 30 }
+    inst.btn_scope_downtown = { x = 0, y = 0, w = 0, h = 30 }
     inst.btn_place_cities   = { x = 0, y = 0, w = 0, h = 34 }
     inst.btn_build_highways = { x = 0, y = 0, w = 0, h = 34 }
     inst.btn_gen_city       = { x = 0, y = 0, w = 0, h = 34 }
+    inst.btn_send_to_game   = { x = 0, y = 0, w = 0, h = 42 }
 
     return inst
 end
@@ -189,7 +191,7 @@ function WorldSandboxSidebarManager:_doLayout()
                     + self.btn_view_regions.h                          -- regions|districts row
                     + self.btn_scope_world.h                           -- scope row
                     + self.btn_place_cities.h + self.btn_build_highways.h
-                    + self.btn_gen_city.h + 140
+                    + self.btn_gen_city.h + self.btn_send_to_game.h + 150
         else
             for _, w in ipairs(panel) do
                 total_h = total_h + w.h
@@ -244,17 +246,21 @@ function WorldSandboxSidebarManager:_doLayout()
     local view_y3 = view_y2 + self.btn_view_suit.h + 4
     self.btn_view_regions.x   = bx;              self.btn_view_regions.y   = view_y3; self.btn_view_regions.w   = half_w
     self.btn_view_districts.x = bx + half_w + 4; self.btn_view_districts.y = view_y3; self.btn_view_districts.w = half_w
-    -- Scope buttons: World | Continent | Region | City (four equal quarters)
+    -- Scope buttons row 1: World | Continent | Region | City
     local scope_y = view_y3 + self.btn_view_regions.h + 8
     local qtr_w   = math.floor((ww - 12) / 4)
     self.btn_scope_world.x  = bx;                 self.btn_scope_world.y  = scope_y; self.btn_scope_world.w  = qtr_w
     self.btn_scope_cont.x   = bx + qtr_w + 4;    self.btn_scope_cont.y   = scope_y; self.btn_scope_cont.w   = qtr_w
     self.btn_scope_region.x = bx + 2*(qtr_w+4);  self.btn_scope_region.y = scope_y; self.btn_scope_region.w = qtr_w
     self.btn_scope_city.x   = bx + 3*(qtr_w+4);  self.btn_scope_city.y   = scope_y; self.btn_scope_city.w   = qtr_w
-    local city_y = scope_y + self.btn_scope_world.h + 8
+    -- Scope buttons row 2: Downtown (full width, sub-scope of city)
+    local scope_y2 = scope_y + self.btn_scope_world.h + 4
+    self.btn_scope_downtown.x = bx; self.btn_scope_downtown.y = scope_y2; self.btn_scope_downtown.w = ww
+    local city_y = scope_y2 + self.btn_scope_downtown.h + 8
     self.btn_place_cities.x   = bx; self.btn_place_cities.y   = city_y;                               self.btn_place_cities.w   = ww
     self.btn_build_highways.x = bx; self.btn_build_highways.y = city_y + self.btn_place_cities.h + 4; self.btn_build_highways.w = ww
     self.btn_gen_city.x       = bx; self.btn_gen_city.y       = self.btn_build_highways.y + self.btn_build_highways.h + 8; self.btn_gen_city.w = ww
+    self.btn_send_to_game.x   = bx; self.btn_send_to_game.y   = self.btn_gen_city.y + self.btn_gen_city.h + 12;            self.btn_send_to_game.w = ww
 end
 
 -- ── Draw ─────────────────────────────────────────────────────────────────────
@@ -310,14 +316,28 @@ function WorldSandboxSidebarManager:draw()
                 draw_button(self.btn_view_districts,  "Districts",   self.wsc.view_mode == "districts",   game)
                 local sc = self.wsc.view_scope
                 local sm = self.wsc.scope_mode
-                draw_button(self.btn_scope_world,  "World",     sc == "world",                                          game)
-                draw_button(self.btn_scope_cont,   "Cont",      sc == "continent" or sm == "picking_continent",         game)
-                draw_button(self.btn_scope_region, "Region",    sc == "region"    or sm == "picking_region",            game)
-                draw_button(self.btn_scope_city,   "City",      sc == "city"      or sm == "picking_city",              game)
+                draw_button(self.btn_scope_world,    "World",    sc == "world",                                          game)
+                draw_button(self.btn_scope_cont,     "Cont",     sc == "continent" or sm == "picking_continent",         game)
+                draw_button(self.btn_scope_region,   "Region",   sc == "region"    or sm == "picking_region",            game)
+                draw_button(self.btn_scope_city,     "City",     sc == "city"      or sm == "picking_city",              game)
+                draw_button(self.btn_scope_downtown, "Downtown", sc == "downtown",                                       game)
                 local has_suit = self.wsc.suitability_scores ~= nil
                 draw_button(self.btn_place_cities,   "Place Cities",   has_suit and self.wsc.city_locations ~= nil, game)
                 draw_button(self.btn_build_highways, "Build Highways", self.wsc.highway_map ~= nil, game)
                 draw_button(self.btn_gen_city, "Regen Bounds", self.wsc.city_bounds ~= nil, game)
+                -- Send to Game: gold border when ready, greyed out otherwise
+                local ready = self.wsc.city_bounds_list ~= nil
+                love.graphics.setColor(ready and 0.55 or 0.15, ready and 0.42 or 0.15, ready and 0.08 or 0.15)
+                love.graphics.rectangle("fill", self.btn_send_to_game.x, self.btn_send_to_game.y,
+                    self.btn_send_to_game.w, self.btn_send_to_game.h, 4, 4)
+                love.graphics.setColor(ready and 0.9 or 0.35, ready and 0.72 or 0.35, ready and 0.15 or 0.15)
+                love.graphics.rectangle("line", self.btn_send_to_game.x, self.btn_send_to_game.y,
+                    self.btn_send_to_game.w, self.btn_send_to_game.h, 4, 4)
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.setFont(game.fonts.ui_small)
+                love.graphics.printf("Send to Game", self.btn_send_to_game.x,
+                    self.btn_send_to_game.y + (self.btn_send_to_game.h - 14) / 2,
+                    self.btn_send_to_game.w, "center")
             else
                 for _, w in ipairs(self.panel_widgets[i]) do
                     w:draw()
@@ -396,6 +416,10 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
             self.wsc:regen_bounds()
             return true
         end
+        if point_in_rect(x, sy, self.btn_send_to_game) and self.wsc.city_bounds_list then
+            self.wsc:sendToGame()
+            return true
+        end
         if point_in_rect(x, sy, self.btn_scope_world) then
             self.wsc:set_scope_world()
             return true
@@ -410,6 +434,10 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
         end
         if point_in_rect(x, sy, self.btn_scope_city) and self.wsc.city_bounds_list then
             self.wsc:enter_scope_pick("picking_city")
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_scope_downtown) and self.wsc.selected_city_idx then
+            self.wsc:_selectDowntown()
             return true
         end
     end

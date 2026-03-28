@@ -45,23 +45,25 @@ function ZoomControls:update(game)
     
     if self:shouldShowButtons(game) then
         local current_scale = game.state.current_map_scale
+        local S = C.MAP.SCALES
         if self:pointInButton(mx, my, self.zoom_out_button) then
             self.hovered_button = "zoom_out"
-            if current_scale == C.MAP.SCALES.DOWNTOWN then
+            if current_scale == S.DOWNTOWN then
                 if not game.state.metro_license_unlocked then
                     self.tooltip_text = "Metropolitan Expansion License Required"
                 else
                     self.tooltip_text = "Zoom out to City View"
                 end
-            elseif current_scale == C.MAP.SCALES.CITY then
-                self.tooltip_text = "Zoom out to Region View"
+            elseif current_scale == S.CITY      then self.tooltip_text = "Zoom out to Region View"
+            elseif current_scale == S.REGION    then self.tooltip_text = "Zoom out to Continental View"
+            elseif current_scale == S.CONTINENT then self.tooltip_text = "Zoom out to World View"
             end
         elseif self:pointInButton(mx, my, self.zoom_in_button) then
             self.hovered_button = "zoom_in"
-            if current_scale == C.MAP.SCALES.CITY then
-                self.tooltip_text = "Zoom in to Downtown View"
-            elseif current_scale == C.MAP.SCALES.REGION then
-                self.tooltip_text = "Zoom in to City View"
+            if     current_scale == S.WORLD     then self.tooltip_text = "Zoom in to Continental View"
+            elseif current_scale == S.CONTINENT then self.tooltip_text = "Zoom in to Region View"
+            elseif current_scale == S.REGION    then self.tooltip_text = "Zoom in to City View"
+            elseif current_scale == S.CITY      then self.tooltip_text = "Zoom in to Downtown View"
             end
         end
     end
@@ -92,25 +94,27 @@ function ZoomControls:draw(game)
     local can_afford_license = game.state.money >= C.ZOOM.METRO_LICENSE_COST
     local is_hovered_out = self.hovered_button == "zoom_out"
 
-    -- Metro license gates downtown→city. City→region is always accessible.
-    local zoom_out_enabled = (current_scale == C.MAP.SCALES.DOWNTOWN and (game.state.metro_license_unlocked or can_afford_license)) or
-                             (current_scale == C.MAP.SCALES.CITY)
+    local S = C.MAP.SCALES
+    -- Metro license gates downtown→city. All other zoom-out steps are free.
+    local zoom_out_enabled = (current_scale == S.DOWNTOWN and (game.state.metro_license_unlocked or can_afford_license)) or
+                             current_scale == S.CITY or current_scale == S.REGION or current_scale == S.CONTINENT
 
     love.graphics.setColor(0, 0, 0, 0.7 * transition_alpha)
     love.graphics.rectangle("fill", self.zoom_out_button.x, self.zoom_out_button.y, self.zoom_out_button.w, self.zoom_out_button.h)
-    
+
     if zoom_out_enabled and is_hovered_out then
-        love.graphics.setColor(1, 1, 0, transition_alpha) -- Hover color
+        love.graphics.setColor(1, 1, 0, transition_alpha)
     elseif zoom_out_enabled then
-        love.graphics.setColor(1, 1, 1, transition_alpha) -- Enabled color
+        love.graphics.setColor(1, 1, 1, transition_alpha)
     else
-        love.graphics.setColor(0.5, 0.5, 0.5, transition_alpha) -- Disabled color
+        love.graphics.setColor(0.5, 0.5, 0.5, transition_alpha)
     end
     love.graphics.rectangle("line", self.zoom_out_button.x, self.zoom_out_button.y, self.zoom_out_button.w, self.zoom_out_button.h)
     love.graphics.printf("+", self.zoom_out_button.x, self.zoom_out_button.y + 7, self.zoom_out_button.w, "center")
-    
+
     -- === Zoom In Button ('-') LOGIC ===
-    local zoom_in_enabled = current_scale == C.MAP.SCALES.CITY or current_scale == C.MAP.SCALES.REGION
+    local zoom_in_enabled = current_scale == S.CITY or current_scale == S.REGION or
+                            current_scale == S.CONTINENT or current_scale == S.WORLD
     local is_hovered_in = self.hovered_button == "zoom_in"
 
     love.graphics.setColor(0, 0, 0, 0.7 * transition_alpha)
@@ -167,10 +171,10 @@ function ZoomControls:handle_click(x, y, game)
     local state = game.state
     local current_scale = state.current_map_scale
     
+    local S = C.MAP.SCALES
     -- === Zoom Out Button Click Logic ===
     if self:pointInButton(x, y, self.zoom_out_button) then
-        -- Case 1: In Downtown - metro license gates zoom to city
-        if current_scale == C.MAP.SCALES.DOWNTOWN then
+        if current_scale == S.DOWNTOWN then
             if state.metro_license_unlocked then
                 game.EventBus:publish("ui_zoom_out_clicked")
                 return true
@@ -178,16 +182,15 @@ function ZoomControls:handle_click(x, y, game)
                 game.EventBus:publish("ui_purchase_metro_license_clicked")
                 return true
             end
-        -- Case 2: In City - free zoom to region
-        elseif current_scale == C.MAP.SCALES.CITY then
+        elseif current_scale == S.CITY or current_scale == S.REGION or current_scale == S.CONTINENT then
             game.EventBus:publish("ui_zoom_out_clicked")
             return true
         end
-    
+
     -- === Zoom In Button Click Logic ===
     elseif self:pointInButton(x, y, self.zoom_in_button) then
-        local zoom_in_enabled = (current_scale == C.MAP.SCALES.CITY or current_scale == C.MAP.SCALES.REGION)
-        if zoom_in_enabled then
+        if current_scale == S.CITY or current_scale == S.REGION or
+           current_scale == S.CONTINENT or current_scale == S.WORLD then
             game.EventBus:publish("ui_zoom_in_clicked")
             return true
         end

@@ -37,8 +37,10 @@ function WorldSandboxController:new(game)
     inst.city_district_maps    = nil   -- [city_idx] = {[cell_idx] = poi_idx}
     inst.city_district_colors  = nil   -- [city_idx] = {[poi_idx] = {r,g,b}}
     inst.city_arterial_maps    = nil   -- [city_idx] = {[sci] = true}  sub-cell roads
-    inst.selected_city_idx     = nil
-    inst.selected_city_bounds  = nil
+    inst.city_street_maps      = nil   -- [city_idx] = {[sci] = true}  sub-cell streets (between cells)
+    inst.selected_city_idx       = nil
+    inst.selected_city_bounds    = nil
+    inst.selected_downtown_bounds = nil
     inst.city_image            = nil   -- high-res city grid image (city scope)
     inst.city_img_min_x        = 0
     inst.city_img_min_y        = 0
@@ -160,6 +162,366 @@ function WorldSandboxController:close()
     self.active = false
 end
 
+-- ── Send to Game ──────────────────────────────────────────────────────────────
+-- Converts the world sandbox data into a game Map (1 world-cell = 1 game tile)
+-- and replaces game.maps.city, then resets vehicles/clients exactly like F9's
+-- SandboxController:sendToMainGame().
+
+function WorldSandboxController:sendToGame()
+    local game = self.game
+    local C    = game.C
+    local w    = self.world_w
+    local h    = self.world_h
+
+    if not self.city_locations or #self.city_locations == 0 then
+        self.status_text = "Place cities first"; return
+    end
+    if not self.city_bounds_list then
+        self.status_text = "Run Regen Bounds first"; return
+    end
+
+    -- Pick a random starting city
+    local start_idx = love.math.random(1, #self.city_locations)
+    local start_bounds = self.city_bounds_list[start_idx]
+    if not start_bounds then start_idx = 1; start_bounds = self.city_bounds_list[1] end
+
+    -- Compute starting city bounding box in world coords
+    local city_mn_x, city_mx_x, city_mn_y, city_mx_y = w+1, 0, h+1, 0
+    for ci in pairs(start_bounds) do
+        local cx = (ci-1)%w+1; local cy = math.floor((ci-1)/w)+1
+        if cx < city_mn_x then city_mn_x = cx end; if cx > city_mx_x then city_mx_x = cx end
+        if cy < city_mn_y then city_mn_y = cy end; if cy > city_mx_y then city_mx_y = cy end
+    end
+    -- Safety fallback
+    if city_mn_x > city_mx_x then city_mn_x=1; city_mx_x=30; city_mn_y=1; city_mx_y=30 end
+
+    local sw = w * 3   -- sub-cell row width
+
+    -- art_wc[ci] = true when world cell ci contains at least one arterial sub-cell
+    local art_wc = {}
+    for idx = 1, #self.city_locations do
+        local amap = self.city_arterial_maps and self.city_arterial_maps[idx]
+        if amap then
+            for sci in pairs(amap) do
+                local gscx = (sci - 1) % sw
+                local gscy = math.floor((sci - 1) / sw)
+                local wx   = math.floor(gscx / 3) + 1
+                local wy   = math.floor(gscy / 3) + 1
+                art_wc[(wy - 1) * w + wx] = true
+            end
+        end
+    end
+
+    -- has_street[ci] = true when world cell ci is the cell "before" a street boundary
+    local has_street = {}
+    for idx = 1, #self.city_locations do
+        local smap = self.city_street_maps and self.city_street_maps[idx]
+        if smap then
+            for key in pairs(smap.v or {}) do
+                local cx = math.floor(key / 1000); local cy = key % 1000
+                has_street[(cy - 1) * w + cx] = true
+            end
+            for key in pairs(smap.h or {}) do
+                local cy = math.floor(key / 1000); local cx = key % 1000
+                has_street[(cy - 1) * w + cx] = true
+            end
+        end
+    end
+
+    -- all_claimed[ci] = city_idx
+    local all_claimed = {}
+    for idx = 1, #self.city_locations do
+        local bnds = self.city_bounds_list and self.city_bounds_list[idx]
+        if bnds then
+            for ci in pairs(bnds) do all_claimed[ci] = idx end
+        end
+    end
+
+    -- downtown_cells: world cells within DT_RADIUS of starting city's first POI
+    local downtown_cells = {}
+    local poi1 = self.city_pois_list and self.city_pois_list[start_idx]
+                 and self.city_pois_list[start_idx][1]
+    local DT_RADIUS = 6   -- world-cell radius around downtown POI
+    if poi1 then
+        for ci in pairs(start_bounds) do
+            local cx = (ci-1)%w+1; local cy = math.floor((ci-1)/w)+1
+            local dx = cx - poi1.x; local dy = cy - poi1.y
+            if dx*dx + dy*dy <= DT_RADIUS*DT_RADIUS then
+                downtown_cells[ci] = true
+            end
+        end
+    end
+
+    -- Build tile grid for the starting city's bounding box only
+    local cw = city_mx_x - city_mn_x + 1
+    local ch = city_mx_y - city_mn_y + 1
+    local grid = {}
+    local p = self.params
+    for gy = 1, ch do
+        grid[gy] = {}
+        local world_gy = city_mn_y + gy - 1
+        for gx = 1, cw do
+            local world_gx = city_mn_x + gx - 1
+            local ci       = (world_gy - 1) * w + world_gx
+            local tile
+            if self.highway_map and self.highway_map[ci] then
+                tile = "highway"
+            elseif art_wc[ci] then
+                tile = "arterial"
+            elseif has_street[ci] and all_claimed[ci] then
+                tile = downtown_cells[ci] and "downtown_road" or "road"
+            elseif all_claimed[ci] then
+                tile = downtown_cells[ci] and "downtown_plot" or "plot"
+            else
+                local elev = (self.heightmap and self.heightmap[world_gy] and self.heightmap[world_gy][world_gx]) or 0.5
+                if     elev <= (p.ocean_max    or 0.42) then tile = "water"
+                elseif elev >= (p.highland_max or 0.80) then tile = "mountain"
+                else                                          tile = "grass" end
+            end
+            grid[gy][gx] = {type = tile}
+        end
+    end
+
+    -- Downtown bounding box in city-grid-local coords (starting city's district-1 cells)
+    local dt_mn_x, dt_mx_x, dt_mn_y, dt_mx_y = cw+1, 0, ch+1, 0
+    for ci in pairs(downtown_cells) do
+        local cx = (ci-1)%w+1; local cy = math.floor((ci-1)/w)+1
+        local lx = cx - city_mn_x + 1; local ly = cy - city_mn_y + 1
+        if lx < dt_mn_x then dt_mn_x = lx end; if lx > dt_mx_x then dt_mx_x = lx end
+        if ly < dt_mn_y then dt_mn_y = ly end; if ly > dt_mx_y then dt_mx_y = ly end
+    end
+    if dt_mn_x > dt_mx_x then
+        -- Fallback: POI of starting city
+        local poi = self.city_pois_list and self.city_pois_list[start_idx] and self.city_pois_list[start_idx][1]
+        local r = 4
+        if poi then
+            local lx = poi.x - city_mn_x + 1; local ly = poi.y - city_mn_y + 1
+            dt_mn_x = math.max(1, lx-r); dt_mx_x = math.min(cw, lx+r)
+            dt_mn_y = math.max(1, ly-r); dt_mx_y = math.min(ch, ly+r)
+        else
+            dt_mn_x=1; dt_mx_x=10; dt_mn_y=1; dt_mx_y=10
+        end
+    end
+
+    C.MAP.CITY_GRID_WIDTH      = cw
+    C.MAP.CITY_GRID_HEIGHT     = ch
+    C.MAP.DOWNTOWN_GRID_WIDTH  = math.max(1, dt_mx_x - dt_mn_x + 1)
+    C.MAP.DOWNTOWN_GRID_HEIGHT = math.max(1, dt_mx_y - dt_mn_y + 1)
+
+    local Map     = require("models.Map")
+    local new_map = Map:new(C)
+    new_map.grid            = grid
+    new_map.downtown_offset = {x = dt_mn_x, y = dt_mn_y}
+    new_map.building_plots  = new_map:getPlotsFromGrid(grid)
+
+    -- Helper: build city scope image with a specific view_mode (and optional scope), returns love.graphics.Image
+    local function buildCityImg(mode, bx1, bx2, by1, by2, scope)
+        local sv_mode  = self.view_mode
+        local sv_scope = self.view_scope
+        self.view_mode  = mode
+        if scope then self.view_scope = scope end
+        self:_buildCityImage(start_idx, bx1, bx2, by1, by2)
+        self.view_mode  = sv_mode
+        self.view_scope = sv_scope
+        return self.city_image
+    end
+
+    -- Helper: build world_image with specific scope/continent/region
+    local function buildWorldImg(scope, cid, rid)
+        local sv_scope = self.view_scope
+        local sv_cid   = self.selected_continent_id
+        local sv_rid   = self.selected_region_id
+        local sv_mode  = self.view_mode
+        self.view_scope = scope
+        self.selected_continent_id = cid
+        self.selected_region_id    = rid
+        -- world images always use biome (or height as fallback)
+        self.view_mode = self.biome_colormap and "biome" or "height"
+        self:_buildImage()
+        self.view_scope = sv_scope
+        self.selected_continent_id = sv_cid
+        self.selected_region_id    = sv_rid
+        self.view_mode = sv_mode
+        return self.world_image
+    end
+
+    -- Choose richest city-scope colour mode
+    local city_mode = (self.city_district_maps and self.city_district_maps[start_idx])
+                      and "districts"
+                      or  (self.biome_colormap and "biome" or "height")
+
+    -- City F8 image: full city bounds (padded 2 cells)
+    local cox1=math.max(1,city_mn_x-2); local cox2=math.min(w,city_mx_x+2)
+    local coy1=math.max(1,city_mn_y-2); local coy2=math.min(h,city_mx_y+2)
+    -- Downtown fogged version: same bounds as city image but with fog baked in
+    game.world_gen_downtown_fogged_image = buildCityImg(city_mode, cox1, cox2, coy1, coy2, "downtown")
+    -- Unfogged city image
+    game.world_gen_city_image     = buildCityImg(city_mode, cox1, cox2, coy1, coy2)
+    game.world_gen_city_img_x     = cox1
+    game.world_gen_city_img_y     = coy1
+
+    -- Store city origin for vehicle coord mapping
+    game.world_gen_city_mn_x = city_mn_x   -- world cell of city grid top-left
+    game.world_gen_city_mn_y = city_mn_y
+
+    -- Determine starting city's continent and region IDs
+    local start_loc = self.city_locations[start_idx]
+    local start_ci  = (start_loc.y - 1) * w + start_loc.x
+    local start_cid = self.continent_map and self.continent_map[start_ci]
+    local start_rid = self.region_map    and self.region_map[start_ci]
+
+    -- Region image: scope = starting city's region (darkened outside), fallback to world
+    game.world_gen_region_image =
+        buildWorldImg(start_rid and "region" or "world", nil, start_rid)
+
+    -- Continent image: scope = starting city's continent, fallback to world
+    game.world_gen_continent_image =
+        buildWorldImg(start_cid and "continent" or "world", start_cid, nil)
+
+    -- World image: full world
+    game.world_gen_world_image = buildWorldImg("world", nil, nil)
+
+    -- Store city image metadata (set by the last _buildCityImage call = city-scope)
+    game.world_gen_city_img_min_x = self.city_img_min_x   -- cox1
+    game.world_gen_city_img_min_y = self.city_img_min_y   -- coy1
+    game.world_gen_city_img_K     = self.city_img_K       -- 9
+
+    -- Precompute camera params for all 5 zoom levels (world-pixel coords, mirrors _fitToArea)
+    do
+        local ts2 = C.MAP.TILE_SIZE
+        local sw2, sh2 = love.graphics.getDimensions()
+        local vw2 = sw2 - C.UI.SIDEBAR_WIDTH
+
+        local function fitArea(mn_x, mx_x, mn_y, mx_y)
+            local aw = (mx_x - mn_x + 1) * ts2
+            local ah = (mx_y - mn_y + 1) * ts2
+            return {
+                scale = math.min(vw2 / aw, sh2 / ah) * 0.88,
+                x = ((mn_x + mx_x) * 0.5 - 0.5) * ts2,
+                y = ((mn_y + mx_y) * 0.5 - 0.5) * ts2,
+            }
+        end
+
+        local cp = {}
+        local S2 = C.MAP.SCALES
+
+        -- DOWNTOWN: sub-cell bounds of district poi_idx==1 (matches F8 _selectDowntown logic)
+        do
+            local dmap2  = self.city_district_maps and self.city_district_maps[start_idx]
+            local sub_w2 = w * 3
+            local sub_h2 = h * 3
+            local mn_scx, mx_scx = sub_w2, -1
+            local mn_scy, mx_scy = sub_h2, -1
+            if dmap2 then
+                for sci2, poi_idx2 in pairs(dmap2) do
+                    if poi_idx2 == 1 then
+                        local gscx2 = (sci2 - 1) % sub_w2
+                        local gscy2 = math.floor((sci2 - 1) / sub_w2)
+                        if gscx2 < mn_scx then mn_scx = gscx2 end
+                        if gscx2 > mx_scx then mx_scx = gscx2 end
+                        if gscy2 < mn_scy then mn_scy = gscy2 end
+                        if gscy2 > mx_scy then mx_scy = gscy2 end
+                    end
+                end
+            end
+            if mx_scx >= mn_scx then
+                local ts2 = C.MAP.TILE_SIZE
+                local px_x1 = mn_scx / 3 * ts2
+                local px_x2 = (mx_scx + 1) / 3 * ts2
+                local px_y1 = mn_scy / 3 * ts2
+                local px_y2 = (mx_scy + 1) / 3 * ts2
+                local area_w2 = px_x2 - px_x1
+                local area_h2 = px_y2 - px_y1
+                cp[S2.DOWNTOWN] = {
+                    scale = math.min(vw2 / area_w2, sh2 / area_h2) * 0.88,
+                    x = (px_x1 + px_x2) * 0.5,
+                    y = (px_y1 + px_y2) * 0.5,
+                }
+            else
+                -- Fallback: city bounds
+                cp[S2.DOWNTOWN] = fitArea(city_mn_x, city_mx_x, city_mn_y, city_mx_y)
+            end
+        end
+
+        -- CITY: full starting city bounds
+        cp[S2.CITY] = fitArea(city_mn_x, city_mx_x, city_mn_y, city_mx_y)
+
+        -- REGION: bounding box of starting city's region
+        do
+            local rmin_x, rmax_x, rmin_y, rmax_y = w+1, 0, h+1, 0
+            if start_rid and self.region_map then
+                for i = 1, w*h do
+                    if self.region_map[i] == start_rid then
+                        local rx = (i-1)%w+1; local ry = math.floor((i-1)/w)+1
+                        if rx<rmin_x then rmin_x=rx end; if rx>rmax_x then rmax_x=rx end
+                        if ry<rmin_y then rmin_y=ry end; if ry>rmax_y then rmax_y=ry end
+                    end
+                end
+            end
+            cp[S2.REGION] = (rmax_x >= rmin_x) and fitArea(rmin_x, rmax_x, rmin_y, rmax_y)
+                                                 or  fitArea(1, w, 1, h)
+        end
+
+        -- CONTINENT: bounding box of starting city's continent
+        do
+            local cmin_x, cmax_x, cmin_y, cmax_y = w+1, 0, h+1, 0
+            if start_cid and self.continent_map then
+                for i = 1, w*h do
+                    if self.continent_map[i] == start_cid then
+                        local cx2 = (i-1)%w+1; local cy2 = math.floor((i-1)/w)+1
+                        if cx2<cmin_x then cmin_x=cx2 end; if cx2>cmax_x then cmax_x=cx2 end
+                        if cy2<cmin_y then cmin_y=cy2 end; if cy2>cmax_y then cmax_y=cy2 end
+                    end
+                end
+            end
+            cp[S2.CONTINENT] = (cmax_x >= cmin_x) and fitArea(cmin_x, cmax_x, cmin_y, cmax_y)
+                                                    or  fitArea(1, w, 1, h)
+        end
+
+        -- WORLD: full map
+        cp[S2.WORLD] = fitArea(1, w, 1, h)
+
+        game.world_gen_cam_params = cp
+    end
+
+    -- Stamp onto game
+    game.maps.city      = new_map
+    game.active_map_key = "city"
+    game.lab_grid       = nil
+    game.wfc_final_grid = nil
+    game.lab_zone_grid  = nil
+
+    -- Reset vehicles
+    local States    = require("models.vehicles.vehicle_states")
+    local new_depot = new_map:getRandomDowntownBuildingPlot() or new_map:getRandomBuildingPlot()
+    game.entities.depot_plot = new_depot
+    for _, v in ipairs(game.entities.vehicles) do
+        v.cargo = {}; v.trip_queue = {}; v.path = {}
+        if new_depot then
+            v.depot_plot  = new_depot
+            v.grid_anchor = {x = new_depot.x, y = new_depot.y}
+            if v.recalculatePixelPosition then v:recalculatePixelPosition(game) end
+        end
+        if States and States.Idle then v:changeState(States.Idle, game) end
+    end
+
+    -- Reset trips and respawn clients
+    game.entities.trips.pending = {}
+    local num_clients = math.max(1, #game.entities.clients)
+    game.entities.clients = {}
+    for _ = 1, num_clients do
+        game.entities:addClient(game)
+    end
+
+    -- Zoom to downtown and close sandbox
+    local ok, err = pcall(function()
+        game.maps.city:setScale(C.MAP.SCALES.DOWNTOWN)
+    end)
+    if not ok then print("WorldSandbox sendToGame: setScale failed: " .. tostring(err)) end
+
+    self:close()
+end
+
 -- ── Generation ────────────────────────────────────────────────────────────────
 
 function WorldSandboxController:generate()
@@ -238,6 +600,8 @@ function WorldSandboxController:_buildImage()
                 in_scope = (reg_map and reg_map[i] == sel_rid)
             elseif scope == "city" and sel_city_b then
                 in_scope = (sel_city_b[i] == true)
+            elseif scope == "downtown" then
+                in_scope = (self.selected_downtown_bounds ~= nil and self.selected_downtown_bounds[i] == true)
             end
 
             local c = active[y][x]
@@ -847,35 +1211,43 @@ function WorldSandboxController:_gen_bounds_for_city(city)
         end
     end
 
-    -- Fill enclosed islands: any non-claimed cell with all 4 cardinal neighbors
-    -- inside the claimed set is absorbed into the city (eliminates 1-cell holes).
-    -- Repeat until stable (handles larger pockets too).
-    local changed = true
-    while changed do
-        changed = false
-        for ci in pairs(claimed) do
-            local cx2 = (ci-1) % w
-            local cy2 = math.floor((ci-1) / w)
-            for _, m in ipairs({{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}}) do
-                local nx2 = cx2 + m[1]; local ny2 = cy2 + m[2]
-                if nx2 >= 0 and nx2 < w and ny2 >= 0 and ny2 < h then
-                    local ni = ny2 * w + nx2 + 1
-                    if not claimed[ni] then
-                        -- Check if this unclaimed cell is surrounded on all 4 sides
-                        local surrounded = true
-                        for _, m2 in ipairs({{1,0},{-1,0},{0,1},{0,-1}}) do
-                            local ax = nx2 + m2[1]; local ay = ny2 + m2[2]
-                            if ax < 0 or ax >= w or ay < 0 or ay >= h or not claimed[ay*w+ax+1] then
-                                surrounded = false; break
-                            end
-                        end
-                        if surrounded then
-                            claimed[ni] = true
-                            claimed_count = claimed_count + 1
-                            changed = true
-                        end
-                    end
+    -- Fill enclosed islands: flood-fill from the world border outward through
+    -- unclaimed cells to find all "exterior" unclaimed space.  Any unclaimed
+    -- cell that is NOT reachable from the border is fully enclosed by city and
+    -- gets absorbed.  This handles islands of any size in one O(w*h) pass.
+    local exterior = {}
+    local q = {}; local qh = 1
+
+    local function seed(cx2, cy2)
+        local ci = cy2 * w + cx2 + 1
+        if not claimed[ci] and not exterior[ci] then
+            exterior[ci] = true; q[#q+1] = ci
+        end
+    end
+    for bx = 0, w-1 do seed(bx, 0); seed(bx, h-1) end
+    for by = 1, h-2 do seed(0, by); seed(w-1, by) end
+
+    local CARD = {{1,0},{-1,0},{0,1},{0,-1}}
+    while qh <= #q do
+        local ci = q[qh]; qh = qh + 1
+        local cx2 = (ci-1) % w; local cy2 = math.floor((ci-1) / w)
+        for _, m in ipairs(CARD) do
+            local nx2 = cx2+m[1]; local ny2 = cy2+m[2]
+            if nx2 >= 0 and nx2 < w and ny2 >= 0 and ny2 < h then
+                local ni = ny2*w+nx2+1
+                if not claimed[ni] and not exterior[ni] then
+                    exterior[ni] = true; q[#q+1] = ni
                 end
+            end
+        end
+    end
+
+    -- Claim every cell that is unclaimed AND not exterior (i.e. enclosed)
+    for cy2 = 0, h-1 do
+        for cx2 = 0, w-1 do
+            local ci = cy2*w+cx2+1
+            if not claimed[ci] and not exterior[ci] then
+                claimed[ci] = true; claimed_count = claimed_count + 1
             end
         end
     end
@@ -1055,6 +1427,7 @@ function WorldSandboxController:_gen_all_bounds()
 
     self:_gen_all_districts()
     self:_gen_all_arterials()
+    self:_gen_all_streets()
 end
 
 -- ── Sub-cell elevation ────────────────────────────────────────────────────────
@@ -1721,6 +2094,84 @@ function WorldSandboxController:_gen_all_arterials()
     self.city_arterial_maps = maps
 end
 
+-- ── Downtown street generator ─────────────────────────────────────────────────
+-- Recursive binary-space-partition of the downtown district bounding box.
+-- Streets run BETWEEN world cells (at the shared edge), not ON them, so they
+-- occupy the 2 sub-cells that straddle each boundary:
+--   vertical boundary after world column wx   → gscx = wx*3+2  AND  (wx+1)*3+0
+--   horizontal boundary after world row wy    → gscy = wy*3+2  AND  (wy+1)*3+0
+-- Each boundary sub-cell column/row runs the full height/width of the block
+-- being split (3 sub-cells per world cell tall/wide).
+
+local ST_MIN_BLOCK = 2   -- min block side in world cells before we stop splitting
+local ST_MAX_BLOCK = 3   -- max block side before we force a split
+
+function WorldSandboxController:_gen_streets_for_city(city_idx)
+    local bounds   = self.city_bounds_list   and self.city_bounds_list[city_idx]
+    local pois     = self.city_pois_list     and self.city_pois_list[city_idx]
+    local dist_map = self.city_district_maps and self.city_district_maps[city_idx]
+    if not bounds or not pois or #pois == 0 then return {v={},h={}} end
+
+    local w  = self.world_w
+    local sw = w * 3
+    local function sci_of(gscx, gscy) return gscy * sw + gscx + 1 end
+
+    -- Build set of world cells owned by downtown (district owner index 1)
+    local dt_cells = {}
+    if dist_map then
+        for ci in pairs(bounds) do
+            local cx = (ci-1) % w + 1
+            local cy = math.floor((ci-1) / w) + 1
+            if dist_map[sci_of((cx-1)*3+1, (cy-1)*3+1)] == 1 then
+                dt_cells[ci] = true
+            end
+        end
+    end
+    -- Fallback: fixed radius around downtown POI if district map absent or tiny
+    if not next(dt_cells) then
+        local dt = pois[1]; local r = 3
+        local mn_x = math.max(1, dt.x-r); local mx_x = math.min(w, dt.x+r)
+        local mn_y = math.max(1, dt.y-r); local mx_y = math.min(self.world_h, dt.y+r)
+        for cy = mn_y, mx_y do
+            for cx = mn_x, mx_x do
+                dt_cells[(cy-1)*w+cx] = true
+            end
+        end
+    end
+
+    -- Regular grid: draw a street boundary between two cells when BOTH are
+    -- downtown AND the boundary falls on a grid line (every SPACING cells).
+    -- Grid is aligned to a global origin so all cities share the same phase.
+    -- This handles irregular downtown shapes naturally: lines only appear where
+    -- both neighbours are inside the district, so the grid clips to the shape.
+    local sv, sh = {}, {}
+    for ci in pairs(dt_cells) do
+        local cx = (ci-1) % w + 1
+        local cy = math.floor((ci-1) / w) + 1
+
+        -- Vertical boundary: between col cx and cx+1, if cx is a grid line
+        if cx % ST_MIN_BLOCK == 0 and cx < w then
+            local r_ci = (cy-1)*w + (cx+1)
+            if dt_cells[r_ci] then sv[cx * 1000 + cy] = true end
+        end
+        -- Horizontal boundary: between row cy and cy+1, if cy is a grid line
+        if cy % ST_MIN_BLOCK == 0 and cy < self.world_h then
+            local b_ci = cy*w + cx
+            if dt_cells[b_ci] then sh[cy * 1000 + cx] = true end
+        end
+    end
+
+    return {v=sv, h=sh}
+end
+
+function WorldSandboxController:_gen_all_streets()
+    local maps = {}
+    for idx = 1, #(self.city_locations or {}) do
+        maps[idx] = self:_gen_streets_for_city(idx)
+    end
+    self.city_street_maps = maps
+end
+
 function WorldSandboxController:regen_bounds()
     if not self.city_locations then
         self.status_text = "Place cities first"
@@ -1771,6 +2222,59 @@ function WorldSandboxController:_selectCity(city_idx)
     self.status_text = "City view  |  RMB pan  |  Wheel zoom  |  Esc to zoom out"
 end
 
+function WorldSandboxController:_selectDowntown()
+    local idx = self.selected_city_idx
+    if not idx or not self.city_district_maps then return end
+    local dmap = self.city_district_maps[idx]
+    if not dmap then return end
+    local w, h  = self.world_w, self.world_h
+    local sub_w = w * 3
+    local sub_h = h * 3
+    -- Find sub-cell bounds in 0-indexed gscx/gscy space
+    local min_scx, max_scx = sub_w,  -1
+    local min_scy, max_scy = sub_h,  -1
+    for sci, poi_idx in pairs(dmap) do
+        if poi_idx == 1 then
+            local gscx = (sci - 1) % sub_w
+            local gscy = math.floor((sci - 1) / sub_w)
+            if gscx < min_scx then min_scx = gscx end
+            if gscx > max_scx then max_scx = gscx end
+            if gscy < min_scy then min_scy = gscy end
+            if gscy > max_scy then max_scy = gscy end
+        end
+    end
+    if max_scx < min_scx then return end
+    -- Set view_scope BEFORE building city_image so fog is baked in
+    self.view_scope = "downtown"
+    self.scope_mode = nil
+    -- Rebuild city_image with downtown fog baked in at sub-cell precision
+    local bounds = self.city_bounds_list and self.city_bounds_list[idx]
+    if bounds then
+        local bx1, bx2, by1, by2 = w+1, 0, h+1, 0
+        for ci in pairs(bounds) do
+            local bx = (ci-1)%w+1; local by = math.floor((ci-1)/w)+1
+            if bx<bx1 then bx1=bx end; if bx>bx2 then bx2=bx end
+            if by<by1 then by1=by end; if by>by2 then by2=by end
+        end
+        self:_buildCityImage(idx, bx1, bx2, by1, by2)
+    end
+    -- Set camera from sub-cell world-pixel extent: gscx (0-indexed) → world px = gscx/3 * ts
+    local C2  = self.game.C
+    local ts  = C2.MAP.TILE_SIZE
+    local sw2, sh2 = love.graphics.getDimensions()
+    local vw2 = sw2 - C2.UI.SIDEBAR_WIDTH
+    local px_x1 = min_scx / 3 * ts
+    local px_x2 = (max_scx + 1) / 3 * ts
+    local px_y1 = min_scy / 3 * ts
+    local px_y2 = (max_scy + 1) / 3 * ts
+    local area_w = px_x2 - px_x1
+    local area_h = px_y2 - px_y1
+    self.camera.scale = math.min(vw2 / area_w, sh2 / area_h) * 0.88
+    self.camera.x = (px_x1 + px_x2) / 2
+    self.camera.y = (px_y1 + px_y2) / 2
+    self.status_text = "Downtown view  |  RMB pan  |  Wheel zoom  |  Esc to zoom out"
+end
+
 -- Builds a high-resolution city image: ~200 city cells across, each CELL_PX×CELL_PX image pixels.
 -- Grid lines separate every city cell so the full granularity is visible on screen.
 function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, max_y)
@@ -1779,11 +2283,14 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
 
     -- Districts view: colour looked up from the sub-cell Dijkstra owner map.
     local use_districts  = (self.view_mode == "districts")
+    local fog_downtown   = (self.view_scope == "downtown")
     local dist_colors    = use_districts and self.city_district_colors and self.city_district_colors[city_idx]
-    local dist_owner_map = use_districts and self.city_district_maps    and self.city_district_maps[city_idx]
+    local dist_owner_map = (use_districts or fog_downtown) and self.city_district_maps and self.city_district_maps[city_idx]
     local pois_for_city  = (use_districts and self.city_pois_list and self.city_pois_list[city_idx]) or {}
     local sub_w          = self.world_w * 3   -- total sub-cell width (for owner map key)
-    local art_city_map   = self.city_arterial_maps and self.city_arterial_maps[city_idx]
+    local art_city_map    = self.city_arterial_maps and self.city_arterial_maps[city_idx]
+    local street_city_map = self.city_street_maps   and self.city_street_maps[city_idx]
+    -- street_city_map = {v={[sx*1000+wy]=true}, h={[sy*1000+wx]=true}}
 
     -- Terrain colormap used for out-of-bounds background in all modes (including districts)
     local terrain_cmap = self.biome_colormap or self.colormap
@@ -1865,13 +2372,47 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
                 local ix    = px % CELL
                 local outer = (ix == 0 or iy == 0)
                 local inner = (ix == 3 or ix == 6 or iy == 3 or iy == 6)
-                if outer then
-                    imgdata:setPixel(px, py, c[1]*0.20, c[2]*0.20, c[3]*0.20, 1.0)
-                elseif inner then
-                    imgdata:setPixel(px, py, c[1]*0.55, c[2]*0.55, c[3]*0.55, 1.0)
-                else
-                    imgdata:setPixel(px, py, c[1], c[2], c[3], 1.0)
+
+                -- Streets run between world cells: paint the 2 boundary pixels
+                -- (ix=8 of the left/top cell AND ix=0 of the right/bottom cell)
+                -- at full brightness so they appear as thin bright lines, not
+                -- colored sub-cells.  Arterials painted above still take priority
+                -- because the arterial check already changed c; we only override
+                -- the per-pixel dimming logic here, not c itself.
+                -- Streets are 1px: only the outer border pixel (ix=0 / iy=0) of the
+                -- right/bottom cell at each boundary.  ix=0 is already the cell-border
+                -- line drawn everywhere; we just paint it bright instead of dark.
+                local is_street = false
+                if street_city_map and (ix == 0 or iy == 0) then
+                    local sv, sh = street_city_map.v, street_city_map.h
+                    -- ix=0 → boundary is after col wx-1
+                    if ix == 0 and wx > min_x then
+                        is_street = sv and sv[(wx-1) * 1000 + wy]
+                    end
+                    -- iy=0 → boundary is after row wy-1
+                    if iy == 0 and wy > min_y then
+                        is_street = is_street or (sh and sh[(wy-1) * 1000 + wx])
+                    end
                 end
+
+                local r, g, b
+                if is_street then
+                    r, g, b = 0.88, 0.86, 0.80
+                elseif outer then
+                    r, g, b = c[1]*0.20, c[2]*0.20, c[3]*0.20
+                elseif inner then
+                    r, g, b = c[1]*0.55, c[2]*0.55, c[3]*0.55
+                else
+                    r, g, b = c[1], c[2], c[3]
+                end
+                -- Bake downtown fog: darken non-district-1 sub-cells at pixel precision
+                if fog_downtown and dist_owner_map then
+                    local sci2 = gscy * sub_w + gscx + 1
+                    if dist_owner_map[sci2] ~= 1 then
+                        r = r*0.18+0.01; g = g*0.18+0.02; b = b*0.18+0.06
+                    end
+                end
+                imgdata:setPixel(px, py, r, g, b, 1.0)
             else
                 -- Outside city bounds: terrain colour, dimmed
                 local tc = (terrain_cmap and terrain_cmap[wy] and terrain_cmap[wy][wx]) or {0.08, 0.08, 0.10}
@@ -1907,6 +2448,12 @@ function WorldSandboxController:handle_keypressed(key)
         if self.scope_mode then
             self.scope_mode  = nil
             self.status_text = "Cancelled"
+        elseif self.view_scope == "downtown" then
+            if self.selected_city_idx then
+                self:_selectCity(self.selected_city_idx)
+            else
+                self:set_scope_world()
+            end
         elseif self.view_scope == "city" then
             if self.selected_region_id then
                 self:_selectRegion(self.selected_region_id)

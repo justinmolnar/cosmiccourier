@@ -51,17 +51,19 @@ local C = {
     },
 
     SCALES = {
-            DOWNTOWN = 1,
-            CITY = 2,
-            REGION = 3,
-            PLANET = 4,
+            DOWNTOWN  = 1,
+            CITY      = 2,
+            REGION    = 3,
+            CONTINENT = 4,
+            WORLD     = 5,
         },
 
     SCALE_NAMES = {
             [1] = "Downtown Core",
-            [2] = "Metropolitan Area", 
-            [3] = "Regional Network",
-            [4] = "Planetary Grid",
+            [2] = "Metropolitan Area",
+            [3] = "Regional View",
+            [4] = "Continental View",
+            [5] = "World View",
         },
 },
 

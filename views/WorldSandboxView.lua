@@ -60,7 +60,7 @@ function WorldSandboxView:draw()
         love.graphics.scale(wsc.camera.scale, wsc.camera.scale)
         love.graphics.translate(-wsc.camera.x, -wsc.camera.y)
         love.graphics.setColor(1, 1, 1)
-        if wsc.view_scope == "city" and wsc.city_image then
+        if (wsc.view_scope == "city" or wsc.view_scope == "downtown") and wsc.city_image then
             -- High-res city image: K city pixels per world cell, offset by bbox origin
             local K     = wsc.city_img_K
             local ox    = (wsc.city_img_min_x - 1) * ts
@@ -146,7 +146,7 @@ function WorldSandboxView:draw()
     end
 
     -- POI markers (downtown + districts, visible in region scope, filtered to selected region)
-    if wsc.city_pois and (wsc.view_scope == "region" or wsc.view_scope == "city") then
+    if wsc.city_pois and (wsc.view_scope == "region" or wsc.view_scope == "city" or wsc.view_scope == "downtown") then
         local C   = self.game.C
         local ts  = C.MAP.TILE_SIZE
         local sel = wsc.selected_region_id

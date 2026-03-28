@@ -140,53 +140,23 @@ end
 function Map:setScale(new_scale)
     if not self.C.MAP.SCALE_NAMES[new_scale] then return false end
 
-    local target_map_key = (new_scale == self.C.MAP.SCALES.REGION) and "region" or "city"
-    local target_map = Game.maps[target_map_key]
-    Game.active_map_key = target_map_key
-    
+    Game.active_map_key = "city"
     Game.state.current_map_scale = new_scale
-    
-    local screen_w, screen_h = love.graphics.getDimensions()
-    local game_world_w = screen_w - (Game and Game.C.UI.SIDEBAR_WIDTH or 280)
-    
-    local grid_w = #target_map.grid > 0 and #target_map.grid[1] or 1
-    local grid_h = #target_map.grid > 0 and #target_map.grid or 1
 
-    if new_scale == self.C.MAP.SCALES.DOWNTOWN then
-        -- Use the downtown dimensions from the constants file
-        local downtown_w = self.C.MAP.DOWNTOWN_GRID_WIDTH
-        local downtown_h = self.C.MAP.DOWNTOWN_GRID_HEIGHT
-        local downtown_center_x_grid = self.downtown_offset.x + (downtown_w / 2)
-        local downtown_center_y_grid = self.downtown_offset.y + (downtown_h / 2)
-        
-        Game.camera.x, Game.camera.y = self:getPixelCoords(downtown_center_x_grid, downtown_center_y_grid)
-        local scale_w = game_world_w / ((downtown_w + 4) * self.C.MAP.TILE_SIZE)
-        local scale_h = screen_h   / ((downtown_h + 4) * self.C.MAP.TILE_SIZE)
-        Game.camera.scale = math.min(scale_w, scale_h)
-        
-    elseif new_scale == self.C.MAP.SCALES.CITY then
-        local city_center_x_grid = grid_w / 2
-        local city_center_y_grid = grid_h / 2
-        Game.camera.x, Game.camera.y = self:getPixelCoords(city_center_x_grid, city_center_y_grid)
-
-        local scale_w = game_world_w / (grid_w * self.C.MAP.TILE_SIZE)
-        local scale_h = screen_h   / (grid_h * self.C.MAP.TILE_SIZE)
-        Game.camera.scale = math.min(scale_w, scale_h)
-
-    elseif new_scale == self.C.MAP.SCALES.REGION then
-        local region_center_x_grid = grid_w / 2
-        local region_center_y_grid = grid_h / 2
-        Game.camera.x, Game.camera.y = target_map:getPixelCoords(region_center_x_grid, region_center_y_grid)
-
-        local scale_w = game_world_w / (grid_w * self.C.MAP.TILE_SIZE)
-        local scale_h = screen_h   / (grid_h * self.C.MAP.TILE_SIZE)
-        Game.camera.scale = math.min(scale_w, scale_h)
+    -- Apply precomputed world-pixel camera params (mirrors F8 _fitToArea)
+    if Game.world_gen_cam_params and Game.world_gen_cam_params[new_scale] then
+        local p = Game.world_gen_cam_params[new_scale]
+        Game.camera.x     = p.x
+        Game.camera.y     = p.y
+        Game.camera.scale = p.scale
+    else
+        Game.camera.x = 0; Game.camera.y = 0; Game.camera.scale = 1
     end
-    
+
     if Game and Game.EventBus then
         Game.EventBus:publish("map_scale_changed")
     end
-    
+
     print("Set camera view to", self:getScaleName())
     return true
 end
