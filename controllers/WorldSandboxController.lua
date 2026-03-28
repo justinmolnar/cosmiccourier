@@ -32,7 +32,10 @@ function WorldSandboxController:new(game)
     inst.city_border           = nil
     inst.city_fringe           = nil
     inst.city_pois             = nil
+    inst.city_pois_list        = nil   -- [city_idx] = {pois array} for that city
     inst.city_bounds_list      = nil
+    inst.city_district_maps    = nil   -- [city_idx] = {[cell_idx] = poi_idx}
+    inst.city_district_colors  = nil   -- [city_idx] = {[poi_idx] = {r,g,b}}
     inst.selected_city_idx     = nil
     inst.selected_city_bounds  = nil
     inst.city_image            = nil   -- high-res city grid image (city scope)
@@ -42,7 +45,7 @@ function WorldSandboxController:new(game)
     inst.world_image           = nil
     inst.world_w        = 0
     inst.world_h        = 0
-    inst.view_mode      = "height"   -- "height" | "biome" | "suitability" | "continents" | "regions"
+    inst.view_mode      = "height"   -- "height" | "biome" | "suitability" | "continents" | "regions" | "districts"
     inst.view_scope     = "world"    -- "world" | "continent" | "region"
     inst.scope_mode     = nil        -- nil | "picking_continent" | "picking_region"
     inst.selected_continent_id = nil
@@ -110,8 +113,10 @@ function WorldSandboxController:new(game)
         highway_budget_scale   = 800, -- slider 100-3000: budget per unit of suitability² (larger = more roads)
         -- City bounds generation (Dijkstra flood-fill from city seed)
         city_size_fraction = 0.07, -- slider 0.01-0.50: fraction of region cells the city can claim (scaled by suitability)
-        city_poi_count     = 5,    -- slider 2-10: POIs to identify (downtown + districts)
+        city_poi_count     = 10,   -- slider 2-20: POIs to identify (downtown + districts)
         city_poi_spacing   = 1.0,  -- slider 0.3-3.0: multiplier on auto-spacing (1.0 = evenly distribute across footprint)
+        downtown_pct       = 0.05, -- slider 0.05-0.30: target fraction of city cells for the downtown district
+        downtown_min_cells = 11,   -- slider 1-50: hard minimum sub-cells for downtown regardless of % result
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
         -- Biome thresholds on the normalized [0,1] height.
@@ -823,6 +828,39 @@ function WorldSandboxController:_gen_bounds_for_city(city)
         end
     end
 
+    -- Fill enclosed islands: any non-claimed cell with all 4 cardinal neighbors
+    -- inside the claimed set is absorbed into the city (eliminates 1-cell holes).
+    -- Repeat until stable (handles larger pockets too).
+    local changed = true
+    while changed do
+        changed = false
+        for ci in pairs(claimed) do
+            local cx2 = (ci-1) % w
+            local cy2 = math.floor((ci-1) / w)
+            for _, m in ipairs({{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}}) do
+                local nx2 = cx2 + m[1]; local ny2 = cy2 + m[2]
+                if nx2 >= 0 and nx2 < w and ny2 >= 0 and ny2 < h then
+                    local ni = ny2 * w + nx2 + 1
+                    if not claimed[ni] then
+                        -- Check if this unclaimed cell is surrounded on all 4 sides
+                        local surrounded = true
+                        for _, m2 in ipairs({{1,0},{-1,0},{0,1},{0,-1}}) do
+                            local ax = nx2 + m2[1]; local ay = ny2 + m2[2]
+                            if ax < 0 or ax >= w or ay < 0 or ay >= h or not claimed[ay*w+ax+1] then
+                                surrounded = false; break
+                            end
+                        end
+                        if surrounded then
+                            claimed[ni] = true
+                            claimed_count = claimed_count + 1
+                            changed = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     -- Erode claimed area: remove cells where any 8-neighbor is unclaimed.
     -- Two passes guarantee POIs are always ≥2 cells from any edge.
     local eroded = {}
@@ -926,9 +964,11 @@ function WorldSandboxController:_gen_all_bounds()
     local new_bounds      = {}
     local new_bounds_list = {}
     local new_pois        = {}
+    local new_pois_list   = {}
     for idx, city in ipairs(self.city_locations) do
         local claimed, pois = self:_gen_bounds_for_city(city)
         new_bounds_list[idx] = claimed or {}
+        new_pois_list[idx]   = pois or {}
         if claimed then
             for ci in pairs(claimed) do new_bounds[ci] = true end
         end
@@ -943,6 +983,7 @@ function WorldSandboxController:_gen_all_bounds()
         end
     end
     self.city_bounds_list = new_bounds_list
+    self.city_pois_list   = new_pois_list
     self.city_bounds = new_bounds
     self.city_pois   = new_pois
 
@@ -984,6 +1025,297 @@ function WorldSandboxController:_gen_all_bounds()
         end
     end
     self.city_fringe = fringe
+
+    self:_gen_all_districts()
+end
+
+-- ── Sub-cell elevation ────────────────────────────────────────────────────────
+
+-- Each world cell contains 3×3 sub-cells. Their elevations are derived by
+-- combining the parent world-cell elevation with two noise octaves at sub-cell
+-- frequency. This gives each sub-cell its own character (biome variation,
+-- organic district boundaries) without touching the world-gen pipeline.
+--
+-- Noise seeds are offset far from world-gen seeds so they don't correlate.
+-- Amplitudes are kept small so sub-cells stay in the same biome family as
+-- their parent; they add texture, not radical terrain changes.
+local SC_DETAIL_FREQ = 0.55   -- high-freq: varies every ~2 sub-cells
+local SC_DETAIL_AMP  = 0.08   -- ±0.08 elevation delta from fine noise
+local SC_MEDIUM_FREQ = 0.18   -- mid-freq: city-scale undulation
+local SC_MEDIUM_AMP  = 0.04   -- ±0.04 from medium noise
+
+local function subcell_elev_at(gscx, gscy, hmap)
+    local wx   = math.floor(gscx / 3)
+    local wy   = math.floor(gscy / 3)
+    local base = hmap[wy + 1][wx + 1]
+    local d = (love.math.noise(gscx * SC_DETAIL_FREQ + 100.3, gscy * SC_DETAIL_FREQ + 73.1) - 0.5) * SC_DETAIL_AMP * 2
+    local m = (love.math.noise(gscx * SC_MEDIUM_FREQ + 200.7, gscy * SC_MEDIUM_FREQ + 31.9) - 0.5) * SC_MEDIUM_AMP * 2
+    return base + d + m
+end
+
+-- ── District flood-fill ───────────────────────────────────────────────────────
+
+-- Distinct colours for up to 10 POIs. Index 1 = downtown (gold), rest = districts.
+local DISTRICT_PALETTE = {
+    {1.00, 0.82, 0.15},   -- downtown: gold
+    {0.28, 0.55, 0.92},   -- blue
+    {0.22, 0.78, 0.42},   -- green
+    {0.88, 0.32, 0.22},   -- red
+    {0.72, 0.38, 0.88},   -- purple
+    {0.92, 0.56, 0.18},   -- orange
+    {0.20, 0.80, 0.84},   -- cyan
+    {0.88, 0.28, 0.60},   -- pink
+    {0.62, 0.88, 0.18},   -- lime
+    {0.44, 0.28, 0.88},   -- indigo
+}
+
+function WorldSandboxController:_gen_all_districts()
+    local maps   = {}
+    local colors = {}
+    for idx = 1, #(self.city_locations or {}) do
+        maps[idx], colors[idx] = self:_gen_districts_for_city(idx)
+    end
+    self.city_district_maps   = maps
+    self.city_district_colors = colors
+end
+
+-- Multi-source Dijkstra at sub-cell resolution (3×3 per world cell).
+-- Sub-cell elevations come from subcell_elev_at(), which adds noise on top of
+-- the world-cell baseline. This gives genuine intra-cell elevation variation,
+-- so the flood-fill can draw district boundaries that meander through sub-cells.
+-- Returns district_map ([sub_cell_idx] = poi_idx) and color table ([poi_idx] = {r,g,b}).
+function WorldSandboxController:_gen_districts_for_city(city_idx)
+    local bounds = self.city_bounds_list and self.city_bounds_list[city_idx]
+    local pois   = self.city_pois_list   and self.city_pois_list[city_idx]
+    if not bounds or not pois or #pois == 0 then return {}, {} end
+
+    local w     = self.world_w
+    local h     = self.world_h
+    local sub_w = w * 3
+    local sub_h = h * 3
+    local hmap  = self.heightmap
+    local bdata = self.biome_data
+
+    local function in_bounds(gscx, gscy)
+        local wx = math.floor(gscx / 3)
+        local wy = math.floor(gscy / 3)
+        if wx < 0 or wx >= w or wy < 0 or wy >= h then return false end
+        return bounds[wy * w + wx + 1] == true
+    end
+
+    -- Binary min-heap (same pattern used throughout this file)
+    local heap = {}
+    local function hpush(f, i)
+        heap[#heap+1] = {f, i}
+        local pos = #heap
+        while pos > 1 do
+            local par = math.floor(pos / 2)
+            if heap[par][1] > heap[pos][1] then
+                heap[par], heap[pos] = heap[pos], heap[par]; pos = par
+            else break end
+        end
+    end
+    local function hpop()
+        local top = heap[1]; local n = #heap
+        heap[1] = heap[n]; heap[n] = nil
+        local pos = 1
+        while true do
+            local l, r, s = pos*2, pos*2+1, pos
+            if l <= #heap and heap[l][1] < heap[s][1] then s = l end
+            if r <= #heap and heap[r][1] < heap[s][1] then s = r end
+            if s == pos then break end
+            heap[pos], heap[s] = heap[s], heap[pos]; pos = s
+        end
+        return top
+    end
+
+    local dist  = {}
+    local owner = {}  -- [sub_cell_idx] = poi_idx
+
+    -- Seed each POI at the centre sub-cell of its world cell
+    for poi_idx, poi in ipairs(pois) do
+        local gscx = (poi.x - 1) * 3 + 1
+        local gscy = (poi.y - 1) * 3 + 1
+        if in_bounds(gscx, gscy) then
+            local sci  = gscy * sub_w + gscx + 1
+            dist[sci]  = 0
+            owner[sci] = poi_idx
+            hpush(0, sci)
+        end
+    end
+
+    local dirs = {-1, 1, -sub_w, sub_w}
+
+    while #heap > 0 do
+        local node = hpop()
+        local d, sci = node[1], node[2]
+        if dist[sci] == d then
+            local gscx   = (sci - 1) % sub_w
+            local gscy   = math.floor((sci - 1) / sub_w)
+            local from_e = subcell_elev_at(gscx, gscy, hmap)
+
+            for _, dir in ipairs(dirs) do
+                local ni = sci + dir
+                if ni >= 1 and ni <= sub_w * sub_h then
+                    local nx2 = (ni - 1) % sub_w
+                    local ny2 = math.floor((ni - 1) / sub_w)
+                    local valid = (dir == -1     and nx2 == gscx - 1) or
+                                  (dir ==  1     and nx2 == gscx + 1) or
+                                  (dir == -sub_w and ny2 == gscy - 1) or
+                                  (dir ==  sub_w and ny2 == gscy + 1)
+                    if valid and in_bounds(nx2, ny2) then
+                        local to_e   = subcell_elev_at(nx2, ny2, hmap)
+                        local elev_d = math.abs(to_e - from_e)
+                        -- elev_d now includes sub-cell noise variation,
+                        -- so intra-cell steps have genuine cost differences
+                        local cost   = 1.0 + elev_d * 12.0
+
+                        local wni = math.floor(ny2 / 3) * w + math.floor(nx2 / 3) + 1
+                        local bd  = bdata and bdata[wni]
+                        if bd and (bd.is_river or bd.is_lake) then cost = cost + 6.0 end
+
+                        local nd = d + cost
+                        if not dist[ni] or nd < dist[ni] then
+                            dist[ni]  = nd
+                            owner[ni] = owner[sci]
+                            hpush(nd, ni)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Enforce per-district cell budget.
+    -- effective budget = max(floor(total_owned * pct), min_cells)
+    -- Trim strategy: sort the district's cells by Euclidean distance from its POI
+    -- seed (farthest first), mark the excess as nil, then BFS from all remaining
+    -- owned cells to re-fill the vacated territory.  Geographic distance reliably
+    -- identifies outer cells; the BFS fill lets adjacent districts absorb them
+    -- without needing a direct non-district neighbour at the moment of removal.
+    -- Expand: BFS outward from boundary until minimum is met.
+    local p = self.params
+    local total_owned = 0
+    for _ in pairs(owner) do total_owned = total_owned + 1 end
+
+    local function apply_district_budget(target_poi, pct, min_cells)
+        local budget = math.max(min_cells, math.floor(total_owned * pct))
+
+        local poi    = pois[target_poi]
+        local seed_x = (poi.x - 1) * 3 + 1
+        local seed_y = (poi.y - 1) * 3 + 1
+
+        local cells = {}
+        for sci, pid in pairs(owner) do
+            if pid == target_poi then
+                local cx2 = (sci - 1) % sub_w
+                local cy2 = math.floor((sci - 1) / sub_w)
+                local dx, dy = cx2 - seed_x, cy2 - seed_y
+                cells[#cells+1] = {sci=sci, d2=dx*dx + dy*dy}
+            end
+        end
+
+        if #cells > budget then
+            -- Sort farthest-first, vacate excess cells
+            table.sort(cells, function(a, b) return a.d2 > b.d2 end)
+            for i = 1, #cells - budget do
+                owner[cells[i].sci] = nil
+            end
+
+            -- BFS from every still-owned cell to fill the vacated territory
+            local q    = {}
+            local in_q = {}
+            for sci, pid in pairs(owner) do
+                q[#q+1]  = sci
+                in_q[sci] = true
+            end
+            local qi = 1
+            while qi <= #q do
+                local sci = q[qi]; qi = qi + 1
+                local cx2 = (sci - 1) % sub_w
+                local cy2 = math.floor((sci - 1) / sub_w)
+                for _, dir in ipairs(dirs) do
+                    local ni = sci + dir
+                    if ni >= 1 and ni <= sub_w * sub_h then
+                        local nx2 = (ni - 1) % sub_w
+                        local ny2 = math.floor((ni - 1) / sub_w)
+                        local valid = (dir == -1     and nx2 == cx2 - 1) or
+                                      (dir ==  1     and nx2 == cx2 + 1) or
+                                      (dir == -sub_w and ny2 == cy2 - 1) or
+                                      (dir ==  sub_w and ny2 == cy2 + 1)
+                        if valid and owner[ni] == nil and not in_q[ni]
+                                and in_bounds(nx2, ny2) then
+                            owner[ni] = owner[sci]
+                            q[#q+1]   = ni
+                            in_q[ni]  = true
+                        end
+                    end
+                end
+            end
+
+        elseif #cells < budget then
+            -- BFS-expand outward from the district boundary
+            local frontier = {}
+            local in_f     = {}
+            for _, dc in ipairs(cells) do
+                local sci = dc.sci
+                local cx2 = (sci - 1) % sub_w
+                local cy2 = math.floor((sci - 1) / sub_w)
+                for _, dir in ipairs(dirs) do
+                    local ni = sci + dir
+                    if ni >= 1 and ni <= sub_w * sub_h then
+                        local nx2 = (ni - 1) % sub_w
+                        local ny2 = math.floor((ni - 1) / sub_w)
+                        local valid = (dir == -1     and nx2 == cx2 - 1) or
+                                      (dir ==  1     and nx2 == cx2 + 1) or
+                                      (dir == -sub_w and ny2 == cy2 - 1) or
+                                      (dir ==  sub_w and ny2 == cy2 + 1)
+                        if valid and owner[ni] and owner[ni] ~= target_poi and not in_f[ni] then
+                            frontier[#frontier+1] = ni
+                            in_f[ni] = true
+                        end
+                    end
+                end
+            end
+            local fi    = 1
+            local count = #cells
+            while count < budget and fi <= #frontier do
+                local sci = frontier[fi]; fi = fi + 1
+                if owner[sci] and owner[sci] ~= target_poi then
+                    owner[sci] = target_poi
+                    count = count + 1
+                    local cx2 = (sci - 1) % sub_w
+                    local cy2 = math.floor((sci - 1) / sub_w)
+                    for _, dir in ipairs(dirs) do
+                        local ni = sci + dir
+                        if ni >= 1 and ni <= sub_w * sub_h then
+                            local nx2 = (ni - 1) % sub_w
+                            local ny2 = math.floor((ni - 1) / sub_w)
+                            local valid = (dir == -1     and nx2 == cx2 - 1) or
+                                          (dir ==  1     and nx2 == cx2 + 1) or
+                                          (dir == -sub_w and ny2 == cy2 - 1) or
+                                          (dir ==  sub_w and ny2 == cy2 + 1)
+                            if valid and owner[ni] and owner[ni] ~= target_poi and not in_f[ni] then
+                                frontier[#frontier+1] = ni
+                                in_f[ni] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Apply downtown budget: % cap with hard minimum in absolute sub-cells
+    apply_district_budget(1, p.downtown_pct or 0.05, p.downtown_min_cells or 11)
+
+    -- Build colour table (index 1 = downtown gold, rest cycle through palette)
+    local colors = {}
+    for poi_idx = 1, #pois do
+        colors[poi_idx] = DISTRICT_PALETTE[((poi_idx - 1) % #DISTRICT_PALETTE) + 1]
+    end
+
+    return owner, colors
 end
 
 function WorldSandboxController:regen_bounds()
@@ -993,7 +1325,21 @@ function WorldSandboxController:regen_bounds()
     end
     self:_gen_all_bounds()
     self:_buildImage()
-    self.status_text = string.format("Bounds regenerated for %d cities", #self.city_locations)
+    if self.view_scope == "city" and self.selected_city_idx then
+        local idx    = self.selected_city_idx
+        local bounds = self.city_bounds_list and self.city_bounds_list[idx]
+        if bounds then
+            local ww, wh = self.world_w, self.world_h
+            local min_x, max_x, min_y, max_y = ww+1, 0, wh+1, 0
+            for ci in pairs(bounds) do
+                local x = (ci-1) % ww + 1; local y = math.floor((ci-1) / ww) + 1
+                if x < min_x then min_x = x end; if x > max_x then max_x = x end
+                if y < min_y then min_y = y end; if y > max_y then max_y = y end
+            end
+            self:_buildCityImage(idx, min_x, max_x, min_y, max_y)
+        end
+    end
+    self.status_text = string.format("Bounds + districts regenerated for %d cities", #self.city_locations)
 end
 
 function WorldSandboxController:_selectCity(city_idx)
@@ -1027,10 +1373,25 @@ end
 function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, max_y)
     local bounds = self.city_bounds_list and self.city_bounds_list[city_idx]
     if not bounds then return end
-    local active = (self.view_mode == "biome"       and self.biome_colormap)
-               or  (self.view_mode == "suitability" and self.suitability_colormap)
-               or   self.colormap
-    if not active then return end
+
+    -- Districts view: colour looked up from the sub-cell Dijkstra owner map.
+    local use_districts  = (self.view_mode == "districts")
+    local dist_colors    = use_districts and self.city_district_colors and self.city_district_colors[city_idx]
+    local dist_owner_map = use_districts and self.city_district_maps    and self.city_district_maps[city_idx]
+    local pois_for_city  = (use_districts and self.city_pois_list and self.city_pois_list[city_idx]) or {}
+    local sub_w          = self.world_w * 3   -- total sub-cell width (for owner map key)
+
+    -- Terrain colormap used for out-of-bounds background in all modes (including districts)
+    local terrain_cmap = self.biome_colormap or self.colormap
+    local active
+    if not use_districts then
+        active = (self.view_mode == "biome"       and self.biome_colormap)
+              or (self.view_mode == "suitability" and self.suitability_colormap)
+              or  self.colormap
+        if not active then return end
+    elseif not terrain_cmap then
+        return
+    end
 
     local w      = self.world_w
     local bbox_w = max_x - min_x + 1
@@ -1049,20 +1410,63 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
         for px = 0, img_w - 1 do
             local wx = min_x + math.floor(px / CELL)
             local ci = (wy-1)*w + wx
-            local c  = active[wy] and active[wy][wx] or {0.1, 0.1, 0.1}
+
+            -- Sub-cell coordinates for this pixel
+            local gscx = (wx - 1) * 3 + math.floor((px % CELL) / 3)
+            local gscy = (wy - 1) * 3 + math.floor(iy / 3)
+
+            -- Determine base colour for this cell
+            local c
+            if use_districts then
+                -- Look up this sub-cell's district owner from the precomputed
+                -- terrain-aware sub-cell Dijkstra map.  The owner map key is the
+                -- same formula used during flood-fill: gscy*sub_w + gscx + 1.
+                local best_poi = dist_owner_map and dist_owner_map[gscy * sub_w + gscx + 1]
+
+                -- Fallback: nearest-POI if Dijkstra map is absent (e.g. just placed
+                -- cities but haven't run Regen Bounds yet).
+                if not best_poi and #pois_for_city > 0 then
+                    local best_wd = math.huge
+                    for poi_idx, poi in ipairs(pois_for_city) do
+                        local px2 = (poi.x - 1) * 3 + 1
+                        local py2 = (poi.y - 1) * 3 + 1
+                        local dx  = gscx - px2
+                        local dy  = gscy - py2
+                        local wd  = dx*dx + dy*dy
+                        if wd < best_wd then best_wd = wd; best_poi = poi_idx end
+                    end
+                end
+
+                c = (best_poi and dist_colors and dist_colors[best_poi]) or {0.25, 0.25, 0.28}
+            else
+                -- World-cell base colour, modulated by sub-cell elevation delta
+                -- so each sub-cell shows its own character within the world cell.
+                local bc      = active[wy] and active[wy][wx] or {0.1, 0.1, 0.1}
+                local world_e = self.heightmap[wy][wx]
+                local sub_e   = subcell_elev_at(gscx, gscy, self.heightmap)
+                local adjust  = (sub_e - world_e) * 3.0   -- amplify delta for visibility
+                c = {
+                    math.max(0, math.min(1, bc[1] + adjust)),
+                    math.max(0, math.min(1, bc[2] + adjust)),
+                    math.max(0, math.min(1, bc[3] + adjust)),
+                }
+            end
+
             if bounds[ci] then
-                local ix = px % CELL
+                local ix    = px % CELL
                 local outer = (ix == 0 or iy == 0)
                 local inner = (ix == 3 or ix == 6 or iy == 3 or iy == 6)
                 if outer then
                     imgdata:setPixel(px, py, c[1]*0.20, c[2]*0.20, c[3]*0.20, 1.0)
                 elseif inner then
-                    imgdata:setPixel(px, py, c[1]*0.60, c[2]*0.60, c[3]*0.60, 1.0)
+                    imgdata:setPixel(px, py, c[1]*0.55, c[2]*0.55, c[3]*0.55, 1.0)
                 else
                     imgdata:setPixel(px, py, c[1], c[2], c[3], 1.0)
                 end
             else
-                imgdata:setPixel(px, py, c[1]*0.18+0.01, c[2]*0.18+0.02, c[3]*0.18+0.06, 1.0)
+                -- Outside city bounds: terrain colour, dimmed
+                local tc = (terrain_cmap and terrain_cmap[wy] and terrain_cmap[wy][wx]) or {0.08, 0.08, 0.10}
+                imgdata:setPixel(px, py, tc[1]*0.18+0.01, tc[2]*0.18+0.02, tc[3]*0.18+0.06, 1.0)
             end
         end
     end
