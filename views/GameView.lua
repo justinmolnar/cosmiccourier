@@ -134,18 +134,18 @@ function GameView:draw()
         love.graphics.translate(-Game.camera.x, -Game.camera.y)
         love.graphics.setColor(1, 1, 1)
 
-        local city_bg = (cur_scale == S.DOWNTOWN) and (Game.world_gen_downtown_fogged_image or Game.world_gen_city_image)
-                                                    or Game.world_gen_city_image
+        local city_bg = Game.world_gen_city_image
         if (cur_scale == S.DOWNTOWN or cur_scale == S.CITY) and city_bg then
+            local bg = (cur_scale == S.DOWNTOWN and (Game.world_gen_downtown_fogged_image or city_bg)) or city_bg
             local K  = Game.world_gen_city_img_K or 9
             local ox = (Game.world_gen_city_img_min_x - 1) * ts
             local oy = (Game.world_gen_city_img_min_y - 1) * ts
-            love.graphics.draw(city_bg, ox, oy, 0, ts / K, ts / K)
+            love.graphics.draw(bg, ox, oy, 0, ts / K, ts / K)
         elseif cur_scale == S.REGION and Game.world_gen_region_image then
             love.graphics.draw(Game.world_gen_region_image, 0, 0, 0, ts, ts)
         elseif cur_scale == S.CONTINENT and Game.world_gen_continent_image then
             love.graphics.draw(Game.world_gen_continent_image, 0, 0, 0, ts, ts)
-        elseif Game.world_gen_world_image then
+        elseif cur_scale == S.WORLD and Game.world_gen_world_image then
             love.graphics.draw(Game.world_gen_world_image, 0, 0, 0, ts, ts)
         end
 
@@ -165,6 +165,36 @@ function GameView:draw()
             end
             for _, v in ipairs(Game.entities.vehicles) do
                 if v.visible then v:draw(Game) end
+            end
+
+            -- Trip route preview on hover (same as tile-grid branch)
+            if ui_manager.hovered_trip_index then
+                local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
+                if trip and trip.legs[trip.current_leg] then
+                    local leg = trip.legs[trip.current_leg]
+                    local start_node = active_map:findNearestRoadTile(leg.start_plot)
+                    local end_node   = active_map:findNearestRoadTile(leg.end_plot)
+                    if start_node and end_node and active_map.grid then
+                        local vp = (leg.vehicleType == "bike") and Game.C.VEHICLES.BIKE or Game.C.VEHICLES.TRUCK
+                        local cost_fn = function(x, y)
+                            local tile = active_map.grid[y] and active_map.grid[y][x]
+                            return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
+                        end
+                        local path = Game.pathfinder.findPath(active_map.grid, start_node, end_node, cost_fn, active_map)
+                        if path and #path >= 2 then
+                            local pixel_path = {}
+                            for _, node in ipairs(path) do
+                                local px, py = active_map:getPixelCoords(node.x, node.y)
+                                table.insert(pixel_path, px); table.insert(pixel_path, py)
+                            end
+                            local hc = Game.C.MAP.COLORS.HOVER
+                            love.graphics.setColor(hc[1], hc[2], hc[3], 0.7)
+                            love.graphics.setLineWidth(3 / Game.camera.scale)
+                            love.graphics.line(pixel_path)
+                            love.graphics.setLineWidth(1)
+                        end
+                    end
+                end
             end
         end
 

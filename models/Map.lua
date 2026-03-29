@@ -185,12 +185,43 @@ function Map:draw()
     love.graphics.setColor(1, 1, 1, 1)
 end
 
+-- Draws only road-type tiles (for overlaying on top of a background image).
+function Map:drawRoads()
+    local C_MAP = self.C.MAP
+    if not self.grid or #self.grid == 0 then return end
+    local tile_size = self.tile_pixel_size or C_MAP.TILE_SIZE
+    local road_color     = C_MAP.COLORS.ROAD
+    local dt_road_color  = C_MAP.COLORS.DOWNTOWN_ROAD
+    local art_color      = C_MAP.COLORS.ARTERIAL
+    for y = 1, #self.grid do
+        local row = self.grid[y]
+        for x = 1, #row do
+            local t = row[x].type
+            local c
+            if t == "road" or t == "highway_ring" or t == "highway_ns" or t == "highway_ew" then
+                c = road_color
+            elseif t == "downtown_road" then
+                c = dt_road_color
+            elseif t == "arterial" then
+                c = art_color
+            elseif t == "highway" then
+                c = C_MAP.COLORS.ROAD  -- draw highways too so they're visible
+            end
+            if c then
+                love.graphics.setColor(c[1], c[2], c[3], 1)
+                love.graphics.rectangle("fill", (x-1)*tile_size, (y-1)*tile_size, tile_size, tile_size)
+            end
+        end
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+end
+
 function Map:drawGrid(grid, alpha)
     local C_MAP = self.C.MAP
     if not grid or #grid == 0 then return end
     
     local grid_h, grid_w = #grid, #grid[1]
-    local tile_size = C_MAP.TILE_SIZE
+    local tile_size = self.tile_pixel_size or C_MAP.TILE_SIZE
     
     local dt_x_min = self.downtown_offset.x
     local dt_y_min = self.downtown_offset.y
@@ -248,7 +279,11 @@ function Map:getRandomDowntownBuildingPlot()
 
     for _, plot in ipairs(self.building_plots) do
         if plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max then
-            table.insert(downtown_plots, plot)
+            -- Require the tile is actually downtown_plot, not just inside the bounding box
+            local t = self.grid and self.grid[plot.y] and self.grid[plot.y][plot.x] and self.grid[plot.y][plot.x].type
+            if t == "downtown_plot" then
+                table.insert(downtown_plots, plot)
+            end
         end
     end
 
@@ -256,15 +291,24 @@ function Map:getRandomDowntownBuildingPlot()
         return downtown_plots[love.math.random(1, #downtown_plots)]
     end
 
-    -- building_plots may not have been populated with downtown tiles yet.
-    -- Scan the grid directly for downtown_plot tiles within bounds.
+    -- Fallback: scan grid for downtown_plot tiles adjacent to a road tile.
     if self.grid and #self.grid > 0 then
+        local gh, gw = #self.grid, #self.grid[1]
         local direct_plots = {}
-        for y = math.floor(y_min) + 1, math.floor(y_max) do
+        for y = math.floor(y_min), math.ceil(y_max) do
             if self.grid[y] then
-                for x = math.floor(x_min) + 1, math.floor(x_max) do
+                for x = math.floor(x_min), math.ceil(x_max) do
                     if self.grid[y][x] and self.grid[y][x].type == "downtown_plot" then
-                        table.insert(direct_plots, {x = x, y = y})
+                        -- Only include if adjacent to a road (reachable by vehicles)
+                        local has_road = false
+                        for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+                            local nx, ny = x+d[1], y+d[2]
+                            if nx>=1 and nx<=gw and ny>=1 and ny<=gh
+                               and self.grid[ny][nx] and self:isRoad(self.grid[ny][nx].type) then
+                                has_road = true; break
+                            end
+                        end
+                        if has_road then table.insert(direct_plots, {x = x, y = y}) end
                     end
                 end
             end
@@ -323,8 +367,8 @@ function Map:getRandomBuildingPlot()
 end
 
 function Map:getPixelCoords(grid_x, grid_y)
-    local TILE_SIZE = self.C.MAP.TILE_SIZE
-    return (grid_x - 0.5) * TILE_SIZE, (grid_y - 0.5) * TILE_SIZE
+    local tps = self.tile_pixel_size or self.C.MAP.TILE_SIZE
+    return (grid_x - 0.5) * tps, (grid_y - 0.5) * tps
 end
 
 function Map:getCurrentTileSize()

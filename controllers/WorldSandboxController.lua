@@ -180,6 +180,11 @@ function WorldSandboxController:sendToGame()
         self.status_text = "Run Regen Bounds first"; return
     end
 
+    -- Auto-generate sub-systems if regen_bounds was run but sub-steps are missing
+    if not self.city_district_maps then self:_gen_all_districts() end
+    if not self.city_arterial_maps  then self:_gen_all_arterials() end
+    if not self.city_street_maps    then self:_gen_all_streets() end
+
     -- Pick a random starting city
     local start_idx = love.math.random(1, #self.city_locations)
     local start_bounds = self.city_bounds_list[start_idx]
@@ -195,40 +200,43 @@ function WorldSandboxController:sendToGame()
     -- Safety fallback
     if city_mn_x > city_mx_x then city_mn_x=1; city_mx_x=30; city_mn_y=1; city_mx_y=30 end
 
-    local sw = w * 3   -- sub-cell row width
+    local sw = w * 3   -- sub-cell row width (global)
 
-    -- art_wc[ci] = true when world cell ci contains at least one arterial sub-cell
-    local art_wc = {}
+    -- art_sci[sci] = true for sub-cells with arterial roads (direct, no conversion)
+    local art_sci = {}
     for idx = 1, #self.city_locations do
         local amap = self.city_arterial_maps and self.city_arterial_maps[idx]
         if amap then
-            for sci in pairs(amap) do
-                local gscx = (sci - 1) % sw
-                local gscy = math.floor((sci - 1) / sw)
-                local wx   = math.floor(gscx / 3) + 1
-                local wy   = math.floor(gscy / 3) + 1
-                art_wc[(wy - 1) * w + wx] = true
+            for sci in pairs(amap) do art_sci[sci] = true end
+        end
+    end
+
+    -- dt_sci[sci] = true for district-1 (downtown) sub-cells
+    local poi1 = self.city_pois_list and self.city_pois_list[start_idx]
+                 and self.city_pois_list[start_idx][1]
+    local dt_sci = {}
+    local dmap_dt = self.city_district_maps and self.city_district_maps[start_idx]
+    if dmap_dt then
+        for sci, poi_idx_v in pairs(dmap_dt) do
+            if poi_idx_v == 1 then dt_sci[sci] = true end
+        end
+    end
+    if not next(dt_sci) and poi1 then
+        -- Fallback: DT_RADIUS circle of world cells → mark all 9 sub-cells each
+        local DT_RADIUS = 6
+        for ci in pairs(start_bounds) do
+            local cx = (ci-1)%w+1; local cy = math.floor((ci-1)/w)+1
+            local dx = cx - poi1.x; local dy = cy - poi1.y
+            if dx*dx + dy*dy <= DT_RADIUS*DT_RADIUS then
+                local gscx0 = (cx-1)*3; local gscy0 = (cy-1)*3
+                for dy2 = 0, 2 do for dx2 = 0, 2 do
+                    dt_sci[(gscy0+dy2)*sw + (gscx0+dx2) + 1] = true
+                end end
             end
         end
     end
 
-    -- has_street[ci] = true when world cell ci is the cell "before" a street boundary
-    local has_street = {}
-    for idx = 1, #self.city_locations do
-        local smap = self.city_street_maps and self.city_street_maps[idx]
-        if smap then
-            for key in pairs(smap.v or {}) do
-                local cx = math.floor(key / 1000); local cy = key % 1000
-                has_street[(cy - 1) * w + cx] = true
-            end
-            for key in pairs(smap.h or {}) do
-                local cy = math.floor(key / 1000); local cx = key % 1000
-                has_street[(cy - 1) * w + cx] = true
-            end
-        end
-    end
-
-    -- all_claimed[ci] = city_idx
+    -- all_claimed[ci] = city_idx (world-cell, for city vs terrain distinction)
     local all_claimed = {}
     for idx = 1, #self.city_locations do
         local bnds = self.city_bounds_list and self.city_bounds_list[idx]
@@ -237,74 +245,153 @@ function WorldSandboxController:sendToGame()
         end
     end
 
-    -- downtown_cells: world cells within DT_RADIUS of starting city's first POI
-    local downtown_cells = {}
-    local poi1 = self.city_pois_list and self.city_pois_list[start_idx]
-                 and self.city_pois_list[start_idx][1]
-    local DT_RADIUS = 6   -- world-cell radius around downtown POI
-    if poi1 then
-        for ci in pairs(start_bounds) do
-            local cx = (ci-1)%w+1; local cy = math.floor((ci-1)/w)+1
-            local dx = cx - poi1.x; local dy = cy - poi1.y
-            if dx*dx + dy*dy <= DT_RADIUS*DT_RADIUS then
-                downtown_cells[ci] = true
+    -- Sub-cell grid dimensions
+    local cw = city_mx_x - city_mn_x + 1
+    local ch = city_mx_y - city_mn_y + 1
+    local sub_cw = cw * 3
+    local sub_ch = ch * 3
+    local gscx_off = (city_mn_x - 1) * 3  -- global sub-cell x offset for local (0,0)
+    local gscy_off = (city_mn_y - 1) * 3  -- global sub-cell y offset for local (0,0)
+
+    -- Augmented street maps: original streets PLUS a street boundary on every side
+    -- of each arterial / highway world cell, giving the |arterial| pattern.
+    local aug_street_maps = {}
+    do
+        local art_sw = w * 3
+        for idx = 1, #self.city_locations do
+            local orig = self.city_street_maps and self.city_street_maps[idx]
+            local aug_v, aug_h = {}, {}
+            if orig then
+                for k in pairs(orig.v or {}) do aug_v[k] = true end
+                for k in pairs(orig.h or {}) do aug_h[k] = true end
+            end
+            -- Streets alongside arterial sub-cells (per-city map)
+            local amap = self.city_arterial_maps and self.city_arterial_maps[idx]
+            if amap then
+                local done = {}
+                for sci in pairs(amap) do
+                    local gscx_a = (sci - 1) % art_sw
+                    local gscy_a = math.floor((sci - 1) / art_sw)
+                    local wcx = math.floor(gscx_a / 3) + 1
+                    local wcy = math.floor(gscy_a / 3) + 1
+                    local ci  = (wcy - 1) * w + wcx
+                    if not done[ci] then
+                        done[ci] = true
+                        aug_v[(wcx - 1) * 1000 + wcy] = true
+                        aug_v[wcx       * 1000 + wcy] = true
+                        aug_h[(wcy - 1) * 1000 + wcx] = true
+                        aug_h[wcy       * 1000 + wcx] = true
+                    end
+                end
+            end
+            -- Streets alongside highway world cells (global map, filtered to city bounds)
+            local hmap = self.highway_map
+            local bnds = self.city_bounds_list and self.city_bounds_list[idx]
+            if hmap and bnds then
+                for ci in pairs(bnds) do
+                    if hmap[ci] then
+                        local wcx = (ci - 1) % w + 1
+                        local wcy = math.floor((ci - 1) / w) + 1
+                        aug_v[(wcx - 1) * 1000 + wcy] = true
+                        aug_v[wcx       * 1000 + wcy] = true
+                        aug_h[(wcy - 1) * 1000 + wcx] = true
+                        aug_h[wcy       * 1000 + wcx] = true
+                    end
+                end
+            end
+            aug_street_maps[idx] = { v = aug_v, h = aug_h }
+        end
+        self.aug_street_maps = aug_street_maps
+    end
+
+    -- is_street_sc[lscy*sub_cw+lscx] = true for street boundary sub-cells
+    local is_street_sc = {}
+    local function mark_street_sc(lscx, lscy)
+        if lscx >= 0 and lscx < sub_cw and lscy >= 0 and lscy < sub_ch then
+            is_street_sc[lscy * sub_cw + lscx] = true
+        end
+    end
+
+    -- Original city streets (world-cell boundaries from city_street_maps)
+    for idx = 1, #self.city_locations do
+        local smap = self.city_street_maps and self.city_street_maps[idx]
+        if smap then
+            for key in pairs(smap.v or {}) do
+                local cx  = math.floor(key / 1000); local wy = key % 1000
+                local lscx  = cx * 3 - gscx_off
+                local lscy0 = (wy - 1) * 3 - gscy_off
+                for dlscy = 0, 2 do mark_street_sc(lscx, lscy0 + dlscy) end
+            end
+            for key in pairs(smap.h or {}) do
+                local cy  = math.floor(key / 1000); local wx = key % 1000
+                local lscy  = cy * 3 - gscy_off
+                local lscx0 = (wx - 1) * 3 - gscx_off
+                for dlscx = 0, 2 do mark_street_sc(lscx0 + dlscx, lscy) end
             end
         end
     end
 
-    -- Build tile grid for the starting city's bounding box only
-    local cw = city_mx_x - city_mn_x + 1
-    local ch = city_mx_y - city_mn_y + 1
+
+    -- Build tile grid at SUB-CELL resolution: 1 tile = 1 sub-cell = 1/3 world cell
     local grid = {}
     local p = self.params
-    for gy = 1, ch do
-        grid[gy] = {}
-        local world_gy = city_mn_y + gy - 1
-        for gx = 1, cw do
-            local world_gx = city_mn_x + gx - 1
-            local ci       = (world_gy - 1) * w + world_gx
+    for lscy = 0, sub_ch - 1 do
+        grid[lscy + 1] = {}
+        local wcy  = city_mn_y + math.floor(lscy / 3)
+        local gscy = gscy_off + lscy
+        for lscx = 0, sub_cw - 1 do
+            local wcx  = city_mn_x + math.floor(lscx / 3)
+            local gscx = gscx_off + lscx
+            local ci   = (wcy - 1) * w + wcx
+            local sci  = gscy * sw + gscx + 1
             local tile
             if self.highway_map and self.highway_map[ci] then
                 tile = "highway"
-            elseif art_wc[ci] then
+            elseif art_sci[sci] then
                 tile = "arterial"
-            elseif has_street[ci] and all_claimed[ci] then
-                tile = downtown_cells[ci] and "downtown_road" or "road"
+            elseif is_street_sc[lscy * sub_cw + lscx] and all_claimed[ci] then
+                tile = dt_sci[sci] and "downtown_road" or "road"
             elseif all_claimed[ci] then
-                tile = downtown_cells[ci] and "downtown_plot" or "plot"
+                tile = dt_sci[sci] and "downtown_plot" or "plot"
             else
-                local elev = (self.heightmap and self.heightmap[world_gy] and self.heightmap[world_gy][world_gx]) or 0.5
+                local elev = (self.heightmap and self.heightmap[wcy] and self.heightmap[wcy][wcx]) or 0.5
                 if     elev <= (p.ocean_max    or 0.42) then tile = "water"
                 elseif elev >= (p.highland_max or 0.80) then tile = "mountain"
                 else                                          tile = "grass" end
             end
-            grid[gy][gx] = {type = tile}
+            grid[lscy + 1][lscx + 1] = {type = tile}
         end
     end
 
-    -- Downtown bounding box in city-grid-local coords (starting city's district-1 cells)
-    local dt_mn_x, dt_mx_x, dt_mn_y, dt_mx_y = cw+1, 0, ch+1, 0
-    for ci in pairs(downtown_cells) do
-        local cx = (ci-1)%w+1; local cy = math.floor((ci-1)/w)+1
-        local lx = cx - city_mn_x + 1; local ly = cy - city_mn_y + 1
-        if lx < dt_mn_x then dt_mn_x = lx end; if lx > dt_mx_x then dt_mx_x = lx end
-        if ly < dt_mn_y then dt_mn_y = ly end; if ly > dt_mx_y then dt_mx_y = ly end
+    -- Downtown bounding box: scan sub-cell tile grid for downtown_road / downtown_plot
+    local dt_mn_x, dt_mx_x, dt_mn_y, dt_mx_y = sub_cw + 1, 0, sub_ch + 1, 0
+    for gy = 1, sub_ch do
+        for gx = 1, sub_cw do
+            local t = grid[gy][gx].type
+            if t == "downtown_road" or t == "downtown_plot" then
+                if gx < dt_mn_x then dt_mn_x = gx end
+                if gx > dt_mx_x then dt_mx_x = gx end
+                if gy < dt_mn_y then dt_mn_y = gy end
+                if gy > dt_mx_y then dt_mx_y = gy end
+            end
+        end
     end
     if dt_mn_x > dt_mx_x then
-        -- Fallback: POI of starting city
+        -- Fallback: use POI position converted to sub-cell local coords
         local poi = self.city_pois_list and self.city_pois_list[start_idx] and self.city_pois_list[start_idx][1]
-        local r = 4
         if poi then
-            local lx = poi.x - city_mn_x + 1; local ly = poi.y - city_mn_y + 1
-            dt_mn_x = math.max(1, lx-r); dt_mx_x = math.min(cw, lx+r)
-            dt_mn_y = math.max(1, ly-r); dt_mx_y = math.min(ch, ly+r)
+            local lscx = (poi.x - city_mn_x) * 3 + 1
+            local lscy = (poi.y - city_mn_y) * 3 + 1
+            local r = 18  -- ~6 world cells * 3
+            dt_mn_x = math.max(1, lscx - r); dt_mx_x = math.min(sub_cw, lscx + r)
+            dt_mn_y = math.max(1, lscy - r); dt_mx_y = math.min(sub_ch, lscy + r)
         else
-            dt_mn_x=1; dt_mx_x=10; dt_mn_y=1; dt_mx_y=10
+            dt_mn_x = 1; dt_mx_x = 30; dt_mn_y = 1; dt_mx_y = 30
         end
     end
 
-    C.MAP.CITY_GRID_WIDTH      = cw
-    C.MAP.CITY_GRID_HEIGHT     = ch
+    C.MAP.CITY_GRID_WIDTH      = sub_cw
+    C.MAP.CITY_GRID_HEIGHT     = sub_ch
     C.MAP.DOWNTOWN_GRID_WIDTH  = math.max(1, dt_mx_x - dt_mn_x + 1)
     C.MAP.DOWNTOWN_GRID_HEIGHT = math.max(1, dt_mx_y - dt_mn_y + 1)
 
@@ -312,6 +399,7 @@ function WorldSandboxController:sendToGame()
     local new_map = Map:new(C)
     new_map.grid            = grid
     new_map.downtown_offset = {x = dt_mn_x, y = dt_mn_y}
+    new_map.tile_pixel_size = C.MAP.TILE_SIZE / 3   -- 2/3 world px per sub-cell tile
     new_map.building_plots  = new_map:getPlotsFromGrid(grid)
 
     -- Helper: build city scope image with a specific view_mode (and optional scope), returns love.graphics.Image
@@ -495,11 +583,12 @@ function WorldSandboxController:sendToGame()
     local States    = require("models.vehicles.vehicle_states")
     local new_depot = new_map:getRandomDowntownBuildingPlot() or new_map:getRandomBuildingPlot()
     game.entities.depot_plot = new_depot
+    local depot_road = new_depot and new_map:findNearestRoadTile(new_depot)
     for _, v in ipairs(game.entities.vehicles) do
         v.cargo = {}; v.trip_queue = {}; v.path = {}
         if new_depot then
             v.depot_plot  = new_depot
-            v.grid_anchor = {x = new_depot.x, y = new_depot.y}
+            v.grid_anchor = depot_road or {x = new_depot.x, y = new_depot.y}
             if v.recalculatePixelPosition then v:recalculatePixelPosition(game) end
         end
         if States and States.Idle then v:changeState(States.Idle, game) end
@@ -1078,10 +1167,6 @@ function WorldSandboxController:build_highways()
     end
 
     self.highway_map = highway_map
-    -- Re-rasterise arterials now that highway data is available
-    if self.city_bounds_list then
-        self:_gen_all_arterials()
-    end
     self:_buildImage()
     if self.view_scope == "city" and self.selected_city_idx then
         local idx    = self.selected_city_idx
@@ -1385,6 +1470,10 @@ function WorldSandboxController:_gen_all_bounds()
     self.city_pois_list   = new_pois_list
     self.city_bounds = new_bounds
     self.city_pois   = new_pois
+    -- Invalidate subsystem maps so sendToGame() or regen_bounds() regenerates them fresh
+    self.city_district_maps = nil
+    self.city_arterial_maps = nil
+    self.city_street_maps   = nil
 
     local w, h = self.world_w, self.world_h
 
@@ -1425,9 +1514,6 @@ function WorldSandboxController:_gen_all_bounds()
     end
     self.city_fringe = fringe
 
-    self:_gen_all_districts()
-    self:_gen_all_arterials()
-    self:_gen_all_streets()
 end
 
 -- ── Sub-cell elevation ────────────────────────────────────────────────────────
@@ -2178,6 +2264,9 @@ function WorldSandboxController:regen_bounds()
         return
     end
     self:_gen_all_bounds()
+    self:_gen_all_districts()
+    self:_gen_all_arterials()
+    self:_gen_all_streets()
     self:_buildImage()
     if self.view_scope == "city" and self.selected_city_idx then
         local idx    = self.selected_city_idx
@@ -2308,34 +2397,39 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
     local bbox_w = max_x - min_x + 1
     local bbox_h = max_y - min_y + 1
 
-    -- Each world cell = 9×9 image pixels; lines at 0,3,6 create a tic-tac-toe grid
-    local CELL  = 9
-    local img_w = bbox_w * CELL
-    local img_h = bbox_h * CELL
+    -- Sub-cell-centric image. Each sub-cell = K_SC content pixels + 1px gap.
+    -- The loop is over sub-cells directly; world cells only appear when
+    -- looking up world-level data (bounds, color, height).
+    -- Streets and arterial boundaries live on the gap pixels between sub-cells.
+    local K_SC   = 3                      -- content pixels per sub-cell
+    local STRIDE = K_SC + 1              -- 4px total per sub-cell (1 gap + 3 content)
+    local sc_min_x = (min_x - 1) * 3    -- global gscx (0-indexed) of first image column
+    local sc_min_y = (min_y - 1) * 3
+    local sc_bbox_w = bbox_w * 3
+    local sc_bbox_h = bbox_h * 3
+    local img_w = sc_bbox_w * STRIDE
+    local img_h = sc_bbox_h * STRIDE
 
     local imgdata = love.image.newImageData(img_w, img_h)
 
     for py = 0, img_h - 1 do
-        local wy = min_y + math.floor(py / CELL)
-        local iy = py % CELL
+        local scy  = math.floor(py / STRIDE)
+        local iy   = py % STRIDE                   -- 0=gap, 1..K_SC=content
+        local gscy = sc_min_y + scy
+        local wy   = math.floor(gscy / 3) + 1     -- world cell y (1-indexed)
         for px = 0, img_w - 1 do
-            local wx = min_x + math.floor(px / CELL)
-            local ci = (wy-1)*w + wx
+            local scx  = math.floor(px / STRIDE)
+            local ix   = px % STRIDE               -- 0=gap, 1..K_SC=content
+            local gscx = sc_min_x + scx
+            local wx   = math.floor(gscx / 3) + 1 -- world cell x (1-indexed)
+            local ci   = (wy - 1) * w + wx
 
-            -- Sub-cell coordinates for this pixel
-            local gscx = (wx - 1) * 3 + math.floor((px % CELL) / 3)
-            local gscy = (wy - 1) * 3 + math.floor(iy / 3)
+            local is_gap = (ix == 0) or (iy == 0)
 
-            -- Determine base colour for this cell
+            -- Base colour from this sub-cell
             local c
             if use_districts then
-                -- Look up this sub-cell's district owner from the precomputed
-                -- terrain-aware sub-cell Dijkstra map.  The owner map key is the
-                -- same formula used during flood-fill: gscy*sub_w + gscx + 1.
                 local best_poi = dist_owner_map and dist_owner_map[gscy * sub_w + gscx + 1]
-
-                -- Fallback: nearest-POI if Dijkstra map is absent (e.g. just placed
-                -- cities but haven't run Regen Bounds yet).
                 if not best_poi and #pois_for_city > 0 then
                     local best_wd = math.huge
                     for poi_idx, poi in ipairs(pois_for_city) do
@@ -2347,15 +2441,12 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
                         if wd < best_wd then best_wd = wd; best_poi = poi_idx end
                     end
                 end
-
                 c = (best_poi and dist_colors and dist_colors[best_poi]) or {0.25, 0.25, 0.28}
             else
-                -- World-cell base colour, modulated by sub-cell elevation delta
-                -- so each sub-cell shows its own character within the world cell.
                 local bc      = active[wy] and active[wy][wx] or {0.1, 0.1, 0.1}
                 local world_e = self.heightmap[wy][wx]
                 local sub_e   = subcell_elev_at(gscx, gscy, self.heightmap)
-                local adjust  = (sub_e - world_e) * 3.0   -- amplify delta for visibility
+                local adjust  = (sub_e - world_e) * 3.0
                 c = {
                     math.max(0, math.min(1, bc[1] + adjust)),
                     math.max(0, math.min(1, bc[2] + adjust)),
@@ -2363,49 +2454,55 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
                 }
             end
 
-            -- Arterial road overlay (always visible regardless of view mode)
+            -- Arterial overlay
             if art_city_map and art_city_map[gscy * sub_w + gscx + 1] then
-                c = {0.20, 0.19, 0.17}   -- dark asphalt
+                c = {0.20, 0.19, 0.17}
             end
 
             if bounds[ci] then
-                local ix    = px % CELL
-                local outer = (ix == 0 or iy == 0)
-                local inner = (ix == 3 or ix == 6 or iy == 3 or iy == 6)
-
-                -- Streets run between world cells: paint the 2 boundary pixels
-                -- (ix=8 of the left/top cell AND ix=0 of the right/bottom cell)
-                -- at full brightness so they appear as thin bright lines, not
-                -- colored sub-cells.  Arterials painted above still take priority
-                -- because the arterial check already changed c; we only override
-                -- the per-pixel dimming logic here, not c itself.
-                -- Streets are 1px: only the outer border pixel (ix=0 / iy=0) of the
-                -- right/bottom cell at each boundary.  ix=0 is already the cell-border
-                -- line drawn everywhere; we just paint it bright instead of dark.
+                -- Streets: gap pixel at a sub-cell boundary that is also a
+                -- world-cell boundary (gscx%3==0 or gscy%3==0).
                 local is_street = false
-                if street_city_map and (ix == 0 or iy == 0) then
+                if street_city_map then
                     local sv, sh = street_city_map.v, street_city_map.h
-                    -- ix=0 → boundary is after col wx-1
-                    if ix == 0 and wx > min_x then
-                        is_street = sv and sv[(wx-1) * 1000 + wy]
+                    if ix == 0 and gscx > sc_min_x and gscx % 3 == 0 then
+                        if sv and sv[(math.floor(gscx / 3)) * 1000 + wy] then is_street = true end
                     end
-                    -- iy=0 → boundary is after row wy-1
-                    if iy == 0 and wy > min_y then
-                        is_street = is_street or (sh and sh[(wy-1) * 1000 + wx])
+                    if not is_street and iy == 0 and gscy > sc_min_y and gscy % 3 == 0 then
+                        if sh and sh[(math.floor(gscy / 3)) * 1000 + wx] then is_street = true end
                     end
                 end
+
+                -- Arterial boundary: bright gap wherever arterial meets non-arterial.
+                -- Works at ANY sub-cell boundary, not just world-cell boundaries.
+                if not is_street and art_city_map and is_gap then
+                    if ix == 0 and gscx > sc_min_x then
+                        local curr = art_city_map[gscy * sub_w + gscx + 1]
+                        local left = art_city_map[gscy * sub_w + (gscx - 1) + 1]
+                        if (curr and not left) or (left and not curr) then is_street = true end
+                    end
+                    if not is_street and iy == 0 and gscy > sc_min_y then
+                        local curr  = art_city_map[gscy * sub_w + gscx + 1]
+                        local above = art_city_map[(gscy - 1) * sub_w + gscx + 1]
+                        if (curr and not above) or (above and not curr) then is_street = true end
+                    end
+                end
+
+                -- Debug: tint sub-cells by gscx%3 so the 3 sub-cells per world cell
+                -- are visually distinct (red / green / blue).
+                local dbg_tints = {{1.25, 0.75, 0.75}, {0.75, 1.25, 0.75}, {0.75, 0.75, 1.25}}
+                local tint = dbg_tints[(gscx % 3) + 1]
+                c = {math.min(1, c[1]*tint[1]), math.min(1, c[2]*tint[2]), math.min(1, c[3]*tint[3])}
 
                 local r, g, b
                 if is_street then
                     r, g, b = 0.88, 0.86, 0.80
-                elseif outer then
-                    r, g, b = c[1]*0.20, c[2]*0.20, c[3]*0.20
-                elseif inner then
-                    r, g, b = c[1]*0.55, c[2]*0.55, c[3]*0.55
+                elseif is_gap then
+                    r, g, b = 0.08, 0.08, 0.10
                 else
                     r, g, b = c[1], c[2], c[3]
                 end
-                -- Bake downtown fog: darken non-district-1 sub-cells at pixel precision
+
                 if fog_downtown and dist_owner_map then
                     local sci2 = gscy * sub_w + gscx + 1
                     if dist_owner_map[sci2] ~= 1 then
@@ -2414,7 +2511,6 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
                 end
                 imgdata:setPixel(px, py, r, g, b, 1.0)
             else
-                -- Outside city bounds: terrain colour, dimmed
                 local tc = (terrain_cmap and terrain_cmap[wy] and terrain_cmap[wy][wx]) or {0.08, 0.08, 0.10}
                 imgdata:setPixel(px, py, tc[1]*0.18+0.01, tc[2]*0.18+0.02, tc[3]*0.18+0.06, 1.0)
             end
@@ -2426,7 +2522,9 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
     self.city_image     = img
     self.city_img_min_x = min_x
     self.city_img_min_y = min_y
-    self.city_img_K     = CELL
+    -- pixels per world cell = 3 sub-cells × STRIDE px/sub-cell = 12
+    -- GameView uses ts/K as draw scale, so 1 image px = ts/12 world px
+    self.city_img_K     = 3 * STRIDE
 end
 
 function WorldSandboxController:_centerCamera()

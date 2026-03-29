@@ -95,9 +95,14 @@ end
 -- REMOVED THE DRAW FUNCTION FROM HERE
 
 function Entities:handle_click(x, y, game)
+    -- vehicle.px/py are city-map-local tile pixels; world coords include the city world-pixel offset
+    local ts = game.C.MAP.TILE_SIZE
+    local city_off_x = ((game.world_gen_city_mn_x or 1) - 1) * ts
+    local city_off_y = ((game.world_gen_city_mn_y or 1) - 1) * ts
+    local local_x = x - city_off_x
+    local local_y = y - city_off_y
     for _, vehicle in ipairs(self.vehicles) do
-        local dist_sq = (x - vehicle.px)^2 + (y - vehicle.py)^2
-        -- FIX: Use the click radius from the correct location in constants
+        local dist_sq = (local_x - vehicle.px)^2 + (local_y - vehicle.py)^2
         if dist_sq < game.C.UI.VEHICLE_CLICK_RADIUS * game.C.UI.VEHICLE_CLICK_RADIUS then
             self.selected_vehicle = vehicle
             print("Selected " .. vehicle.type .. " " .. vehicle.id)

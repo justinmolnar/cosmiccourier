@@ -264,8 +264,8 @@ function States.DoDropoff:enter(vehicle, game)
             at_destination = true
             print(string.format("DEBUG: %s %d: Abstracted dropoff assumed at destination", vehicle.type, vehicle.id))
         else
-            at_destination = destination_road_tile and 
-                           current_pos.x == destination_road_tile.x and 
+            at_destination = destination_road_tile and
+                           current_pos.x == destination_road_tile.x and
                            current_pos.y == destination_road_tile.y
             print(string.format("DEBUG: %s %d: Detailed dropoff position check - at_destination: %s", vehicle.type, vehicle.id, tostring(at_destination)))
         end

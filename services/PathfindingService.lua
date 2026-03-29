@@ -19,8 +19,33 @@ function PathfindingService.findVehiclePath(vehicle, start_plot, end_plot, game)
         return nil
     end
     
-    local start_node = map:findNearestRoadTile(start_plot)
-    local end_node = map:findNearestRoadTile(end_plot)
+    -- Find the nearest road tile that this vehicle can actually traverse.
+    -- A simple isRoad() check can return tile types the vehicle can't use (e.g. highway
+    -- for bikes), which may be in a disconnected component from the vehicle's network.
+    local function findTraversable(plot)
+        local grid = path_grid
+        local grid_h, grid_w = #grid, #grid[1]
+        local x, y = plot.x, plot.y
+        local function inBounds(gx, gy) return gx>=1 and gx<=grid_w and gy>=1 and gy<=grid_h end
+        for r = 0, 10 do
+            for dy = -r, r do
+                for dx = -r, r do
+                    if math.abs(dx)==r or math.abs(dy)==r then
+                        local nx, ny = x+dx, y+dy
+                        if inBounds(nx,ny) and map:isRoad(grid[ny][nx].type) then
+                            if vehicle:getMovementCostFor(grid[ny][nx].type) < 9999 then
+                                return {x=nx, y=ny}
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return map:findNearestRoadTile(plot)  -- fallback to any road
+    end
+
+    local start_node = findTraversable(start_plot)
+    local end_node   = findTraversable(end_plot)
     
     if not start_node or not end_node then
         return nil
@@ -96,15 +121,15 @@ function PathfindingService.estimatePathTravelTime(path, vehicle, game)
     if not path or #path == 0 then return 0 end
 
     local total_distance = 0
-    -- Use the vehicle's operational map to get the correct tile size.
+    -- Use the vehicle's operational map to get the correct tile pixel size.
     local map = game.maps[vehicle.operational_map_key]
-    local TILE_SIZE = map.C.MAP.TILE_SIZE
+    local TPS = map.tile_pixel_size or map.C.MAP.TILE_SIZE
 
-    -- Start from the vehicle's current position
+    -- Start from the vehicle's current position (also in tile_pixel_size coords)
     local last_px, last_py = vehicle.px, vehicle.py
 
     for _, node in ipairs(path) do
-        local node_px, node_py = (node.x - 0.5) * TILE_SIZE, (node.y - 0.5) * TILE_SIZE
+        local node_px, node_py = (node.x - 0.5) * TPS, (node.y - 0.5) * TPS
         local dist = math.sqrt((node_px - last_px)^2 + (node_py - last_py)^2)
         total_distance = total_distance + dist
         last_px, last_py = node_px, node_py

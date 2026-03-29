@@ -8,7 +8,8 @@
       "Bash(grep -rn \"hire_truck\\\\|buy.*truck\\\\|truck.*cost\\\\|HIRE\\\\|ui_buy_vehicle\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
       "Bash(grep -rn \"truck\\\\|vehicleType\\\\|vehicle_type\\\\|multi.*leg\\\\|city.*trip\\\\|spawn.*trip\\\\|generate.*trip\\\\|createTrip\\\\|TripFactory\" 'C:/Users/chate/Documents/cosmic courier/models/' --include=*.lua)",
       "Bash(grep -rn \"is_long_distance\\\\|addLeg\\\\|truck.*trip\\\\|city.*trip\\\\|spawnTrip\\\\|new_trip\\\\|Trip:new\\\\|Trip\\\\.new\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
-      "Bash(grep -rn .vehicless*= 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)"
+      "Bash(grep -rn .vehicless*= 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
+      "Bash(xargs ls:*)"
     ]
   }
 }

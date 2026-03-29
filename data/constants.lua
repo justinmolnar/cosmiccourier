@@ -102,13 +102,13 @@ local C = {
             cost_multiplier = 1.15,
             speed = 80,
             pathfinding_costs = {
-                road = 9999,       -- bikes cannot use outer city roads
+                road = 10,
                 downtown_road = 5,
-                arterial = 9999,   -- bikes cannot exit downtown via arterials
-                highway = 9999,
-                highway_ring = 9999,
-                highway_ns = 9999,
-                highway_ew = 9999,
+                arterial = 3,
+                highway = 2,
+                highway_ring = 2,
+                highway_ns = 2,
+                highway_ew = 2,
             }
         },
         TRUCK = {
