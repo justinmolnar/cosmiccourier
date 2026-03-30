@@ -23,22 +23,33 @@ function PathfindingService.findVehiclePath(vehicle, start_node, end_plot, game)
 
     if map.road_v_rxs then
         -- ── Road-node map ──────────────────────────────────────────────────────
-        -- start_node is road-node coords (vehicle.grid_anchor) — used directly.
+        -- start_node is road-node coords (vehicle.grid_anchor).
+        -- Snap to nearest road_node if not already valid (depot may not be on an intersection).
+        if not (map.road_nodes[start_node.y] and map.road_nodes[start_node.y][start_node.x]) then
+            local snapped = map:findNearestRoadNode({x = start_node.x + 1, y = start_node.y + 1})
+            if snapped then start_node = snapped end
+        end
         -- end_plot is a sub-cell (building location) — must be converted to road-node.
 
         local function get_cost(rx, ry)
-            -- A position is traversable only if it is a valid road node.
-            if not (map.road_nodes[ry] and map.road_nodes[ry][rx]) then return 9999 end
-            -- Arterials and highways still have tile types — use them for cost.
+            -- Accept both corner road-nodes and tile-centre nodes (is_tile trucks).
+            local is_corner = map.road_nodes[ry] and map.road_nodes[ry][rx]
+            local is_tile   = map.tile_nodes and map.tile_nodes[ry] and map.tile_nodes[ry][rx]
+            if not is_corner and not is_tile then return 9999 end
+            -- Tile type at (rx,ry) 0-indexed = grid[ry+1][rx+1] 1-indexed.
+            -- For tile-centre nodes this IS the highway tile; for corner nodes it
+            -- is the SE neighbour tile, which is a reliable proxy for the road type.
             local tile = path_grid[ry + 1] and path_grid[ry + 1][rx + 1]
             if tile then
                 local t = tile.type
-                if t == "arterial" or t == "highway" or t == "highway_ring" or
-                   t == "highway_ns" or t == "highway_ew" then
-                    return vehicle:getMovementCostFor(t)
+                if t == "arterial" then
+                    return vehicle:getMovementCostFor("arterial")
+                elseif t == "highway" or t == "highway_ring" or
+                       t == "highway_ns" or t == "highway_ew" then
+                    return vehicle:getMovementCostFor("highway")
                 end
             end
-            -- City-street nodes: tile is now a plot (roads are lines, not tiles).
+            -- City-street corner nodes: tile is a plot (roads are lines, not tiles).
             return vehicle:getMovementCostFor("road")
         end
 

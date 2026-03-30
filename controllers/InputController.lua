@@ -35,6 +35,11 @@ function InputController:keypressed(key)
         print("DEBUG: pickup/client overlay " .. (self.game.debug_pickup_locations and "ON" or "OFF"))
         return
     end
+    if key == "g" then
+        self.game.debug_road_segments = not (self.game.debug_road_segments or false)
+        print("DEBUG: road segments overlay " .. (self.game.debug_road_segments and "ON" or "OFF"))
+        return
+    end
 
     -- Force-enable autodispatch (debug cheat)
     if key == "a" then

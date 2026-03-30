@@ -159,14 +159,10 @@ function UpgradeSystem:applyStatToGameValues(stat_name, stat_value)
     end
     
     if stat_name == "bike_speed" then
-        -- Apply bike speed multiplier to all existing bikes
-        local Bike = require("models.vehicles.Bike")
-        local base_speed = 80 -- Base bike speed from PROPERTIES
+        local base_speed = game.C.VEHICLES.BIKE.speed
         local new_speed = base_speed * stat_value
-        
-        -- Update the class properties (affects new bikes)
-        Bike.PROPERTIES.speed = new_speed
-        
+        -- Update constants so newly purchased bikes get the upgraded speed
+        game.C.VEHICLES.BIKE.speed = new_speed
         -- Update existing bikes
         for _, vehicle in ipairs(game.entities.vehicles) do
             if vehicle.type == "bike" then
@@ -174,15 +170,11 @@ function UpgradeSystem:applyStatToGameValues(stat_name, stat_value)
                 print(string.format("Updated bike %d speed to %d", vehicle.id, new_speed))
             end
         end
-        
+
     elseif stat_name == "truck_speed" then
-        -- Apply truck speed multiplier
-        local Truck = require("models.vehicles.Truck")
-        local base_speed = 60 -- Base truck speed
+        local base_speed = game.C.VEHICLES.TRUCK.speed
         local new_speed = base_speed * stat_value
-        
-        Truck.PROPERTIES.speed = new_speed
-        
+        game.C.VEHICLES.TRUCK.speed = new_speed
         for _, vehicle in ipairs(game.entities.vehicles) do
             if vehicle.type == "truck" then
                 vehicle.properties.speed = new_speed

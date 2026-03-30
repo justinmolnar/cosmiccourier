@@ -62,9 +62,14 @@ function Vehicle:recalculatePixelPosition(game)
         local tps = home_map.tile_pixel_size or home_map.C.MAP.TILE_SIZE
         if home_map.road_v_rxs then
             -- Road-node map: grid_anchor holds road-node coords (rx, ry).
-            -- Pixel position is simply rx*tps, ry*tps — no sub-cell arithmetic.
-            self.px = self.grid_anchor.x * tps
-            self.py = self.grid_anchor.y * tps
+            -- Tile-centre nodes (is_tile=true) are offset by half a cell.
+            if self.grid_anchor.is_tile then
+                self.px = (self.grid_anchor.x + 0.5) * tps
+                self.py = (self.grid_anchor.y + 0.5) * tps
+            else
+                self.px = self.grid_anchor.x * tps
+                self.py = self.grid_anchor.y * tps
+            end
         else
             self.px, self.py = home_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
         end
@@ -97,8 +102,8 @@ function Vehicle:shouldDrawAtCurrentScale(game)
     local C_MAP = game.C.MAP
     
     if self.type == "bike" then
-        -- Bikes only show at downtown scale
-        return current_scale == C_MAP.SCALES.DOWNTOWN
+        -- Bikes show at downtown and city scale
+        return current_scale == C_MAP.SCALES.DOWNTOWN or current_scale == C_MAP.SCALES.CITY
     elseif self.type == "truck" then
         -- Trucks show at all scales
         return true
@@ -275,7 +280,7 @@ function Vehicle:updateAbstracted(dt, game)
     if self.current_path_eta <= 0 then
         if self.path and #self.path > 0 then
             local final_node = self.path[#self.path]
-            self.grid_anchor = {x = final_node.x, y = final_node.y}
+            self.grid_anchor = {x = final_node.x, y = final_node.y, is_tile = final_node.is_tile}
             self:recalculatePixelPosition(game)
             self.path = {}
         end
@@ -325,7 +330,11 @@ function Vehicle:drawDebug(game)
         for _, node in ipairs(self.path) do
             local px, py
             if path_map.road_v_rxs then
-                px, py = node.x * path_tps, node.y * path_tps
+                if node.is_tile then
+                    px, py = (node.x + 0.5) * path_tps, (node.y + 0.5) * path_tps
+                else
+                    px, py = node.x * path_tps, node.y * path_tps
+                end
             else
                 px, py = path_map:getPixelCoords(node.x, node.y)
             end

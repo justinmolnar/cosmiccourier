@@ -167,6 +167,67 @@ function GameView:draw()
                 if v.visible then v:draw(Game) end
             end
 
+            -- Zone grid overlay (SimCity-style colored zones)
+            -- Zone overlay: color only the content pixels of each sub-cell.
+            -- Each sub-cell's left (ix=0) and top (iy=0) pixel is a road gap in the
+            -- background image.  The image renders that gap as cream when there's a
+            -- road OR a zone-type boundary, dark otherwise.
+            -- Rule: skip (expose) the gap when adjacent zone differs from this one
+            --       (covers city streets, zone boundaries, arterial edges, map edges).
+            --       Cover it when adjacent zone is identical → cells bleed together.
+            -- Right/bottom edges are never inset; the adjacent cell owns its own gaps.
+            if active_map.zone_grid and active_map.all_city_plots then
+                local ZT    = require("data.zone_types")
+                local tps   = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
+                local gap   = tps / 9
+                local alpha = ZT.COLOR_ALPHA
+                local zg    = active_map.zone_grid
+                for _, plot in ipairs(active_map.all_city_plots) do
+                    local gx, gy = plot.x, plot.y
+                    local zone   = zg[gy] and zg[gy][gx]
+                    local col    = zone and ZT.COLORS[zone]
+                    if col then
+                        local left_z = zg[gy] and zg[gy][gx-1]   -- nil = arterial/OOB
+                        local top_z  = zg[gy-1] and zg[gy-1][gx] -- nil = arterial/OOB
+                        local sl = (left_z ~= zone) and gap or 0
+                        local st = (top_z  ~= zone) and gap or 0
+                        love.graphics.setColor(col[1], col[2], col[3], alpha)
+                        love.graphics.rectangle("fill",
+                            (gx-1)*tps + sl, (gy-1)*tps + st,
+                            tps - sl,        tps - st)
+                    end
+                end
+            end
+
+            -- Smooth road overlay (arterial / highway)
+            do
+                local tps_r = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
+                if not active_map._road_smooth_paths_v5 then
+                    local RS = require("utils.RoadSmoother")
+                    if active_map.road_centerlines and #active_map.road_centerlines > 0 then
+                        active_map._road_smooth_paths_v5 = RS.buildPathsFromCenterlines(active_map.road_centerlines, tps_r)
+                    else
+                        active_map._road_smooth_paths_v5 = RS.buildPaths(active_map.grid, tps_r)
+                    end
+                end
+                if #active_map._road_smooth_paths_v5 > 0 then
+                    local cap_r = tps_r * 0.35   -- half line-width → fills junction gaps
+                    love.graphics.setColor(1, 0, 0.8, 0.92)
+                    love.graphics.setLineWidth(tps_r * 0.7)
+                    love.graphics.setLineJoin("bevel")
+                    for _, pts in ipairs(active_map._road_smooth_paths_v5) do
+                        if #pts >= 4 then
+                            love.graphics.line(pts)
+                            love.graphics.circle("fill", pts[1],      pts[2],      cap_r)
+                            love.graphics.circle("fill", pts[#pts-1], pts[#pts],   cap_r)
+                        end
+                    end
+                    love.graphics.setLineWidth(1)
+                    love.graphics.setLineJoin("miter")
+                    love.graphics.setColor(1, 1, 1)
+                end
+            end
+
             -- Debug overlays (world-gen mode)
             do
                 local tps_dbg = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
@@ -291,6 +352,35 @@ function GameView:draw()
                     end
                 end
 
+                -- [G] Road segment overlay: every segment the pathfinder can traverse.
+                -- Green lines = zone_seg_v (N/S traversable gap between zone columns).
+                -- Blue  lines = zone_seg_h (E/W traversable gap between zone rows).
+                if Game.debug_road_segments and active_map.zone_seg_v then
+                    local zsv = active_map.zone_seg_v
+                    local zsh = active_map.zone_seg_h
+                    local scale = Game.camera and Game.camera.scale or 1
+                    love.graphics.setLineWidth(4 / scale)
+                    -- zone_seg_v[gy][rx]: vertical line at x=rx*tps, y (gy-1)*tps → gy*tps
+                    love.graphics.setColor(0, 1, 0.2, 0.9)
+                    for gy, row in pairs(zsv) do
+                        for rx in pairs(row) do
+                            love.graphics.line(
+                                rx * tps_dbg, (gy - 1) * tps_dbg,
+                                rx * tps_dbg, gy * tps_dbg)
+                        end
+                    end
+                    -- zone_seg_h[ry][gx]: horizontal line at y=ry*tps, x (gx-1)*tps → gx*tps
+                    love.graphics.setColor(0.2, 0.5, 1, 0.9)
+                    for ry, row in pairs(zsh) do
+                        for gx in pairs(row) do
+                            love.graphics.line(
+                                (gx - 1) * tps_dbg, ry * tps_dbg,
+                                gx * tps_dbg, ry * tps_dbg)
+                        end
+                    end
+                    love.graphics.setLineWidth(1)
+                end
+
                 love.graphics.setColor(1, 1, 1)
             end
 
@@ -325,7 +415,11 @@ function GameView:draw()
                             for _, node in ipairs(path) do
                                 local px, py
                                 if is_rn then
-                                    px, py = node.x * tps_pv, node.y * tps_pv
+                                    if node.is_tile then
+                                        px, py = (node.x + 0.5) * tps_pv, (node.y + 0.5) * tps_pv
+                                    else
+                                        px, py = node.x * tps_pv, node.y * tps_pv
+                                    end
                                 else
                                     px, py = active_map:getPixelCoords(node.x, node.y)
                                 end
@@ -338,6 +432,119 @@ function GameView:draw()
                         end
                     end
                 end
+            end
+        end
+
+        -- Zone overlay + debug at CITY scale (world-pixel coords, no city translate active)
+        if cur_scale == S.CITY then
+            local tps = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
+            local ox  = (Game.world_gen_city_mn_x - 1) * ts
+            local oy  = (Game.world_gen_city_mn_y - 1) * ts
+
+            -- Entities: same as DOWNTOWN, just under a translate matching the city origin
+            love.graphics.push()
+            love.graphics.translate(ox, oy)
+            if Game.entities.depot_plot then
+                local dp = Game.entities.depot_plot
+                local dpx, dpy = active_map:getPixelCoords(dp.x, dp.y)
+                DrawingUtils.drawWorldIcon(Game, "🏢", dpx, dpy)
+            end
+            for _, client in ipairs(Game.entities.clients) do
+                DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
+            end
+            for _, v in ipairs(Game.entities.vehicles) do
+                if v.visible then v:draw(Game) end
+            end
+            if Game.event_spawner then Game.event_spawner:draw(Game) end
+            -- [Tab] debug boxes
+            if Game.debug_mode then
+                for _, vehicle in ipairs(Game.entities.vehicles) do
+                    if vehicle.visible then vehicle:drawDebug(Game) end
+                end
+            end
+            love.graphics.pop()
+            love.graphics.setColor(1, 1, 1)
+
+            if active_map.zone_grid and active_map.all_city_plots then
+                local ZT    = require("data.zone_types")
+                local gap   = tps / 9
+                local alpha = ZT.COLOR_ALPHA
+                local zg    = active_map.zone_grid
+                for _, plot in ipairs(active_map.all_city_plots) do
+                    local gx, gy = plot.x, plot.y
+                    local zone   = zg[gy] and zg[gy][gx]
+                    local col    = zone and ZT.COLORS[zone]
+                    if col then
+                        local left_z = zg[gy] and zg[gy][gx-1]
+                        local top_z  = zg[gy-1] and zg[gy-1][gx]
+                        local sl = (left_z ~= zone) and gap or 0
+                        local st = (top_z  ~= zone) and gap or 0
+                        love.graphics.setColor(col[1], col[2], col[3], alpha)
+                        love.graphics.rectangle("fill",
+                            ox + (gx-1)*tps + sl, oy + (gy-1)*tps + st,
+                            tps - sl,             tps - st)
+                    end
+                end
+            end
+
+            -- Smooth road overlay at CITY scale (same paths as downtown, offset by ox,oy)
+            do
+                if not active_map._road_smooth_paths_v5 then
+                    local RS = require("utils.RoadSmoother")
+                    if active_map.road_centerlines and #active_map.road_centerlines > 0 then
+                        active_map._road_smooth_paths_v5 = RS.buildPathsFromCenterlines(active_map.road_centerlines, tps)
+                    else
+                        active_map._road_smooth_paths_v5 = RS.buildPaths(active_map.grid, tps)
+                    end
+                end
+                if #active_map._road_smooth_paths_v5 > 0 then
+                    -- Build offset paths on the fly (city origin ox,oy)
+                    local cap_r = tps * 0.35
+                    love.graphics.setColor(1, 0, 0.8, 0.92)
+                    love.graphics.setLineWidth(tps * 0.7)
+                    love.graphics.setLineJoin("bevel")
+                    for _, pts in ipairs(active_map._road_smooth_paths_v5) do
+                        if #pts >= 4 then
+                            local shifted = {}
+                            for i = 1, #pts, 2 do
+                                shifted[i]   = ox + pts[i]
+                                shifted[i+1] = oy + pts[i+1]
+                            end
+                            love.graphics.line(shifted)
+                            love.graphics.circle("fill", shifted[1],         shifted[2],         cap_r)
+                            love.graphics.circle("fill", shifted[#shifted-1], shifted[#shifted], cap_r)
+                        end
+                    end
+                    love.graphics.setLineWidth(1)
+                    love.graphics.setLineJoin("miter")
+                    love.graphics.setColor(1, 1, 1)
+                end
+            end
+
+            -- [G] Road segment overlay at CITY scale
+            if Game.debug_road_segments and active_map.zone_seg_v then
+                local zsv    = active_map.zone_seg_v
+                local zsh    = active_map.zone_seg_h
+                local scale  = Game.camera and Game.camera.scale or 1
+                local tps_dbg = tps
+                love.graphics.setLineWidth(4 / scale)
+                love.graphics.setColor(0, 1, 0.2, 0.9)
+                for gy, row in pairs(zsv) do
+                    for rx in pairs(row) do
+                        love.graphics.line(
+                            ox + rx * tps_dbg,       oy + (gy - 1) * tps_dbg,
+                            ox + rx * tps_dbg,       oy + gy * tps_dbg)
+                    end
+                end
+                love.graphics.setColor(0.2, 0.5, 1, 0.9)
+                for ry, row in pairs(zsh) do
+                    for gx in pairs(row) do
+                        love.graphics.line(
+                            ox + (gx - 1) * tps_dbg, oy + ry * tps_dbg,
+                            ox + gx * tps_dbg,        oy + ry * tps_dbg)
+                    end
+                end
+                love.graphics.setLineWidth(1)
             end
         end
 
@@ -423,7 +630,11 @@ function GameView:draw()
                         for _, node in ipairs(path) do
                             local px, py
                             if is_rn2 then
-                                px, py = node.x * tps_pv2, node.y * tps_pv2
+                                if node.is_tile then
+                                    px, py = (node.x + 0.5) * tps_pv2, (node.y + 0.5) * tps_pv2
+                                else
+                                    px, py = node.x * tps_pv2, node.y * tps_pv2
+                                end
                             else
                                 px, py = active_map:getPixelCoords(node.x, node.y)
                             end

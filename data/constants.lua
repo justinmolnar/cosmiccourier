@@ -103,14 +103,14 @@ local C = {
             speed = 80,
             pathfinding_costs = {
                 road = 10,
-                arterial = 10,
-                highway = 10,
+                arterial = 20,  -- bikes avoid arterials but can cross them
+                highway = 50,   -- bikes strongly prefer streets; short crossings still viable
             }
         },
         TRUCK = {
             cost = 1200,
             cost_multiplier = 1,
-            speed = 10000,
+            speed = 60,
             pathfinding_costs = {
                 road = 10,
                 arterial = 5,

@@ -36,8 +36,11 @@ function WorldSandboxController:new(game)
     inst.city_bounds_list      = nil
     inst.city_district_maps    = nil   -- [city_idx] = {[cell_idx] = poi_idx}
     inst.city_district_colors  = nil   -- [city_idx] = {[poi_idx] = {r,g,b}}
+    inst.city_district_types   = nil   -- [city_idx] = {[poi_idx] = "residential"|"commercial"|"industrial"|"downtown"}
     inst.city_arterial_maps    = nil   -- [city_idx] = {[sci] = true}  sub-cell roads
-    inst.city_street_maps      = nil   -- [city_idx] = {[sci] = true}  sub-cell streets (between cells)
+    inst.city_street_maps      = nil   -- [city_idx] = {v={},h={}}  world-cell boundary streets (fallback)
+    inst.city_zone_grids       = nil   -- [city_idx] = zone_grid result from WFC (sub-cell level)
+    inst.city_zone_offsets     = nil   -- [city_idx] = {x=gscx_off, y=gscy_off} WFC grid origin
     inst.selected_city_idx       = nil
     inst.selected_city_bounds    = nil
     inst.selected_downtown_bounds = nil
@@ -407,6 +410,110 @@ function WorldSandboxController:sendToGame()
     new_map.tile_pixel_size = C.MAP.TILE_SIZE / 3   -- 2/3 world px per sub-cell tile
     new_map.building_plots  = {}  -- populated below in road-node block
 
+    -- ── Zone grid + street generation ────────────────────────────────────────
+    -- WFC runs here (before road-nodes) so zone-type boundaries can drive streets.
+    do
+        local WFC = require("lib.wfc")
+        local ZT  = require("data.zone_types")
+
+        -- Assign random district types for this city's pois (once per world gen)
+        if not self.city_district_types then self.city_district_types = {} end
+        if not self.city_district_types[start_idx] then
+            local dtypes = { [1] = "downtown" }   -- poi 1 is always downtown
+            local pois = self.city_pois_list and self.city_pois_list[start_idx] or {}
+            local choices = ZT.RANDOM_DISTRICT_TYPES
+            for i = 2, #pois do
+                dtypes[i] = choices[love.math.random(1, #choices)]
+            end
+            self.city_district_types[start_idx] = dtypes
+        end
+        local district_types = self.city_district_types[start_idx]
+        local dmap  = self.city_district_maps and self.city_district_maps[start_idx] or {}
+        local bdata = self.biome_data or {}
+
+        -- Build plot lookup from ALL city plot/downtown_plot sub-cells.
+        local plot_set = {}
+        local all_city_plots = {}
+        for lscy = 0, sub_ch - 1 do
+            local gy = lscy + 1
+            for lscx = 0, sub_cw - 1 do
+                local gx = lscx + 1
+                local t = grid[gy][gx].type
+                if t == "plot" or t == "downtown_plot" then
+                    plot_set[gy * 100000 + gx] = true
+                    table.insert(all_city_plots, {x=gx, y=gy})
+                end
+            end
+        end
+        new_map.all_city_plots = all_city_plots
+
+        local wfc = WFC.new(sub_cw, sub_ch, ZT.STATES, ZT.ADJACENCY)
+
+        for lscy = 0, sub_ch - 1 do
+            local gy = lscy + 1
+            for lscx = 0, sub_cw - 1 do
+                local gx = lscx + 1
+                if not plot_set[gy * 100000 + gx] then
+                    for _, s in ipairs(ZT.STATES) do wfc.grid[gy][gx][s] = (s == "none") end
+                    wfc.entropy_grid[gy][gx] = 1
+                else
+                    local gscx2   = gscx_off + lscx
+                    local gscy2   = gscy_off + lscy
+                    local sci     = gscy2 * sw + gscx2 + 1
+                    local poi_idx = dmap[sci]
+                    local dtype   = (poi_idx and district_types[poi_idx]) or "residential"
+                    local base_w  = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS.residential
+                    local wcx2 = city_mn_x + math.floor(lscx / 3)
+                    local wcy2 = city_mn_y + math.floor(lscy / 3)
+                    local ci2  = (wcy2 - 1) * w + wcx2
+                    local bd   = bdata[ci2]
+                    local bmul = (bd and bd.name and ZT.BIOME_MULTS[bd.name]) or {}
+                    if bd and (bd.is_river or bd.is_lake) then
+                        bmul = {}
+                        if bd.name and ZT.BIOME_MULTS[bd.name] then
+                            for k, v in pairs(ZT.BIOME_MULTS[bd.name]) do bmul[k] = v end
+                        end
+                        bmul.commercial = (bmul.commercial or 1.0) * 1.8
+                    end
+                    for _, s in ipairs(ZT.STATES) do
+                        WFC.setWeight(wfc, gx, gy, s, s == "none" and 0 or math.max(0.01, (base_w[s] or 1) * (bmul[s] or 1.0)))
+                    end
+                end
+            end
+        end
+
+        WFC.solve(wfc)
+        local result = WFC.getResult(wfc)
+
+        -- Fallback for contradiction cells
+        for lscy = 0, sub_ch - 1 do
+            local gy = lscy + 1
+            for lscx = 0, sub_cw - 1 do
+                local gx = lscx + 1
+                if plot_set[gy * 100000 + gx] and not result[gy][gx] then
+                    local gscx2   = gscx_off + lscx
+                    local gscy2   = gscy_off + lscy
+                    local sci     = gscy2 * sw + gscx2 + 1
+                    local poi_idx = dmap[sci]
+                    local dtype   = (poi_idx and district_types[poi_idx]) or "residential"
+                    local base_w  = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS.residential
+                    local best, best_w = "residential", 0
+                    for _, s in ipairs(ZT.STATES) do
+                        if s ~= "none" and (base_w[s] or 0) > best_w then best = s; best_w = base_w[s] end
+                    end
+                    result[gy][gx] = best
+                end
+            end
+        end
+        new_map.zone_grid = result
+
+        -- Store zone grid + its sub-cell origin for _buildCityImage rendering
+        if not self.city_zone_grids   then self.city_zone_grids   = {} end
+        if not self.city_zone_offsets then self.city_zone_offsets = {} end
+        self.city_zone_grids[start_idx]   = result
+        self.city_zone_offsets[start_idx] = {x = gscx_off, y = gscy_off}
+    end
+
     -- Build road-node graph.
     -- Roads are LINES between sub-cells, never tiles.  is_street_sc marks every
     -- sub-cell that was previously a road tile; those positions are exactly the
@@ -603,6 +710,228 @@ function WorldSandboxController:sendToGame()
         end
         print(string.format("DEBUG building_plots=%d (total plot/dt_plot cells scanned in %dx%d grid)", #building_plots, sub_cw, sub_ch))
         new_map.building_plots = building_plots
+    end
+
+    -- Override road_v_rxs / road_h_rys / road_nodes with sub-cell zone boundaries.
+    -- A street exists between two adjacent sub-cells with different (non-none) zone types.
+    do
+        local zg = new_map.zone_grid
+        if zg then
+            -- Per-cell road segments derived from zone boundaries.
+            --
+            -- (stale block removed — see updated comments below)
+
+            -- zone_seg_v[gy][rx] = true:
+            --   gap at x = rx*tps in zone row gy, between zone cols rx and rx+1 (1-indexed).
+            --   Requires zg[gy][rx] ~= zg[gy][rx+1].  Vehicle can travel N/S at pixel x=rx*tps.
+            -- zone_seg_h[ry][gx] = true:
+            --   gap at y = ry*tps in zone col gx, between zone rows ry and ry+1 (1-indexed).
+            --   Requires zg[ry][gx] ~= zg[ry+1][gx].  Vehicle can travel E/W at pixel y=ry*tps.
+            --
+            -- Road-node (rx,ry) is at pixel (rx*tps, ry*tps).  Movements:
+            --   North → (rx,ry-1): zone_seg_v[ry][rx]   (gap in zone row ry at x=rx*tps)
+            --   South → (rx,ry+1): zone_seg_v[ry+1][rx] (gap in zone row ry+1)
+            --   East  → (rx+1,ry): zone_seg_h[ry][rx+1] (gap in zone col rx+1 at y=ry*tps)
+            --   West  → (rx-1,ry): zone_seg_h[ry][rx]   (gap in zone col rx)
+            local zone_seg_v = {}
+            for gy = 1, sub_ch do
+                for rx = 1, sub_cw - 1 do       -- rx >= 1: left cell gx=rx exists (1-indexed)
+                    local z1 = zg[gy][rx]         -- zone col rx (1-indexed)
+                    local z2 = zg[gy][rx + 1]     -- zone col rx+1
+                    if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
+                        if not zone_seg_v[gy] then zone_seg_v[gy] = {} end
+                        zone_seg_v[gy][rx] = true
+                    end
+                end
+            end
+            local zone_seg_h = {}
+            for ry = 1, sub_ch - 1 do            -- ry >= 1: top row gx=ry exists (1-indexed)
+                for gx = 1, sub_cw do
+                    local z1 = zg[ry][gx]         -- zone row ry (1-indexed)
+                    local z2 = zg[ry + 1][gx]     -- zone row ry+1
+                    if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
+                        if not zone_seg_h[ry] then zone_seg_h[ry] = {} end
+                        zone_seg_h[ry][gx] = true
+                    end
+                end
+            end
+
+            local new_nodes = {}
+            for ry = 0, sub_ch - 1 do
+                for rx = 0, sub_cw - 1 do
+                    local has_north = ry >= 1 and zone_seg_v[ry] and zone_seg_v[ry][rx]
+                    local has_south = zone_seg_v[ry + 1] and zone_seg_v[ry + 1][rx]
+                    local has_east  = zone_seg_h[ry] and zone_seg_h[ry][rx + 1]
+                    local has_west  = rx >= 1 and zone_seg_h[ry] and zone_seg_h[ry][rx]
+                    if has_north or has_south or has_east or has_west then
+                        if not new_nodes[ry] then new_nodes[ry] = {} end
+                        new_nodes[ry][rx] = true
+                    end
+                end
+            end
+            -- Preserve arterial/highway nodes from the original street map.
+            for ry, row in pairs(new_map.road_nodes) do
+                for rx in pairs(row) do
+                    local gx2, gy2 = rx + 1, ry + 1
+                    local tile2 = grid[gy2] and grid[gy2][gx2]
+                    if tile2 and (tile2.type == "arterial" or tile2.type == "highway") then
+                        if not new_nodes[ry] then new_nodes[ry] = {} end
+                        new_nodes[ry][rx] = true
+                    end
+                end
+            end
+
+            -- ── Island connectivity ─────────────────────────────────────────────
+            -- Some zone-boundary road clusters may be surrounded by same-type or
+            -- "none" cells, making them unreachable from the highway network.
+            -- For each disconnected island, find the nearest reachable node and
+            -- add the minimum road segments to bridge the gap.
+            do
+                -- Step 1: BFS from arterial/highway nodes along zone_seg graph
+                --         to discover the main reachable component.
+                local reachable = {}
+                local rq = {}
+                for ry2, row in pairs(new_nodes) do
+                    for rx2 in pairs(row) do
+                        local gx2, gy2 = rx2 + 1, ry2 + 1
+                        local t2 = grid[gy2] and grid[gy2][gx2]
+                        if t2 and (t2.type == "arterial" or t2.type == "highway") then
+                            local k2 = ry2 * 100000 + rx2
+                            if not reachable[k2] then
+                                reachable[k2] = true
+                                rq[#rq + 1] = {rx2, ry2}
+                            end
+                        end
+                    end
+                end
+                local rqi = 1
+                while rqi <= #rq do
+                    local rx2, ry2 = rq[rqi][1], rq[rqi][2]; rqi = rqi + 1
+                    local checks = {
+                        {rx2,   ry2-1, ry2 >= 1 and zone_seg_v[ry2] and zone_seg_v[ry2][rx2]},
+                        {rx2,   ry2+1, zone_seg_v[ry2+1] and zone_seg_v[ry2+1][rx2]},
+                        {rx2+1, ry2,   zone_seg_h[ry2] and zone_seg_h[ry2][rx2+1]},
+                        {rx2-1, ry2,   rx2 >= 1 and zone_seg_h[ry2] and zone_seg_h[ry2][rx2]},
+                    }
+                    for _, c in ipairs(checks) do
+                        local nx2, ny2, ok = c[1], c[2], c[3]
+                        if ok and new_nodes[ny2] and new_nodes[ny2][nx2] then
+                            local nk = ny2 * 100000 + nx2
+                            if not reachable[nk] then
+                                reachable[nk] = true; rq[#rq + 1] = {nx2, ny2}
+                            end
+                        end
+                    end
+                end
+
+                -- Step 2: Multi-source BFS outward from the reachable set into the
+                --         full road-node grid (not restricted to existing road_nodes)
+                --         to find the shortest Manhattan path from every position to
+                --         the reachable set.
+                local par = {}  -- par[k] = {px, py} or true for seed positions
+                local pq = {}
+                for ry2, row in pairs(new_nodes) do
+                    for rx2 in pairs(row) do
+                        local k2 = ry2 * 100000 + rx2
+                        if reachable[k2] then par[k2] = true; pq[#pq + 1] = {rx2, ry2} end
+                    end
+                end
+                local pqi = 1
+                while pqi <= #pq do
+                    local rx2, ry2 = pq[pqi][1], pq[pqi][2]; pqi = pqi + 1
+                    local k2 = ry2 * 100000 + rx2
+                    for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+                        local nx2, ny2 = rx2 + d[1], ry2 + d[2]
+                        if nx2 >= 0 and nx2 <= sub_cw - 2 and ny2 >= 0 and ny2 <= sub_ch - 2 then
+                            local nk = ny2 * 100000 + nx2
+                            if not par[nk] then
+                                par[nk] = {rx2, ry2}; pq[#pq + 1] = {nx2, ny2}
+                            end
+                        end
+                    end
+                end
+
+                -- Ensure two zone-grid cells are different non-none types so the gap
+                -- between them renders as a visible road in _buildCityImage.
+                local function makeVisible(gr1, gc1, gr2, gc2)
+                    local function ensureRow(r)
+                        if not zg[r] then zg[r] = {} end
+                    end
+                    ensureRow(gr1); ensureRow(gr2)
+                    local z1 = zg[gr1][gc1]
+                    local z2 = zg[gr2][gc2]
+                    if not z1 or z1 == "none" then z1 = "residential"; zg[gr1][gc1] = z1 end
+                    if not z2 or z2 == "none" or z2 == z1 then
+                        zg[gr2][gc2] = (z1 ~= "commercial") and "commercial" or "residential"
+                    end
+                end
+
+                -- Helper: add a single road segment between two adjacent road-node positions
+                -- and ensure the flanking zone cells differ so the road renders visibly.
+                --
+                -- road-node (rx,ry) is 0-indexed; zone grid (zg) is 1-indexed.
+                --   East  (rx2=rx1+1): zone_seg_h[ry1][rx1+1]  → zg[ry1][rx1+1] vs zg[ry1+1][rx1+1]
+                --   West  (rx2=rx1-1): zone_seg_h[ry1][rx1]    → zg[ry1][rx1]   vs zg[ry1+1][rx1]
+                --   South (ry2=ry1+1): zone_seg_v[ry1+1][rx1]  → zg[ry1+1][rx1] vs zg[ry1+1][rx1+1]
+                --   North (ry2=ry1-1): zone_seg_v[ry1][rx1]    → zg[ry1][rx1]   vs zg[ry1][rx1+1]
+                local function addSeg(rx1, ry1, rx2, ry2)
+                    if rx2 == rx1 + 1 then          -- east
+                        if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
+                        zone_seg_h[ry1][rx1 + 1] = true
+                        makeVisible(ry1, rx1 + 1, ry1 + 1, rx1 + 1)
+                    elseif rx2 == rx1 - 1 then      -- west
+                        if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
+                        zone_seg_h[ry1][rx1] = true
+                        makeVisible(ry1, rx1, ry1 + 1, rx1)
+                    elseif ry2 == ry1 + 1 then      -- south
+                        if not zone_seg_v[ry1 + 1] then zone_seg_v[ry1 + 1] = {} end
+                        zone_seg_v[ry1 + 1][rx1] = true
+                        makeVisible(ry1 + 1, rx1, ry1 + 1, rx1 + 1)
+                    elseif ry2 == ry1 - 1 then      -- north
+                        if not zone_seg_v[ry1] then zone_seg_v[ry1] = {} end
+                        zone_seg_v[ry1][rx1] = true
+                        makeVisible(ry1, rx1, ry1, rx1 + 1)
+                    end
+                    if not new_nodes[ry1] then new_nodes[ry1] = {} end; new_nodes[ry1][rx1] = true
+                    if not new_nodes[ry2] then new_nodes[ry2] = {} end; new_nodes[ry2][rx2] = true
+                end
+
+                -- Step 3: For each unreachable road node, walk the parent chain to
+                --         the reachable set, adding a segment at each step.
+                local unreachable = {}
+                for ry2, row in pairs(new_nodes) do
+                    for rx2 in pairs(row) do
+                        if not reachable[ry2 * 100000 + rx2] then
+                            unreachable[#unreachable + 1] = {rx2, ry2}
+                        end
+                    end
+                end
+                for _, unode in ipairs(unreachable) do
+                    local ux, uy = unode[1], unode[2]
+                    if not reachable[uy * 100000 + ux] then
+                        local cx, cy = ux, uy
+                        for _ = 1, sub_cw + sub_ch do
+                            local ck = cy * 100000 + cx
+                            if reachable[ck] then break end
+                            local p = par[ck]
+                            if not p or p == true then break end
+                            addSeg(cx, cy, p[1], p[2])
+                            reachable[ck] = true
+                            cx, cy = p[1], p[2]
+                        end
+                    end
+                end
+            end
+
+            -- road_v_rxs must remain a truthy table so PathfindingService treats this as
+            -- a road-node map (not a sandbox tile map).  The actual per-cell segment
+            -- data lives in zone_seg_v / zone_seg_h which the pathfinder reads directly.
+            new_map.road_v_rxs  = {}   -- truthy sentinel only
+            new_map.road_h_rys  = {}   -- truthy sentinel only
+            new_map.road_nodes  = new_nodes
+            new_map.zone_seg_v  = zone_seg_v
+            new_map.zone_seg_h  = zone_seg_h
+        end
     end
 
     -- Helper: build city scope image with a specific view_mode (and optional scope), returns love.graphics.Image
@@ -1692,9 +2021,12 @@ function WorldSandboxController:_gen_all_bounds()
     self.city_bounds = new_bounds
     self.city_pois   = new_pois
     -- Invalidate subsystem maps so sendToGame() or regen_bounds() regenerates them fresh
-    self.city_district_maps = nil
-    self.city_arterial_maps = nil
-    self.city_street_maps   = nil
+    self.city_district_maps  = nil
+    self.city_district_types = nil
+    self.city_arterial_maps  = nil
+    self.city_street_maps    = nil
+    self.city_zone_grids     = nil
+    self.city_zone_offsets   = nil
 
     local w, h = self.world_w, self.world_h
 
@@ -2401,17 +2733,17 @@ function WorldSandboxController:_gen_all_arterials()
     self.city_arterial_maps = maps
 end
 
--- ── Downtown street generator ─────────────────────────────────────────────────
--- Recursive binary-space-partition of the downtown district bounding box.
--- Streets run BETWEEN world cells (at the shared edge), not ON them, so they
--- occupy the 2 sub-cells that straddle each boundary:
---   vertical boundary after world column wx   → gscx = wx*3+2  AND  (wx+1)*3+0
---   horizontal boundary after world row wy    → gscy = wy*3+2  AND  (wy+1)*3+0
--- Each boundary sub-cell column/row runs the full height/width of the block
--- being split (3 sub-cells per world cell tall/wide).
+-- ── Zone-boundary street generator ───────────────────────────────────────────
+-- World cells are grouped into BLOCK×BLOCK-cell blocks; each block gets a
+-- zone type (residential/commercial/industrial/park) chosen by district weights
+-- + a deterministic position hash.  Streets appear wherever two adjacent world
+-- cells belong to blocks of DIFFERENT zone type.  This produces SimCity-style
+-- irregular block layouts with street grids that follow zone boundaries.
+--
+-- Street key format: v[cx*1000+cy]  h[cy*1000+cx]  (unchanged)
 
-local ST_MIN_BLOCK = 2   -- min block side in world cells before we stop splitting
-local ST_MAX_BLOCK = 3   -- max block side before we force a split
+local ZONE_BLOCK = 2        -- world cells per block side (controls block coarseness)
+local ZONE_STATES = {"residential", "commercial", "industrial", "park"}
 
 function WorldSandboxController:_gen_streets_for_city(city_idx)
     local bounds   = self.city_bounds_list   and self.city_bounds_list[city_idx]
@@ -2420,51 +2752,71 @@ function WorldSandboxController:_gen_streets_for_city(city_idx)
     if not bounds or not pois or #pois == 0 then return {v={},h={}} end
 
     local w  = self.world_w
+    local h  = self.world_h
     local sw = w * 3
+    local ZT = require("data.zone_types")
+
     local function sci_of(gscx, gscy) return gscy * sw + gscx + 1 end
-
-    -- Build set of world cells owned by downtown (district owner index 1)
-    local dt_cells = {}
-    if dist_map then
-        for ci in pairs(bounds) do
-            local cx = (ci-1) % w + 1
-            local cy = math.floor((ci-1) / w) + 1
-            if dist_map[sci_of((cx-1)*3+1, (cy-1)*3+1)] == 1 then
-                dt_cells[ci] = true
-            end
-        end
-    end
-    -- Fallback: fixed radius around downtown POI if district map absent or tiny
-    if not next(dt_cells) then
-        local dt = pois[1]; local r = 3
-        local mn_x = math.max(1, dt.x-r); local mx_x = math.min(w, dt.x+r)
-        local mn_y = math.max(1, dt.y-r); local mx_y = math.min(self.world_h, dt.y+r)
-        for cy = mn_y, mx_y do
-            for cx = mn_x, mx_x do
-                dt_cells[(cy-1)*w+cx] = true
-            end
-        end
+    local function get_poi(wx, wy)
+        if not dist_map then return 0 end
+        return dist_map[sci_of((wx-1)*3+1, (wy-1)*3+1)] or 0
     end
 
-    -- Regular grid: draw a street boundary between two cells when BOTH are
-    -- downtown AND the boundary falls on a grid line (every SPACING cells).
-    -- Grid is aligned to a global origin so all cities share the same phase.
-    -- This handles irregular downtown shapes naturally: lines only appear where
-    -- both neighbours are inside the district, so the grid clips to the shape.
+    -- Deterministic district type for a poi index (mirrors sendToGame logic)
+    local RDTYPES = ZT.RANDOM_DISTRICT_TYPES
+    local function poi_dtype(poi_idx)
+        if poi_idx <= 1 then return "downtown" end
+        return RDTYPES[((city_idx * 7 + poi_idx * 13) % #RDTYPES) + 1]
+    end
+
+    -- Cache: zone type per (block_x, block_y, poi_idx) triple
+    local block_cache = {}
+    local function block_zone(bx, by, poi_idx)
+        local key = bx * 1000000 + by * 1000 + poi_idx
+        if block_cache[key] then return block_cache[key] end
+        local dtype   = poi_dtype(poi_idx)
+        local weights = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS["residential"]
+        local total   = 0
+        for _, z in ipairs(ZONE_STATES) do total = total + (weights[z] or 0) end
+        -- Deterministic positional hash (no love.math.random dependency)
+        local r = ((bx * 741455 + by * 1234577 + bx * by * 89137 + poi_idx * 531731) % 100000)
+                  / 100000.0 * total
+        if r < 0 then r = r + total end
+        local zone = ZONE_STATES[#ZONE_STATES]
+        local cum  = 0
+        for _, z in ipairs(ZONE_STATES) do
+            cum = cum + (weights[z] or 0)
+            if r < cum then zone = z; break end
+        end
+        block_cache[key] = zone
+        return zone
+    end
+
+    local function cell_zone(cx, cy)
+        local bx = math.floor((cx - 1) / ZONE_BLOCK)
+        local by = math.floor((cy - 1) / ZONE_BLOCK)
+        return block_zone(bx, by, get_poi(cx, cy))
+    end
+
     local sv, sh = {}, {}
-    for ci in pairs(dt_cells) do
+    for ci in pairs(bounds) do
         local cx = (ci-1) % w + 1
         local cy = math.floor((ci-1) / w) + 1
+        local z1 = cell_zone(cx, cy)
 
-        -- Vertical boundary: between col cx and cx+1, if cx is a grid line
-        if cx % ST_MIN_BLOCK == 0 and cx < w then
+        -- Vertical boundary: right edge of (cx,cy) / left edge of (cx+1,cy)
+        if cx < w then
             local r_ci = (cy-1)*w + (cx+1)
-            if dt_cells[r_ci] then sv[cx * 1000 + cy] = true end
+            if bounds[r_ci] and cell_zone(cx+1, cy) ~= z1 then
+                sv[cx * 1000 + cy] = true
+            end
         end
-        -- Horizontal boundary: between row cy and cy+1, if cy is a grid line
-        if cy % ST_MIN_BLOCK == 0 and cy < self.world_h then
+        -- Horizontal boundary: bottom of (cx,cy) / top of (cx,cy+1)
+        if cy < h then
             local b_ci = cy*w + cx
-            if dt_cells[b_ci] then sh[cy * 1000 + cx] = true end
+            if bounds[b_ci] and cell_zone(cx, cy+1) ~= z1 then
+                sh[cy * 1000 + cx] = true
+            end
         end
     end
 
@@ -2681,10 +3033,31 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
             end
 
             if bounds[ci] then
-                -- Streets: gap pixel at a sub-cell boundary that is also a
-                -- world-cell boundary (gscx%3==0 or gscy%3==0).
+                -- Streets: gap pixel between two sub-cells of different zone types.
                 local is_street = false
-                if street_city_map then
+                local zg      = self.city_zone_grids   and self.city_zone_grids[city_idx]
+                local zg_orig = self.city_zone_offsets and self.city_zone_offsets[city_idx]
+                local zg_ox   = zg_orig and zg_orig.x or sc_min_x
+                local zg_oy   = zg_orig and zg_orig.y or sc_min_y
+                if zg and is_gap then
+                    local lscx = gscx - zg_ox + 1  -- 1-indexed WFC sub-cell x
+                    local lscy = gscy - zg_oy + 1  -- 1-indexed WFC sub-cell y
+                    if ix == 0 and lscx > 1 then
+                        local z1 = zg[lscy] and zg[lscy][lscx-1]
+                        local z2 = zg[lscy] and zg[lscy][lscx]
+                        if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
+                            is_street = true
+                        end
+                    end
+                    if not is_street and iy == 0 and lscy > 1 then
+                        local z1 = zg[lscy-1] and zg[lscy-1][lscx]
+                        local z2 = zg[lscy] and zg[lscy][lscx]
+                        if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
+                            is_street = true
+                        end
+                    end
+                elseif street_city_map and is_gap then
+                    -- Fallback for cities without zone_grid: world-cell boundary streets
                     local sv, sh = street_city_map.v, street_city_map.h
                     if ix == 0 and gscx > sc_min_x and gscx % 3 == 0 then
                         if sv and sv[(math.floor(gscx / 3)) * 1000 + wy] then is_street = true end
@@ -2718,7 +3091,7 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
                     r, g, b = c[1], c[2], c[3]
                 end
 
-                if fog_downtown and dist_owner_map then
+                if fog_downtown and dist_owner_map and not is_street then
                     local sci2 = gscy * sub_w + gscx + 1
                     if dist_owner_map[sci2] ~= 1 then
                         r = r*0.18+0.01; g = g*0.18+0.02; b = b*0.18+0.06
