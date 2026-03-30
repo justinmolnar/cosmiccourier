@@ -459,12 +459,15 @@ function WorldSandboxController:sendToGame()
             end
         end
 
-        -- road_nodes: from aug_street_maps[start_idx] only (city streets + arterial/highway boundary roads).
-        -- Used by the pathfinder for navigation — must include all traversable positions.
+        -- road_nodes: from city_street_maps[start_idx] only (actual city streets).
+        -- Arterial/highway road_nodes come from the 4-corners loop below.
+        -- aug_street_maps added boundary nodes for arterial world cells, but those
+        -- positions are in "plot" sub-cells (not actual road tiles), creating spurious
+        -- road_nodes that let the pathfinder route through non-road areas.
         do
-            local amap = aug_street_maps[start_idx]
-            if amap then
-                for key in pairs(amap.v or {}) do
+            local smap = self.city_street_maps and self.city_street_maps[start_idx]
+            if smap then
+                for key in pairs(smap.v or {}) do
                     local cx    = math.floor(key / 1000)
                     local wy    = key % 1000
                     local lscx  = cx * 3 - gscx_off
@@ -479,7 +482,7 @@ function WorldSandboxController:sendToGame()
                         end
                     end
                 end
-                for key in pairs(amap.h or {}) do
+                for key in pairs(smap.h or {}) do
                     local cy    = math.floor(key / 1000)
                     local wx    = key % 1000
                     local lscy  = cy * 3 - gscy_off
@@ -497,21 +500,42 @@ function WorldSandboxController:sendToGame()
             end
         end
 
-        -- Arterial/highway tiles: add ALL 4 corner road_nodes per sub-cell.
-        -- Arterials are diagonal and not aligned to road_v/h columns.  Adding all 4
-        -- corners guarantees that any plot adjacent to an arterial sub-cell will find
-        -- a road_node in its 4-corner end_candidates check in PathfindingService.
+        -- Arterial/highway tiles: add road_nodes only at corners that are either:
+        --   (a) shared with another arterial/highway sub-cell (inner edge — vehicle stays on road), or
+        --   (b) at a city-street column/row (junction — vehicle enters/exits arterial from street).
+        -- Pure outer corners (adjacent only to plot sub-cells, not on a street line) are
+        -- skipped so vehicles don't navigate through visible plot areas.
+        local function is_road_type(x, y)
+            if x < 1 or x > sub_cw or y < 1 or y > sub_ch then return false end
+            local tt = grid[y] and grid[y][x] and grid[y][x].type
+            return tt == "arterial" or tt == "highway"
+        end
         for gy = 1, sub_ch do
             for gx = 1, sub_cw do
                 local t = grid[gy][gx].type
-                if t == "arterial" or t == "highway" or t == "highway_ring" or
-                   t == "highway_ns" or t == "highway_ew" then
+                if t == "arterial" or t == "highway" then
+                    -- dx2,dy2 in {0,1}: corner offsets relative to top-left of sub-cell.
+                    -- Corner (rx2,ry2) touches 4 sub-cells; current is always one of them.
+                    -- "Other" neighbors determine if the corner is inner or a street junction.
                     for dy2 = 0, 1 do
                         for dx2 = 0, 1 do
-                            local rx2, ry2 = gx - 1 + dx2, gy - 1 + dy2
+                            local rx2 = gx - 1 + dx2
+                            local ry2 = gy - 1 + dy2
                             if rx2 >= 0 and rx2 < sub_cw and ry2 >= 0 and ry2 < sub_ch then
-                                if not road_nodes[ry2] then road_nodes[ry2] = {} end
-                                road_nodes[ry2][rx2] = true
+                                -- The 3 sub-cells OTHER than (gx,gy) that share this corner:
+                                --   (gx-1+dx2, gy), (gx, gy-1+dy2), (gx-1+dx2, gy-1+dy2)
+                                -- mapped to 1-indexed: (gx+dx2-1, gy), (gx, gy+dy2-1), (gx+dx2-1, gy+dy2-1)
+                                local nx1, ny1 = gx + dx2 - 1, gy         -- horizontal neighbor
+                                local nx2, ny2 = gx,            gy + dy2 - 1  -- vertical neighbor
+                                local nx3, ny3 = gx + dx2 - 1, gy + dy2 - 1  -- diagonal neighbor
+                                local inner = is_road_type(nx1, ny1) or
+                                              is_road_type(nx2, ny2) or
+                                              is_road_type(nx3, ny3)
+                                local on_street = road_v_rxs[rx2] or road_h_rys[ry2]
+                                if inner or on_street then
+                                    if not road_nodes[ry2] then road_nodes[ry2] = {} end
+                                    road_nodes[ry2][rx2] = true
+                                end
                             end
                         end
                     end

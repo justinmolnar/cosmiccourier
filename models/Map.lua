@@ -366,10 +366,17 @@ function Map:findNearestRoadNode(plot)
     if not plot or not self.road_nodes then return nil end
     local gw = self.grid and #self.grid[1] or 0
     local gh = self.grid and #self.grid or 0
-    local rx, ry = plot.x - 1, plot.y - 1
-    if self.road_nodes[ry] and self.road_nodes[ry][rx] then
-        return {x = rx, y = ry}
+    -- Check all 4 corners of the plot sub-cell first (matches PathfindingService logic).
+    local gx, gy = plot.x, plot.y
+    for _, c in ipairs({{gx-1,gy-1},{gx,gy-1},{gx-1,gy},{gx,gy}}) do
+        local rx, ry = c[1], c[2]
+        if rx >= 0 and ry >= 0 and rx < gw and ry < gh then
+            if self.road_nodes[ry] and self.road_nodes[ry][rx] then
+                return {x = rx, y = ry}
+            end
+        end
     end
+    local rx, ry = gx - 1, gy - 1
     local visited = {[ry * 10000 + rx] = true}
     local q = {{rx, ry}}
     local qi = 1

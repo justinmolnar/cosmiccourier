@@ -331,8 +331,7 @@ function GameView:draw()
                                 end
                                 table.insert(pixel_path, px); table.insert(pixel_path, py)
                             end
-                            local hc = Game.C.MAP.COLORS.HOVER
-                            love.graphics.setColor(hc[1], hc[2], hc[3], 0.7)
+                            love.graphics.setColor(0.2, 0.8, 1, 0.85)
                             love.graphics.setLineWidth(3 / Game.camera.scale)
                             love.graphics.line(pixel_path)
                             love.graphics.setLineWidth(1)
@@ -430,13 +429,12 @@ function GameView:draw()
                             end
                             table.insert(pixel_path, px); table.insert(pixel_path, py)
                         end
-                        local hc = Game.C.MAP.COLORS.HOVER
-                        love.graphics.setColor(hc[1], hc[2], hc[3], 0.7)
+                        love.graphics.setColor(0.2, 0.8, 1, 0.85)
                         love.graphics.setLineWidth(3 / Game.camera.scale)
                         love.graphics.line(pixel_path)
                         love.graphics.setLineWidth(1)
                         local cr = 5 / Game.camera.scale
-                        love.graphics.setColor(hc)
+                        love.graphics.setColor(0.2, 0.8, 1, 1)
                         love.graphics.circle("fill", pixel_path[1], pixel_path[2], cr)
                         love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], cr)
                     end

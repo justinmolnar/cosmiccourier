@@ -103,12 +103,8 @@ local C = {
             speed = 80,
             pathfinding_costs = {
                 road = 10,
-                downtown_road = 5,
-                arterial = 3,
-                highway = 2,
-                highway_ring = 2,
-                highway_ns = 2,
-                highway_ew = 2,
+                arterial = 10,
+                highway = 10,
             }
         },
         TRUCK = {
@@ -117,12 +113,8 @@ local C = {
             speed = 10000,
             pathfinding_costs = {
                 road = 10,
-                downtown_road = 20,
                 arterial = 5,
                 highway = 1,
-                highway_ring = 1,
-                highway_ns = 1,
-                highway_ew = 1,
             }
         }
     },
