@@ -7,7 +7,6 @@ Client.__index = Client
 function Client:new(plot, game)
     local instance = setmetatable({}, Client)
     instance.plot = plot
-    -- MODIFIED: Use game.maps.city to get pixel coordinates
     instance.px, instance.py = game.maps.city:getPixelCoords(plot.x, plot.y)
     instance.trip_timer = love.math.random(5, 10) -- Time until next trip
     return instance
@@ -31,7 +30,6 @@ end
 -- REMOVED THE DRAW FUNCTION FROM HERE
 
 function Client:recalculatePixelPosition(game)
-    -- MODIFIED: Get coordinates from the active map
     local active_map = game.maps[game.active_map_key]
     if active_map then
         self.px, self.py = active_map:getPixelCoords(self.plot.x, self.plot.y)

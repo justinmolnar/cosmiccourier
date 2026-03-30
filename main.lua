@@ -131,8 +131,18 @@ function love.load()
         love.graphics.setFont(Game.fonts.ui)
     end, "Font Loading")
     
-    Game.maps.city:setScale(C.MAP.SCALES.DOWNTOWN)
-    
+    -- Auto-generate world and drop into the game on every launch.
+    ErrorService.withErrorHandling(function()
+        local wsc = Game.world_sandbox_controller
+        wsc.params.seed_x = love.math.random() * 1000
+        wsc.params.seed_y = love.math.random() * 1000
+        wsc:generate()
+        wsc:place_cities()
+        wsc:build_highways()
+        wsc:regen_bounds()
+        wsc:sendToGame()
+    end, "World Auto-Generation")
+
     local auto_save_interval = GameConfig.get("ui", "auto_save_interval")
     if auto_save_interval > 0 then
         Game.auto_save_timer = auto_save_interval

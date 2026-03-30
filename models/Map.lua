@@ -276,13 +276,22 @@ function Map:getRandomDowntownBuildingPlot()
     local y_min = self.downtown_offset.y
     local x_max = self.downtown_offset.x + self.C.MAP.DOWNTOWN_GRID_WIDTH
     local y_max = self.downtown_offset.y + self.C.MAP.DOWNTOWN_GRID_HEIGHT
+    local grid = self.grid
+    local gh = grid and #grid or 0
+    local gw = gh > 0 and #grid[1] or 0
 
     for _, plot in ipairs(self.building_plots) do
         if plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max then
-            -- Require the tile is actually downtown_plot, not just inside the bounding box
-            local t = self.grid and self.grid[plot.y] and self.grid[plot.y][plot.x] and self.grid[plot.y][plot.x].type
+            local t = grid and grid[plot.y] and grid[plot.y][plot.x] and grid[plot.y][plot.x].type
             if t == "downtown_plot" then
-                table.insert(downtown_plots, plot)
+                for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+                    local nx, ny = plot.x+d[1], plot.y+d[2]
+                    if nx>=1 and nx<=gw and ny>=1 and ny<=gh
+                       and grid[ny][nx] and self:isRoad(grid[ny][nx].type) then
+                        table.insert(downtown_plots, plot)
+                        break
+                    end
+                end
             end
         end
     end
@@ -290,35 +299,23 @@ function Map:getRandomDowntownBuildingPlot()
     if #downtown_plots > 0 then
         return downtown_plots[love.math.random(1, #downtown_plots)]
     end
-
-    -- Fallback: scan grid for downtown_plot tiles adjacent to a road tile.
-    if self.grid and #self.grid > 0 then
-        local gh, gw = #self.grid, #self.grid[1]
-        local direct_plots = {}
-        for y = math.floor(y_min), math.ceil(y_max) do
-            if self.grid[y] then
-                for x = math.floor(x_min), math.ceil(x_max) do
-                    if self.grid[y][x] and self.grid[y][x].type == "downtown_plot" then
-                        -- Only include if adjacent to a road (reachable by vehicles)
-                        local has_road = false
-                        for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
-                            local nx, ny = x+d[1], y+d[2]
-                            if nx>=1 and nx<=gw and ny>=1 and ny<=gh
-                               and self.grid[ny][nx] and self:isRoad(self.grid[ny][nx].type) then
-                                has_road = true; break
-                            end
-                        end
-                        if has_road then table.insert(direct_plots, {x = x, y = y}) end
-                    end
+    -- Road-node maps: city streets are no longer road tiles, so isRoad check finds nothing.
+    -- Fall back to any downtown_plot in building_plots within downtown bounds.
+    if self.building_plots then
+        local fallback = {}
+        for _, plot in ipairs(self.building_plots) do
+            if plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max then
+                local t = grid and grid[plot.y] and grid[plot.y][plot.x] and grid[plot.y][plot.x].type
+                if t == "downtown_plot" then
+                    table.insert(fallback, plot)
                 end
             end
         end
-        if #direct_plots > 0 then
-            return direct_plots[love.math.random(1, #direct_plots)]
+        if #fallback > 0 then
+            return fallback[love.math.random(1, #fallback)]
         end
     end
-
-    return nil  -- No downtown plots found anywhere
+    return nil
 end
 
 function Map:generateRegion()
@@ -332,36 +329,89 @@ end
 
 function Map:findNearestRoadTile(plot)
     if not plot then return nil end
-    
-    local grid = self.grid 
+    local grid = self.grid
     if not grid or #grid == 0 then return nil end
-    
     local grid_h, grid_w = #grid, #grid[1]
     local x, y = plot.x, plot.y
+    local function inBounds(gx, gy) return gx>=1 and gx<=grid_w and gy>=1 and gy<=grid_h end
 
-    local function inBounds(gx, gy)
-        return gx >= 1 and gx <= grid_w and gy >= 1 and gy <= grid_h
+    -- 4-directional BFS so Manhattan-nearest road tile is always returned first.
+    -- This avoids the diagonal bias of the old Chebyshev spiral (which always found
+    -- corner intersections before orthogonally-adjacent road tiles).
+    local visited = {[y*10000+x] = true}
+    local q = {{x, y}}
+    local qi = 1
+    while qi <= #q do
+        local cx, cy = q[qi][1], q[qi][2]; qi = qi + 1
+        if (cx ~= x or cy ~= y) and inBounds(cx, cy) and self:isRoad(grid[cy][cx].type) then
+            return {x=cx, y=cy}
+        end
+        for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+            local nx, ny = cx+d[1], cy+d[2]
+            local k = ny*10000+nx
+            if inBounds(nx, ny) and not visited[k] then
+                visited[k] = true
+                q[#q+1] = {nx, ny}
+            end
+        end
+        if qi > 1000 then break end  -- safety cap
     end
-    
-    for r = 0, 5 do -- Increased search radius
-        for dy = -r, r do 
-            for dx = -r, r do 
-                if math.abs(dx) == r or math.abs(dy) == r then
-                    local nx, ny = x + dx, y + dy
-                    if inBounds(nx, ny) and self:isRoad(grid[ny][nx].type) then 
-                        return {x = nx, y = ny} 
-                    end 
-                end 
-            end 
-        end 
+    return nil
+end
+
+-- Finds the nearest road-node (rx, ry) to the given sub-cell plot.
+-- Road nodes are the lines between sub-cells: rx = gx-1, ry = gy-1,
+-- pixel position = (rx*tps, ry*tps).  Only valid on road-node maps (road_nodes set).
+function Map:findNearestRoadNode(plot)
+    if not plot or not self.road_nodes then return nil end
+    local gw = self.grid and #self.grid[1] or 0
+    local gh = self.grid and #self.grid or 0
+    local rx, ry = plot.x - 1, plot.y - 1
+    if self.road_nodes[ry] and self.road_nodes[ry][rx] then
+        return {x = rx, y = ry}
     end
-    
+    local visited = {[ry * 10000 + rx] = true}
+    local q = {{rx, ry}}
+    local qi = 1
+    while qi <= #q do
+        local crx, cry = q[qi][1], q[qi][2]; qi = qi + 1
+        if self.road_nodes[cry] and self.road_nodes[cry][crx] then
+            return {x = crx, y = cry}
+        end
+        for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+            local nrx, nry = crx + d[1], cry + d[2]
+            local k = nry * 10000 + nrx
+            if nrx >= 0 and nrx < gw and nry >= 0 and nry < gh and not visited[k] then
+                visited[k] = true; q[#q + 1] = {nrx, nry}
+            end
+        end
+        if qi > 1000 then break end
+    end
     return nil
 end
 
 function Map:getRandomBuildingPlot()
-    if #self.building_plots > 0 then 
-        return self.building_plots[love.math.random(1, #self.building_plots)] 
+    local road_adjacent = {}
+    local grid = self.grid
+    local gh = grid and #grid or 0
+    local gw = gh > 0 and #grid[1] or 0
+    for _, plot in ipairs(self.building_plots) do
+        for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+            local nx, ny = plot.x+d[1], plot.y+d[2]
+            if nx>=1 and nx<=gw and ny>=1 and ny<=gh
+               and grid[ny][nx] and self:isRoad(grid[ny][nx].type) then
+                table.insert(road_adjacent, plot)
+                break
+            end
+        end
+    end
+    if #road_adjacent > 0 then
+        return road_adjacent[love.math.random(1, #road_adjacent)]
+    end
+    -- Road-node maps: city streets are no longer road tiles, so isRoad check finds nothing.
+    -- building_plots are already guaranteed road-line adjacent by construction.
+    if self.building_plots and #self.building_plots > 0 then
+        return self.building_plots[love.math.random(1, #self.building_plots)]
     end
     return nil
 end

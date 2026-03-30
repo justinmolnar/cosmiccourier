@@ -167,24 +167,168 @@ function GameView:draw()
                 if v.visible then v:draw(Game) end
             end
 
+            -- Debug overlays (world-gen mode)
+            do
+                local tps_dbg = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
+
+                -- [B] Building plots: blue highlight on every valid building sub-cell
+                if Game.debug_building_plots and active_map.building_plots then
+                    love.graphics.setColor(0.2, 0.5, 1, 0.35)
+                    for _, plot in ipairs(active_map.building_plots) do
+                        love.graphics.rectangle("fill",
+                            (plot.x - 1) * tps_dbg, (plot.y - 1) * tps_dbg,
+                            tps_dbg, tps_dbg)
+                    end
+
+                    -- Hover: highlight the cell under the mouse and show what road it's beside
+                    -- screenToWorld returns world-pixel coords; drawing is offset by city origin,
+                    -- so subtract that to get local sub-cell pixel coords.
+                    local mx, my = love.mouse.getPosition()
+                    local wx, wy = Game.camera:screenToWorld(mx, my, Game)
+                    local ts_full = Game.C.MAP.TILE_SIZE
+                    local c_off_x = (Game.world_gen_city_mn_x or 1) - 1
+                    local c_off_y = (Game.world_gen_city_mn_y or 1) - 1
+                    local lwx = wx - c_off_x * ts_full
+                    local lwy = wy - c_off_y * ts_full
+                    local hgx = math.floor(lwx / tps_dbg) + 1
+                    local hgy = math.floor(lwy / tps_dbg) + 1
+                    local grid_w = active_map.grid and #(active_map.grid[1] or {}) or 0
+                    local grid_h = active_map.grid and #active_map.grid or 0
+                    if hgx >= 1 and hgx <= grid_w and hgy >= 1 and hgy <= grid_h then
+                        local ht = active_map.grid[hgy][hgx].type
+                        if ht == "plot" or ht == "downtown_plot" then
+                            -- Bright white outline on the hovered cell
+                            love.graphics.setColor(1, 1, 1, 0.9)
+                            love.graphics.rectangle("line",
+                                (hgx-1)*tps_dbg + 1, (hgy-1)*tps_dbg + 1,
+                                tps_dbg - 2, tps_dbg - 2)
+
+                            local rv = active_map.road_v_rxs or {}
+                            local rh = active_map.road_h_rys or {}
+                            local lw = math.max(2, tps_dbg * 0.25)
+
+                            -- Yellow vertical road lines this cell is beside
+                            if rv[hgx-1] then  -- road line to the left
+                                love.graphics.setColor(1, 1, 0, 1)
+                                love.graphics.rectangle("fill",
+                                    (hgx-1)*tps_dbg - lw*0.5, (hgy-1)*tps_dbg,
+                                    lw, tps_dbg)
+                            end
+                            if rv[hgx] then  -- road line to the right
+                                love.graphics.setColor(1, 1, 0, 1)
+                                love.graphics.rectangle("fill",
+                                    hgx*tps_dbg - lw*0.5, (hgy-1)*tps_dbg,
+                                    lw, tps_dbg)
+                            end
+                            -- Orange horizontal road lines this cell is beside
+                            if rh[hgy-1] then  -- road line above
+                                love.graphics.setColor(1, 0.5, 0, 1)
+                                love.graphics.rectangle("fill",
+                                    (hgx-1)*tps_dbg, (hgy-1)*tps_dbg - lw*0.5,
+                                    tps_dbg, lw)
+                            end
+                            if rh[hgy] then  -- road line below
+                                love.graphics.setColor(1, 0.5, 0, 1)
+                                love.graphics.rectangle("fill",
+                                    (hgx-1)*tps_dbg, hgy*tps_dbg - lw*0.5,
+                                    tps_dbg, lw)
+                            end
+                            -- Green: adjacent arterial/highway tile
+                            for _, d in ipairs({{-1,0},{1,0},{0,-1},{0,1}}) do
+                                local nx, ny = hgx+d[1], hgy+d[2]
+                                if nx >= 1 and nx <= grid_w and ny >= 1 and ny <= grid_h then
+                                    local tt = active_map.grid[ny][nx].type
+                                    if tt == "arterial" or tt == "highway" or
+                                       tt == "highway_ring" or tt == "highway_ns" or
+                                       tt == "highway_ew" then
+                                        love.graphics.setColor(0, 1, 0, 0.6)
+                                        love.graphics.rectangle("fill",
+                                            (nx-1)*tps_dbg, (ny-1)*tps_dbg,
+                                            tps_dbg, tps_dbg)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
+                -- [P] Client/pickup overlay: orange dot at client plot, green dots at
+                -- adjacent road_nodes, cyan dots at pending-trip start_plots.
+                if Game.debug_pickup_locations then
+                    local r = tps_dbg * 0.3
+                    for _, client in ipairs(Game.entities.clients) do
+                        -- Client sub-cell centre (where the house icon is)
+                        love.graphics.setColor(1, 0.5, 0, 0.8)
+                        love.graphics.circle("fill", client.px, client.py, r)
+                        -- Adjacent road_nodes (where a vehicle can stop for pickup)
+                        if active_map.road_nodes then
+                            local gx, gy = client.plot.x, client.plot.y
+                            for _, c in ipairs({{gx-1,gy-1},{gx,gy-1},{gx-1,gy},{gx,gy}}) do
+                                local rx, ry = c[1], c[2]
+                                if active_map.road_nodes[ry] and active_map.road_nodes[ry][rx] then
+                                    love.graphics.setColor(0, 1, 0, 0.9)
+                                    love.graphics.circle("fill", rx * tps_dbg, ry * tps_dbg, tps_dbg * 0.2)
+                                end
+                            end
+                        end
+                    end
+                    -- Pending trip start_plots
+                    love.graphics.setColor(0, 1, 1, 0.8)
+                    local r2 = tps_dbg * 0.2
+                    for _, trip in ipairs(Game.entities.trips.pending) do
+                        local leg = trip.legs and trip.legs[trip.current_leg]
+                        if leg and leg.start_plot then
+                            local spx, spy = active_map:getPixelCoords(leg.start_plot.x, leg.start_plot.y)
+                            love.graphics.circle("fill", spx, spy, r2)
+                        end
+                    end
+                end
+
+                -- [Tab] Vehicle paths and debug boxes
+                if Game.debug_mode then
+                    for _, vehicle in ipairs(Game.entities.vehicles) do
+                        if vehicle.visible then vehicle:drawDebug(Game) end
+                    end
+                end
+
+                love.graphics.setColor(1, 1, 1)
+            end
+
             -- Trip route preview on hover (same as tile-grid branch)
             if ui_manager.hovered_trip_index then
                 local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
                 if trip and trip.legs[trip.current_leg] then
                     local leg = trip.legs[trip.current_leg]
-                    local start_node = active_map:findNearestRoadTile(leg.start_plot)
-                    local end_node   = active_map:findNearestRoadTile(leg.end_plot)
+                    local is_rn = active_map.road_v_rxs ~= nil
+                    local start_node = is_rn and active_map:findNearestRoadNode(leg.start_plot)
+                                               or active_map:findNearestRoadTile(leg.start_plot)
+                    local end_node   = is_rn and active_map:findNearestRoadNode(leg.end_plot)
+                                               or active_map:findNearestRoadTile(leg.end_plot)
                     if start_node and end_node and active_map.grid then
                         local vp = (leg.vehicleType == "bike") and Game.C.VEHICLES.BIKE or Game.C.VEHICLES.TRUCK
-                        local cost_fn = function(x, y)
-                            local tile = active_map.grid[y] and active_map.grid[y][x]
-                            return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
+                        local cost_fn
+                        if is_rn then
+                            cost_fn = function(rx, ry)
+                                local tile = active_map.grid[ry+1] and active_map.grid[ry+1][rx+1]
+                                return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
+                            end
+                        else
+                            cost_fn = function(x, y)
+                                local tile = active_map.grid[y] and active_map.grid[y][x]
+                                return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
+                            end
                         end
                         local path = Game.pathfinder.findPath(active_map.grid, start_node, end_node, cost_fn, active_map)
                         if path and #path >= 2 then
                             local pixel_path = {}
+                            local tps_pv = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
                             for _, node in ipairs(path) do
-                                local px, py = active_map:getPixelCoords(node.x, node.y)
+                                local px, py
+                                if is_rn then
+                                    px, py = node.x * tps_pv, node.y * tps_pv
+                                else
+                                    px, py = active_map:getPixelCoords(node.x, node.y)
+                                end
                                 table.insert(pixel_path, px); table.insert(pixel_path, py)
                             end
                             local hc = Game.C.MAP.COLORS.HOVER
@@ -249,21 +393,41 @@ function GameView:draw()
             if trip and trip.legs[trip.current_leg] then
                 local leg = trip.legs[trip.current_leg]
                 local path_grid = active_map.grid
+                local is_rn3 = active_map.road_v_rxs ~= nil
+                local function nearestNode(plot)
+                    return is_rn3 and active_map:findNearestRoadNode(plot)
+                                   or active_map:findNearestRoadTile(plot)
+                end
                 local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1)
-                    and active_map:findNearestRoadTile(Game.entities.depot_plot)
-                    or  active_map:findNearestRoadTile(leg.start_plot)
-                local end_node = active_map:findNearestRoadTile(leg.end_plot)
+                    and nearestNode(Game.entities.depot_plot)
+                    or  nearestNode(leg.start_plot)
+                local end_node = nearestNode(leg.end_plot)
                 if start_node and end_node and path_grid then
                     local vp = (leg.vehicleType == "bike") and Game.C.VEHICLES.BIKE or Game.C.VEHICLES.TRUCK
-                    local cost_function = function(x, y)
-                        local tile = path_grid[y] and path_grid[y][x]
-                        return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
+                    local cost_function
+                    if is_rn3 then
+                        cost_function = function(rx, ry)
+                            local tile = path_grid[ry+1] and path_grid[ry+1][rx+1]
+                            return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
+                        end
+                    else
+                        cost_function = function(x, y)
+                            local tile = path_grid[y] and path_grid[y][x]
+                            return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
+                        end
                     end
                     local path = Game.pathfinder.findPath(path_grid, start_node, end_node, cost_function, active_map)
                     if path then
                         local pixel_path = {}
+                        local tps_pv2 = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
+                        local is_rn2  = active_map.road_v_rxs ~= nil
                         for _, node in ipairs(path) do
-                            local px, py = active_map:getPixelCoords(node.x, node.y)
+                            local px, py
+                            if is_rn2 then
+                                px, py = node.x * tps_pv2, node.y * tps_pv2
+                            else
+                                px, py = active_map:getPixelCoords(node.x, node.y)
+                            end
                             table.insert(pixel_path, px); table.insert(pixel_path, py)
                         end
                         local hc = Game.C.MAP.COLORS.HOVER

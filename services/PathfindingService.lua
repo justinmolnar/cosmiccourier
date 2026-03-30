@@ -1,84 +1,224 @@
 -- services/PathfindingService.lua
 local PathfindingService = {}
 
-function PathfindingService.findVehiclePath(vehicle, start_plot, end_plot, game)
-    if not start_plot or not end_plot then
+function PathfindingService.findVehiclePath(vehicle, start_node, end_plot, game)
+    if not start_node or not end_plot then
         print(string.format("ERROR: PathfindingService - Invalid plots for %s %d", vehicle.type, vehicle.id))
         return nil
     end
-    
+
     local map = game.maps[vehicle.operational_map_key]
     if not map then
         print(string.format("ERROR: PathfindingService - Could not find operational map '%s' for vehicle %d", vehicle.operational_map_key, vehicle.id))
         return nil
     end
-    
+
     local path_grid = map.grid
     if not path_grid or #path_grid == 0 then
         print(string.format("ERROR: PathfindingService - No map grid available for %s %d", vehicle.type, vehicle.id))
         return nil
     end
-    
-    -- Find the nearest road tile that this vehicle can actually traverse.
-    -- A simple isRoad() check can return tile types the vehicle can't use (e.g. highway
-    -- for bikes), which may be in a disconnected component from the vehicle's network.
-    local function findTraversable(plot)
-        local grid = path_grid
-        local grid_h, grid_w = #grid, #grid[1]
-        local x, y = plot.x, plot.y
-        local function inBounds(gx, gy) return gx>=1 and gx<=grid_w and gy>=1 and gy<=grid_h end
-        for r = 0, 10 do
-            for dy = -r, r do
-                for dx = -r, r do
-                    if math.abs(dx)==r or math.abs(dy)==r then
-                        local nx, ny = x+dx, y+dy
-                        if inBounds(nx,ny) and map:isRoad(grid[ny][nx].type) then
-                            if vehicle:getMovementCostFor(grid[ny][nx].type) < 9999 then
-                                return {x=nx, y=ny}
-                            end
+
+    local grid_h, grid_w = #path_grid, #path_grid[1]
+
+    if map.road_v_rxs then
+        -- ── Road-node map ──────────────────────────────────────────────────────
+        -- start_node is road-node coords (vehicle.grid_anchor) — used directly.
+        -- end_plot is a sub-cell (building location) — must be converted to road-node.
+
+        local function get_cost(rx, ry)
+            -- A position is traversable only if it is a valid road node.
+            if not (map.road_nodes[ry] and map.road_nodes[ry][rx]) then return 9999 end
+            -- Arterials and highways still have tile types — use them for cost.
+            local tile = path_grid[ry + 1] and path_grid[ry + 1][rx + 1]
+            if tile then
+                local t = tile.type
+                if t == "arterial" or t == "highway" or t == "highway_ring" or
+                   t == "highway_ns" or t == "highway_ew" then
+                    return vehicle:getMovementCostFor(t)
+                end
+            end
+            -- City-street nodes: tile is now a plot (roads are lines, not tiles).
+            return vehicle:getMovementCostFor("road")
+        end
+
+        local function snapToColumn(rx, ry)
+            -- If already a road_node, use it directly.
+            -- Arterial road_nodes are not constrained to road_v columns.
+            if map.road_nodes[ry] and map.road_nodes[ry][rx] then
+                return {x=rx, y=ry}
+            end
+            -- Search nearby for any road_node on same row (city street columns first).
+            local road_v = map.road_v_rxs
+            for dist = 1, grid_w do
+                for _, dx in ipairs({-dist, dist}) do
+                    local cx = rx + dx
+                    if cx >= 0 and cx < grid_w then
+                        if map.road_nodes[ry] and map.road_nodes[ry][cx] then
+                            return {x=cx, y=ry}
                         end
                     end
                 end
             end
+            -- Fall back to nearest road_node anywhere.
+            local nearest = map:findNearestRoadNode({x=rx+1, y=ry+1})
+            if nearest then return nearest end
+            return {x=rx, y=ry}
         end
-        return map:findNearestRoadTile(plot)  -- fallback to any road
-    end
 
-    local start_node = findTraversable(start_plot)
-    local end_node   = findTraversable(end_plot)
-    
-    if not start_node or not end_node then
-        return nil
+        -- Find road-node candidates adjacent to end_plot.
+        -- Roads are lines between sub-cells; check all 4 corner gap-positions of the
+        -- building sub-cell.  A corner (rx, ry) is valid if it is a road node.
+        -- snapToColumn ensures the candidate is at a road_v column the pathfinder
+        -- can actually navigate to via its horizontal-scan movement.
+        local end_candidates = {}
+        local seen = {}
+        local gx, gy = end_plot.x, end_plot.y
+        for _, c in ipairs({{gx-1, gy-1}, {gx, gy-1}, {gx-1, gy}, {gx, gy}}) do
+            local rx, ry = c[1], c[2]
+            if rx >= 0 and rx < grid_w and ry >= 0 and ry < grid_h then
+                if map.road_nodes[ry] and map.road_nodes[ry][rx] then
+                    local s = snapToColumn(rx, ry)
+                    local key = s.y * 10000 + s.x
+                    if not seen[key] then
+                        seen[key] = true
+                        table.insert(end_candidates, s)
+                    end
+                end
+            end
+        end
+
+        if #end_candidates == 0 then
+            -- BFS in road-node space to find nearest road node to end_plot
+            local ex, ey = end_plot.x - 1, end_plot.y - 1
+            local vis = {[ey * 10000 + ex] = true}
+            local q = {{ex, ey}}
+            local qi = 1
+            while qi <= #q do
+                local crx, cry = q[qi][1], q[qi][2]; qi = qi + 1
+                if map.road_nodes[cry] and map.road_nodes[cry][crx] then
+                    table.insert(end_candidates, snapToColumn(crx, cry))
+                    break
+                end
+                for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+                    local nrx, nry = crx + d[1], cry + d[2]
+                    local k = nry * 10000 + nrx
+                    if nrx >= 0 and nrx < grid_w and nry >= 0 and nry < grid_h and not vis[k] then
+                        vis[k] = true; q[#q + 1] = {nrx, nry}
+                    end
+                end
+                if qi > 1000 then break end
+            end
+            if #end_candidates == 0 then
+                print(string.format("ERROR: PathfindingService - No road node near end_plot for %s %d", vehicle.type, vehicle.id))
+                return nil
+            end
+        end
+
+        local best_path = nil
+        for _, end_node in ipairs(end_candidates) do
+            if end_node.x == start_node.x and end_node.y == start_node.y then return {} end
+            local path = game.pathfinder.findPath(path_grid, start_node, end_node, get_cost, map)
+            if path and (not best_path or #path < #best_path) then
+                best_path = path
+            end
+        end
+
+        if not best_path then
+            print(string.format("ERROR: PathfindingService - No path found for %s %d", vehicle.type, vehicle.id))
+            print(string.format("  start_node=(%d,%d) end_plot=(%d,%d)", start_node.x, start_node.y, end_plot.x, end_plot.y))
+            print(string.format("  end_candidates count=%d", #end_candidates))
+            for i, ec in ipairs(end_candidates) do
+                print(string.format("  candidate[%d]=(%d,%d) in_road_nodes=%s", i, ec.x, ec.y, tostring(map.road_nodes[ec.y] and map.road_nodes[ec.y][ec.x])))
+            end
+            print(string.format("  start in_road_nodes=%s road_v=%s", tostring(map.road_nodes[start_node.y] and map.road_nodes[start_node.y][start_node.x]), tostring(map.road_v_rxs[start_node.x])))
+            return nil
+        end
+
+        if #best_path > 0 then table.remove(best_path, 1) end
+        return best_path
+
+    else
+        -- ── Sandbox map (sub-cell grid) ────────────────────────────────────────
+        local function findTraversable(plot)
+            local x, y = plot.x, plot.y
+            local function inBounds(gx, gy) return gx>=1 and gx<=grid_w and gy>=1 and gy<=grid_h end
+            if inBounds(x, y) and map:isRoad(path_grid[y][x].type)
+               and vehicle:getMovementCostFor(path_grid[y][x].type) < 9999 then
+                return {x=x, y=y}
+            end
+            local visited = {[y*10000+x] = true}
+            local q = {{x, y}}
+            local qi = 1
+            while qi <= #q do
+                local cx, cy = q[qi][1], q[qi][2]; qi = qi + 1
+                if inBounds(cx, cy) and map:isRoad(path_grid[cy][cx].type)
+                   and vehicle:getMovementCostFor(path_grid[cy][cx].type) < 9999 then
+                    return {x=cx, y=cy}
+                end
+                for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+                    local nx, ny = cx+d[1], cy+d[2]
+                    local k = ny*10000+nx
+                    if inBounds(nx, ny) and not visited[k] then
+                        visited[k] = true; q[#q+1] = {nx, ny}
+                    end
+                end
+                if qi > 1000 then break end
+            end
+            return map:findNearestRoadTile(plot)
+        end
+
+        local start_sub = findTraversable(start_node)
+        if not start_sub then return nil end
+
+        local function get_cost(node_x, node_y)
+            local tile = path_grid[node_y][node_x]
+            return vehicle:getMovementCostFor(tile.type)
+        end
+
+        local end_candidates = {}
+        local seen = {}
+        for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+            local nx, ny = end_plot.x + d[1], end_plot.y + d[2]
+            if nx >= 1 and nx <= grid_w and ny >= 1 and ny <= grid_h then
+                local tile = path_grid[ny][nx]
+                if tile and map:isRoad(tile.type) and vehicle:getMovementCostFor(tile.type) < 9999 then
+                    local key = ny * 10000 + nx
+                    if not seen[key] then
+                        seen[key] = true
+                        table.insert(end_candidates, {x=nx, y=ny})
+                    end
+                end
+            end
+        end
+        if #end_candidates == 0 then
+            local fallback = findTraversable(end_plot)
+            if not fallback then return nil end
+            end_candidates = {fallback}
+        end
+
+        local best_path = nil
+        for _, end_node in ipairs(end_candidates) do
+            if end_node.x == start_sub.x and end_node.y == start_sub.y then return {} end
+            local path = game.pathfinder.findPath(path_grid, start_sub, end_node, get_cost, map)
+            if path and (not best_path or #path < #best_path) then
+                best_path = path
+            end
+        end
+
+        if not best_path then
+            print(string.format("ERROR: PathfindingService - No path found for %s %d", vehicle.type, vehicle.id))
+            return nil
+        end
+
+        if #best_path > 0 then table.remove(best_path, 1) end
+        return best_path
     end
-    
-    if start_node.x == end_node.x and start_node.y == end_node.y then
-        return {}
-    end
-    
-    -- This no longer needs to know about vehicle types, it just asks the vehicle for its costs!
-    local function get_cost_for_node(node_x, node_y)
-        local tile = path_grid[node_y][node_x]
-        return vehicle:getMovementCostFor(tile.type)
-    end
-    
-    local path = game.pathfinder.findPath(path_grid, start_node, end_node, get_cost_for_node, map)
-    
-    if not path then
-        print(string.format("ERROR: PathfindingService - No path found for %s %d", vehicle.type, vehicle.id))
-        return nil
-    end
-    
-    if #path > 0 then
-        table.remove(path, 1)
-    end
-    
-    return path
 end
 
 function PathfindingService.findPathToDepot(vehicle, game)
     local current_pos = vehicle.grid_anchor
-    -- MODIFIED: Always use the city map for depot pathfinding
-    return PathfindingService.findVehiclePath(vehicle, current_pos, vehicle.depot_plot, game, game.maps.city)
+    return PathfindingService.findVehiclePath(vehicle, current_pos, vehicle.depot_plot, game)
 end
 
 function PathfindingService.findPathToPickup(vehicle, trip, game)
@@ -87,16 +227,13 @@ function PathfindingService.findPathToPickup(vehicle, trip, game)
     if not leg then
         return nil
     end
-    
-    -- MODIFIED: Always use the city map for pickup pathfinding
-    return PathfindingService.findVehiclePath(vehicle, current_pos, leg.start_plot, game, game.maps.city)
+    return PathfindingService.findVehiclePath(vehicle, current_pos, leg.start_plot, game)
 end
 
 function PathfindingService.findPathToRandomHighway(vehicle, game)
     local city_map = game.maps.city
     local highway_tiles = {}
-    
-    -- Collect all possible highway tiles
+
     for y, row in ipairs(city_map.grid) do
         for x, tile in ipairs(row) do
             if string.find(tile.type, "highway") then
@@ -105,38 +242,45 @@ function PathfindingService.findPathToRandomHighway(vehicle, game)
         end
     end
 
-    if #highway_tiles == 0 then 
+    if #highway_tiles == 0 then
         print("ERROR: No highway tiles found on city map for pathfinding.")
-        return nil 
+        return nil
     end
 
-    -- Pick a random one as the destination
     local destination_plot = highway_tiles[love.math.random(1, #highway_tiles)]
-    
-    -- Find a path from where the vehicle is to that random highway tile
     return PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, destination_plot, game)
+end
+
+-- Returns pixel coords for a path node.
+-- Road-node maps: pixel = rx*TPS  (node coords ARE the road-line grid)
+-- Sandbox maps:   pixel = (x-0.5)*TPS  (tile centre)
+local function nodePixel(node, TPS, is_road_node_map)
+    if is_road_node_map then
+        return node.x * TPS, node.y * TPS
+    else
+        return (node.x - 0.5) * TPS, (node.y - 0.5) * TPS
+    end
 end
 
 function PathfindingService.estimatePathTravelTime(path, vehicle, game)
     if not path or #path == 0 then return 0 end
 
     local total_distance = 0
-    -- Use the vehicle's operational map to get the correct tile pixel size.
     local map = game.maps[vehicle.operational_map_key]
     local TPS = map.tile_pixel_size or map.C.MAP.TILE_SIZE
+    local is_road_node_map = map.road_v_rxs ~= nil
 
-    -- Start from the vehicle's current position (also in tile_pixel_size coords)
     local last_px, last_py = vehicle.px, vehicle.py
 
     for _, node in ipairs(path) do
-        local node_px, node_py = (node.x - 0.5) * TPS, (node.y - 0.5) * TPS
+        local node_px, node_py = nodePixel(node, TPS, is_road_node_map)
         local dist = math.sqrt((node_px - last_px)^2 + (node_py - last_py)^2)
         total_distance = total_distance + dist
         last_px, last_py = node_px, node_py
     end
 
     local base_speed = vehicle.properties.speed
-    local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / TILE_SIZE
+    local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / TPS
     local normalized_speed = base_speed / speed_normalization_factor
 
     if normalized_speed == 0 then return math.huge end
@@ -147,19 +291,18 @@ end
 function PathfindingService.findPathToDropoff(vehicle, game)
     local current_pos = vehicle.grid_anchor
     local best_path, shortest_len = nil, math.huge
-    
+
     for _, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
         if leg then
-            -- MODIFIED: Always use the city map for dropoff pathfinding
-            local path = PathfindingService.findVehiclePath(vehicle, current_pos, leg.end_plot, game, game.maps.city)
+            local path = PathfindingService.findVehiclePath(vehicle, current_pos, leg.end_plot, game)
             if path and #path < shortest_len then
                 shortest_len = #path
                 best_path = path
             end
         end
     end
-    
+
     return best_path
 end
 

@@ -15,16 +15,26 @@ function moveAlongPath(dt, vehicle, game)
     if not map_for_pathing then return end
 
     local target_node = vehicle.path[1]
-    local target_px, target_py = map_for_pathing:getPixelCoords(target_node.x, target_node.y)
+    -- Road-node maps: path nodes are road-node coords, pixel = rx*tps.
+    -- Sandbox maps: path nodes are sub-cell coords, pixel = tile centre.
+    local target_px, target_py
+    local tps_check = map_for_pathing.tile_pixel_size or game.C.MAP.TILE_SIZE
+    if map_for_pathing.road_v_rxs then
+        -- Road-node map: path nodes are road-node coords, pixel = rx*tps
+        target_px, target_py = target_node.x * tps_check, target_node.y * tps_check
+    else
+        target_px, target_py = map_for_pathing:getPixelCoords(target_node.x, target_node.y)
+    end
 
     local angle = math.atan2(target_py - vehicle.py, target_px - vehicle.px)
 
     -- Step 1: Get the correct base speed for the vehicle type from the vehicle's properties
     local base_speed = vehicle.properties.speed
 
-    -- Step 2: Normalize the speed. The original speed was balanced for a visual
-    -- tile size of 16. Our new world tile size is 2. So we must scale it down.
-    local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / game.C.MAP.TILE_SIZE
+    -- Step 2: Normalize speed relative to the map's actual tile pixel size so that
+    -- screen-space speed stays consistent across maps with different tile scales.
+    local tps = map_for_pathing.tile_pixel_size or game.C.MAP.TILE_SIZE
+    local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / tps
     local normalized_speed = base_speed / speed_normalization_factor
 
     -- Step 3: For bikes (downtown-only), scale speed proportionally to downtown size
@@ -236,85 +246,34 @@ end
 States.DoDropoff = State:new()
 States.DoDropoff.name = "Dropping Off"
 function States.DoDropoff:enter(vehicle, game)
-    local C = game.C
     local trip_index_to_remove = nil
-    
-    local current_pos = vehicle.grid_anchor
-    local active_map = game.maps[vehicle.operational_map_key]
-    if not active_map then return end
-    
-    local is_abstracted_mode = (game.active_map_key ~= "city")
-    
-    print(string.format("DEBUG: %s %d starting dropoff at (%d,%d), abstracted: %s, cargo: %d", 
-          vehicle.type, vehicle.id, current_pos.x, current_pos.y, tostring(is_abstracted_mode), #vehicle.cargo))
-    
+
     for i, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
         
-        print(string.format("DEBUG: Processing trip leg %d/%d - vehicle type needed: %s, current vehicle: %s", 
-              trip.current_leg, #trip.legs, leg.vehicleType, vehicle.type))
-        
-        local destination_road_tile = nil
+        -- Vehicle completed its path to reach DoDropoff (or is off-screen abstracted),
+        -- so it is at the destination by definition.
+        trip:thaw()
+        local is_final_destination = trip.current_leg >= #trip.legs
 
-        -- Determine which grid to use for finding the destination
-        destination_road_tile = active_map:findNearestRoadTile(leg.end_plot)
-
-        local at_destination = false
-        if is_abstracted_mode then
-            at_destination = true
-            print(string.format("DEBUG: %s %d: Abstracted dropoff assumed at destination", vehicle.type, vehicle.id))
+        if is_final_destination then
+            -- FINAL DELIVERY
+            local final_payout = trip.base_payout + trip.speed_bonus
+            local event_data = { payout = final_payout, bonus = trip.speed_bonus, base = trip.base_payout, x = vehicle.px, y = vehicle.py }
+            game.EventBus:publish("package_delivered", event_data)
+            trip_index_to_remove = i
         else
-            at_destination = destination_road_tile and
-                           current_pos.x == destination_road_tile.x and
-                           current_pos.y == destination_road_tile.y
-            print(string.format("DEBUG: %s %d: Detailed dropoff position check - at_destination: %s", vehicle.type, vehicle.id, tostring(at_destination)))
+            -- INTERMEDIATE STOP (HUB/DEPOT) - bike completes leg 1, truck picks up leg 2
+            trip.current_leg = trip.current_leg + 1
+            table.insert(game.entities.trips.pending, trip)
+            trip_index_to_remove = i
         end
 
-        if at_destination then
-            trip:thaw()
-            local is_final_destination = trip.current_leg >= #trip.legs
-            
-            print(string.format("DEBUG: %s %d dropoff SUCCESS - current_leg: %d, total_legs: %d, is_final: %s, is_long_distance: %s", 
-                  vehicle.type, vehicle.id, trip.current_leg, #trip.legs, tostring(is_final_destination), tostring(trip.is_long_distance)))
-            
-            if is_final_destination then
-                -- FINAL DELIVERY
-                local final_payout = trip.base_payout + trip.speed_bonus
-                local event_data = { payout = final_payout, bonus = trip.speed_bonus, base = trip.base_payout, x = vehicle.px, y = vehicle.py }
-                game.EventBus:publish("package_delivered", event_data)
-                print(string.format("DEBUG: %s %d completed FINAL delivery! $%d", 
-                      vehicle.type, vehicle.id, math.floor(final_payout)))
-                trip_index_to_remove = i
-            else
-                -- INTERMEDIATE STOP (HUB/DEPOT) - this should happen for bikes completing leg 1
-                local old_leg = trip.current_leg
-                trip.current_leg = trip.current_leg + 1
-                local new_leg = trip.legs[trip.current_leg]
-                
-                print(string.format("DEBUG: %s %d completed INTERMEDIATE stop (leg %d). Trip now needs %s for leg %d/%d", 
-                      vehicle.type, vehicle.id, old_leg, new_leg.vehicleType, trip.current_leg, #trip.legs))
-                
-                -- Put it back in the main pending list for the next vehicle type
-                table.insert(game.entities.trips.pending, trip)
-                print(string.format("DEBUG: Trip added back to pending queue for %s (now %d pending trips)", 
-                      new_leg.vehicleType, #game.entities.trips.pending))
-                trip_index_to_remove = i
-            end
-            
-            break
-        else
-            print(string.format("DEBUG: %s %d NOT at destination: current=(%d,%d), target=(%d,%d)", 
-                  vehicle.type, vehicle.id, current_pos.x, current_pos.y, 
-                  destination_road_tile and destination_road_tile.x or -1, 
-                  destination_road_tile and destination_road_tile.y or -1))
-        end
+        break
     end
 
     if trip_index_to_remove then
         table.remove(vehicle.cargo, trip_index_to_remove)
-        print(string.format("DEBUG: %s %d removed trip from cargo, %d remaining", vehicle.type, vehicle.id, #vehicle.cargo))
-    else
-        print(string.format("DEBUG: %s %d: No trip was dropped off!", vehicle.type, vehicle.id))
     end
 
     vehicle:changeState(States.DecideNextAction, game)

@@ -24,6 +24,18 @@ function InputController:keypressed(key)
         return
     end
 
+    -- Debug overlays
+    if key == "b" then
+        self.game.debug_building_plots = not (self.game.debug_building_plots or false)
+        print("DEBUG: building_plots overlay " .. (self.game.debug_building_plots and "ON" or "OFF"))
+        return
+    end
+    if key == "p" then
+        self.game.debug_pickup_locations = not (self.game.debug_pickup_locations or false)
+        print("DEBUG: pickup/client overlay " .. (self.game.debug_pickup_locations and "ON" or "OFF"))
+        return
+    end
+
     -- Force-enable autodispatch (debug cheat)
     if key == "a" then
         self.game.state.upgrades.auto_dispatch_unlocked = true

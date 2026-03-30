@@ -8,14 +8,29 @@ local function getNeighbors(node, grid, grid_width, grid_height, map)
     local neighbors = {}
     local x, y = node.x, node.y
 
-    local directions = {{x, y - 1}, {x, y + 1}, {x - 1, y}, {x + 1, y}}
+    if not map.road_v_rxs then
+        -- Sandbox map: sub-cell coords, single-step, check tile type directly.
+        for _, dir in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+            local nx, ny = x + dir[1], y + dir[2]
+            if nx > 0 and nx <= grid_width and ny > 0 and ny <= grid_height then
+                if map:isRoad(grid[ny][nx].type) then
+                    table.insert(neighbors, {x = nx, y = ny, dist = 1})
+                end
+            end
+        end
+        return neighbors
+    end
 
-    for _, dir in ipairs(directions) do
-        local nx, ny = dir[1], dir[2]
-        if nx > 0 and nx <= grid_width and ny > 0 and ny <= grid_height then
-            -- FIX: Use the map's isRoad function to check all valid road types
-            if map:isRoad(grid[ny][nx].type) then
-                table.insert(neighbors, {x = nx, y = ny})
+    -- Road-node map: single-step in all 4 directions.
+    -- The old horizontal-scan optimisation (jump to next road_v column) only worked for
+    -- city-street-only maps.  Arterial road_nodes are at arbitrary sub-cell positions, so
+    -- the scan silently skipped them, causing off-road movement and disconnected graphs.
+    local road_nodes = map.road_nodes
+    for _, dir in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+        local nx, ny = x + dir[1], y + dir[2]
+        if nx >= 0 and nx < grid_width and ny >= 0 and ny < grid_height then
+            if road_nodes[ny] and road_nodes[ny][nx] then
+                table.insert(neighbors, {x = nx, y = ny, dist = 1})
             end
         end
     end
@@ -74,10 +89,9 @@ function Pathfinder.findPath(grid, startNode, endNode, costs, map)
         openSet[current.y .. ',' .. current.x] = nil
 
         for _, neighbor in ipairs(getNeighbors(current, grid, grid_width, grid_height, map)) do
-            -- THE FIX: The 'costs' variable is now a function. We must call it
-            -- to get the movement cost for the specific vehicle.
-            local move_cost = costs(neighbor.x, neighbor.y)
-            
+            -- Cost = per-tile cost × number of tiles traversed in this step (dist).
+            local move_cost = costs(neighbor.x, neighbor.y) * (neighbor.dist or 1)
+
             local tentative_gScore = gScore[current.y .. ',' .. current.x] + move_cost
             local neighborKey = neighbor.y .. ',' .. neighbor.x
             

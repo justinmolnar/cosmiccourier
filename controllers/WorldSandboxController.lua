@@ -345,13 +345,18 @@ function WorldSandboxController:sendToGame()
             local ci   = (wcy - 1) * w + wcx
             local sci  = gscy * sw + gscx + 1
             local tile
-            if self.highway_map and self.highway_map[ci] then
-                tile = "highway"
-            elseif art_sci[sci] then
-                tile = "arterial"
-            elseif is_street_sc[lscy * sub_cw + lscx] and all_claimed[ci] then
-                tile = dt_sci[sci] and "downtown_road" or "road"
+            if art_sci[sci] then
+                -- Sub-cell-level check: only the actual road-path sub-cells are typed
+                -- as highway/arterial. Sub-cells in the same world cell that the path
+                -- did NOT touch remain as plot, so buildings can be placed beside roads.
+                if self.highway_map and self.highway_map[ci] then
+                    tile = "highway"
+                else
+                    tile = "arterial"
+                end
             elseif all_claimed[ci] then
+                -- Roads are lines between sub-cells, not tiles.  All claimed
+                -- city sub-cells (including former road positions) are plots.
                 tile = dt_sci[sci] and "downtown_plot" or "plot"
             else
                 local elev = (self.heightmap and self.heightmap[wcy] and self.heightmap[wcy][wcx]) or 0.5
@@ -400,7 +405,181 @@ function WorldSandboxController:sendToGame()
     new_map.grid            = grid
     new_map.downtown_offset = {x = dt_mn_x, y = dt_mn_y}
     new_map.tile_pixel_size = C.MAP.TILE_SIZE / 3   -- 2/3 world px per sub-cell tile
-    new_map.building_plots  = new_map:getPlotsFromGrid(grid)
+    new_map.building_plots  = {}  -- populated below in road-node block
+
+    -- Build road-node graph.
+    -- Roads are LINES between sub-cells, never tiles.  is_street_sc marks every
+    -- sub-cell that was previously a road tile; those positions are exactly the
+    -- road-line locations (road_v columns + road_h rows).
+    -- road_v_rxs[rx]: vertical road line at column rx  ((gx-1)%3==0 city-street column)
+    -- road_h_rys[ry]: horizontal road line at row ry   ((gy-1)%3==0 city-street row)
+    -- road_nodes[ry][rx]: gap position (rx,ry) is on a road line → vehicle can stop here
+    do
+        local road_v_rxs = {}
+        local road_h_rys = {}
+        local road_nodes = {}
+
+        -- road_v_rxs / road_h_rys: ONLY from city_street_maps[start_idx] (actual visible white city streets).
+        -- Only the starting city's streets are relevant; other cities' cx/cy values fall outside this grid.
+        do
+            local smap = self.city_street_maps and self.city_street_maps[start_idx]
+            local miss_cx, miss_cy = {}, {}
+            if smap then
+                for key in pairs(smap.v or {}) do
+                    local cx   = math.floor(key / 1000)
+                    local lscx = cx * 3 - gscx_off
+                    if lscx >= 0 and lscx < sub_cw then
+                        road_v_rxs[lscx] = true
+                    else
+                        miss_cx[cx] = true
+                    end
+                end
+                for key in pairs(smap.h or {}) do
+                    local cy   = math.floor(key / 1000)
+                    local lscy = cy * 3 - gscy_off
+                    if lscy >= 0 and lscy < sub_ch then
+                        road_h_rys[lscy] = true
+                    else
+                        miss_cy[cy] = true
+                    end
+                end
+            end
+            -- Debug: show any out-of-range cx/cy
+            local miss_cx_list, miss_cy_list = {}, {}
+            for cx in pairs(miss_cx) do table.insert(miss_cx_list, cx) end
+            for cy in pairs(miss_cy) do table.insert(miss_cy_list, cy) end
+            table.sort(miss_cx_list); table.sort(miss_cy_list)
+            if #miss_cx_list > 0 then
+                print(string.format("DEBUG v-streets OUT OF RANGE cx (city_mn_x=%d,city_mx_x=%d,gscx_off=%d,sub_cw=%d): %s",
+                    city_mn_x, city_mx_x, gscx_off, sub_cw, table.concat(miss_cx_list, ",")))
+            end
+            if #miss_cy_list > 0 then
+                print(string.format("DEBUG h-streets OUT OF RANGE cy (city_mn_y=%d,city_mx_y=%d,gscy_off=%d,sub_ch=%d): %s",
+                    city_mn_y, city_mx_y, gscy_off, sub_ch, table.concat(miss_cy_list, ",")))
+            end
+        end
+
+        -- road_nodes: from aug_street_maps[start_idx] only (city streets + arterial/highway boundary roads).
+        -- Used by the pathfinder for navigation — must include all traversable positions.
+        do
+            local amap = aug_street_maps[start_idx]
+            if amap then
+                for key in pairs(amap.v or {}) do
+                    local cx    = math.floor(key / 1000)
+                    local wy    = key % 1000
+                    local lscx  = cx * 3 - gscx_off
+                    local lscy0 = (wy - 1) * 3 - gscy_off
+                    if lscx >= 0 and lscx < sub_cw then
+                        for dlscy = 0, 2 do
+                            local lscy = lscy0 + dlscy
+                            if lscy >= 0 and lscy < sub_ch then
+                                if not road_nodes[lscy] then road_nodes[lscy] = {} end
+                                road_nodes[lscy][lscx] = true
+                            end
+                        end
+                    end
+                end
+                for key in pairs(amap.h or {}) do
+                    local cy    = math.floor(key / 1000)
+                    local wx    = key % 1000
+                    local lscy  = cy * 3 - gscy_off
+                    local lscx0 = (wx - 1) * 3 - gscx_off
+                    if lscy >= 0 and lscy < sub_ch then
+                        for dlscx = 0, 2 do
+                            local lscx = lscx0 + dlscx
+                            if lscx >= 0 and lscx < sub_cw then
+                                if not road_nodes[lscy] then road_nodes[lscy] = {} end
+                                road_nodes[lscy][lscx] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Arterial/highway tiles: add ALL 4 corner road_nodes per sub-cell.
+        -- Arterials are diagonal and not aligned to road_v/h columns.  Adding all 4
+        -- corners guarantees that any plot adjacent to an arterial sub-cell will find
+        -- a road_node in its 4-corner end_candidates check in PathfindingService.
+        for gy = 1, sub_ch do
+            for gx = 1, sub_cw do
+                local t = grid[gy][gx].type
+                if t == "arterial" or t == "highway" or t == "highway_ring" or
+                   t == "highway_ns" or t == "highway_ew" then
+                    for dy2 = 0, 1 do
+                        for dx2 = 0, 1 do
+                            local rx2, ry2 = gx - 1 + dx2, gy - 1 + dy2
+                            if rx2 >= 0 and rx2 < sub_cw and ry2 >= 0 and ry2 < sub_ch then
+                                if not road_nodes[ry2] then road_nodes[ry2] = {} end
+                                road_nodes[ry2][rx2] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        new_map.road_v_rxs = road_v_rxs
+        new_map.road_h_rys = road_h_rys
+        new_map.road_nodes = road_nodes
+
+        -- Diagnostic: print road line counts so we can verify sparsity
+        do
+            local vc, hc, nc = 0, 0, 0
+            for _ in pairs(road_v_rxs) do vc = vc + 1 end
+            for _ in pairs(road_h_rys) do hc = hc + 1 end
+            for _, row in pairs(road_nodes) do for _ in pairs(row) do nc = nc + 1 end end
+            print(string.format("DEBUG road_v_rxs=%d road_h_rys=%d road_nodes=%d sub_cw=%d sub_ch=%d", vc, hc, nc, sub_cw, sub_ch))
+            local svc, shc = 0, 0
+            for idx2 = 1, #self.city_locations do
+                local smap2 = self.city_street_maps and self.city_street_maps[idx2]
+                if smap2 then
+                    for _ in pairs(smap2.v or {}) do svc = svc + 1 end
+                    for _ in pairs(smap2.h or {}) do shc = shc + 1 end
+                end
+            end
+            print(string.format("DEBUG city_street_maps total: v=%d h=%d", svc, shc))
+            -- Print first few road_v_rxs entries to verify positions
+            local vrx_list = {}
+            for rx in pairs(road_v_rxs) do table.insert(vrx_list, rx) end
+            table.sort(vrx_list)
+            print("DEBUG road_v_rxs columns: " .. table.concat(vrx_list, ","))
+            local hry_list = {}
+            for ry in pairs(road_h_rys) do table.insert(hry_list, ry) end
+            table.sort(hry_list)
+            print("DEBUG road_h_rys rows: " .. table.concat(hry_list, ","))
+        end
+
+        -- Building plots: plot/downtown_plot cells beside a city street line OR
+        -- directly adjacent to an arterial/highway tile.
+        local function is_road_tile(x, y)
+            if x < 1 or x > sub_cw or y < 1 or y > sub_ch then return false end
+            local tt = grid[y] and grid[y][x] and grid[y][x].type
+            return tt == "arterial" or tt == "highway" or tt == "highway_ring" or
+                   tt == "highway_ns" or tt == "highway_ew"
+        end
+        local building_plots = {}
+        local seen_b = {}
+        for gy = 1, sub_ch do
+            for gx = 1, sub_cw do
+                local t = grid[gy][gx].type
+                if t == "plot" or t == "downtown_plot" then
+                    if road_v_rxs[gx-1] or road_v_rxs[gx] or
+                       road_h_rys[gy-1] or road_h_rys[gy] or
+                       is_road_tile(gx-1,gy) or is_road_tile(gx+1,gy) or
+                       is_road_tile(gx,gy-1) or is_road_tile(gx,gy+1) then
+                        local key = gy * 10000 + gx
+                        if not seen_b[key] then
+                            seen_b[key] = true
+                            table.insert(building_plots, {x=gx, y=gy})
+                        end
+                    end
+                end
+            end
+        end
+        print(string.format("DEBUG building_plots=%d (total plot/dt_plot cells scanned in %dx%d grid)", #building_plots, sub_cw, sub_ch))
+        new_map.building_plots = building_plots
+    end
 
     -- Helper: build city scope image with a specific view_mode (and optional scope), returns love.graphics.Image
     local function buildCityImg(mode, bx1, bx2, by1, by2, scope)
@@ -583,12 +762,30 @@ function WorldSandboxController:sendToGame()
     local States    = require("models.vehicles.vehicle_states")
     local new_depot = new_map:getRandomDowntownBuildingPlot() or new_map:getRandomBuildingPlot()
     game.entities.depot_plot = new_depot
-    local depot_road = new_depot and new_map:findNearestRoadTile(new_depot)
+    -- Find the road node (gap position) adjacent to the depot.
+    -- Check all 4 corners of the depot sub-cell; prefer road_v column positions
+    -- so the pathfinder can navigate there directly via horizontal movement.
+    local depot_road = nil
+    if new_depot then
+        local gx, gy = new_depot.x, new_depot.y
+        local road_v = new_map.road_v_rxs
+        for _, c in ipairs({{gx-1, gy-1}, {gx, gy-1}, {gx-1, gy}, {gx, gy}}) do
+            local rx, ry = c[1], c[2]
+            if new_map.road_nodes and new_map.road_nodes[ry] and new_map.road_nodes[ry][rx] then
+                if not road_v or road_v[rx] then
+                    depot_road = {x=rx, y=ry}
+                    break
+                elseif not depot_road then
+                    depot_road = {x=rx, y=ry}
+                end
+            end
+        end
+    end
     for _, v in ipairs(game.entities.vehicles) do
         v.cargo = {}; v.trip_queue = {}; v.path = {}
         if new_depot then
             v.depot_plot  = new_depot
-            v.grid_anchor = depot_road or {x = new_depot.x, y = new_depot.y}
+            v.grid_anchor = depot_road or {x = new_depot.x - 1, y = new_depot.y - 1}
             if v.recalculatePixelPosition then v:recalculatePixelPosition(game) end
         end
         if States and States.Idle then v:changeState(States.Idle, game) end
@@ -2401,8 +2598,8 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
     -- The loop is over sub-cells directly; world cells only appear when
     -- looking up world-level data (bounds, color, height).
     -- Streets and arterial boundaries live on the gap pixels between sub-cells.
-    local K_SC   = 3                      -- content pixels per sub-cell
-    local STRIDE = K_SC + 1              -- 4px total per sub-cell (1 gap + 3 content)
+    local K_SC   = 8                      -- content pixels per sub-cell
+    local STRIDE = K_SC + 1              -- 9px total per sub-cell (1 gap + 8 content)
     local sc_min_x = (min_x - 1) * 3    -- global gscx (0-indexed) of first image column
     local sc_min_y = (min_y - 1) * 3
     local sc_bbox_w = bbox_w * 3
@@ -2487,12 +2684,6 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
                         if (curr and not above) or (above and not curr) then is_street = true end
                     end
                 end
-
-                -- Debug: tint sub-cells by gscx%3 so the 3 sub-cells per world cell
-                -- are visually distinct (red / green / blue).
-                local dbg_tints = {{1.25, 0.75, 0.75}, {0.75, 1.25, 0.75}, {0.75, 0.75, 1.25}}
-                local tint = dbg_tints[(gscx % 3) + 1]
-                c = {math.min(1, c[1]*tint[1]), math.min(1, c[2]*tint[2]), math.min(1, c[3]*tint[3])}
 
                 local r, g, b
                 if is_street then

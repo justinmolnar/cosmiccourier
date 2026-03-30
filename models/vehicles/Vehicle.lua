@@ -16,13 +16,21 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
     instance.operational_map_key = operational_map_key or "city"
     local home_map = game.maps[instance.operational_map_key]
 
-    instance.px, instance.py = home_map:getPixelCoords(depot_plot.x, depot_plot.y)
-    
     instance.trip_queue = {}
     instance.cargo = {}
     instance.path = {}
-    
-    instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
+
+    if home_map and home_map.road_v_rxs then
+        -- Road-node map: grid_anchor is road-node coords (rx = gx-1, ry = gy-1)
+        local tps = home_map.tile_pixel_size or home_map.C.MAP.TILE_SIZE
+        local rx, ry = depot_plot.x - 1, depot_plot.y - 1
+        instance.grid_anchor = {x = rx, y = ry}
+        instance.px = rx * tps
+        instance.py = ry * tps
+    else
+        instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
+        instance.px, instance.py = home_map:getPixelCoords(depot_plot.x, depot_plot.y)
+    end
     
     instance.state = nil
     instance:changeState(States.Idle, game)
@@ -49,10 +57,17 @@ function Vehicle:canTravelTo(destination)
 end
 
 function Vehicle:recalculatePixelPosition(game)
-    -- This function now uses the vehicle's operational_map_key to calculate its position.
     local home_map = game.maps[self.operational_map_key]
     if home_map then
-        self.px, self.py = home_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
+        local tps = home_map.tile_pixel_size or home_map.C.MAP.TILE_SIZE
+        if home_map.road_v_rxs then
+            -- Road-node map: grid_anchor holds road-node coords (rx, ry).
+            -- Pixel position is simply rx*tps, ry*tps — no sub-cell arithmetic.
+            self.px = self.grid_anchor.x * tps
+            self.py = self.grid_anchor.y * tps
+        else
+            self.px, self.py = home_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
+        end
     end
 end
 
@@ -305,8 +320,15 @@ function Vehicle:drawDebug(game)
         local pixel_path = {}
         table.insert(pixel_path, self.px)
         table.insert(pixel_path, self.py)
+        local path_map = game.maps[self.operational_map_key]
+        local path_tps = path_map.tile_pixel_size or game.C.MAP.TILE_SIZE
         for _, node in ipairs(self.path) do
-            local px, py = game.maps[self.operational_map_key]:getPixelCoords(node.x, node.y)
+            local px, py
+            if path_map.road_v_rxs then
+                px, py = node.x * path_tps, node.y * path_tps
+            else
+                px, py = path_map:getPixelCoords(node.x, node.y)
+            end
             table.insert(pixel_path, px)
             table.insert(pixel_path, py)
         end
