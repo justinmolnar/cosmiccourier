@@ -735,9 +735,9 @@ function WorldSandboxController:sendToGame()
             --   West  → (rx-1,ry): zone_seg_h[ry][rx]   (gap in zone col rx)
             local zone_seg_v = {}
             for gy = 1, sub_ch do
-                for rx = 1, sub_cw - 1 do       -- rx >= 1: left cell gx=rx exists (1-indexed)
-                    local z1 = zg[gy][rx]         -- zone col rx (1-indexed)
-                    local z2 = zg[gy][rx + 1]     -- zone col rx+1
+                for rx = 1, sub_cw - 1 do
+                    local z1 = zg[gy][rx]
+                    local z2 = zg[gy][rx + 1]
                     if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
                         if not zone_seg_v[gy] then zone_seg_v[gy] = {} end
                         zone_seg_v[gy][rx] = true
@@ -745,10 +745,10 @@ function WorldSandboxController:sendToGame()
                 end
             end
             local zone_seg_h = {}
-            for ry = 1, sub_ch - 1 do            -- ry >= 1: top row gx=ry exists (1-indexed)
+            for ry = 1, sub_ch - 1 do
                 for gx = 1, sub_cw do
-                    local z1 = zg[ry][gx]         -- zone row ry (1-indexed)
-                    local z2 = zg[ry + 1][gx]     -- zone row ry+1
+                    local z1 = zg[ry][gx]
+                    local z2 = zg[ry + 1][gx]
                     if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
                         if not zone_seg_h[ry] then zone_seg_h[ry] = {} end
                         zone_seg_h[ry][gx] = true
@@ -874,23 +874,36 @@ function WorldSandboxController:sendToGame()
                 --   West  (rx2=rx1-1): zone_seg_h[ry1][rx1]    → zg[ry1][rx1]   vs zg[ry1+1][rx1]
                 --   South (ry2=ry1+1): zone_seg_v[ry1+1][rx1]  → zg[ry1+1][rx1] vs zg[ry1+1][rx1+1]
                 --   North (ry2=ry1-1): zone_seg_v[ry1][rx1]    → zg[ry1][rx1]   vs zg[ry1][rx1+1]
+                local function tileIsPlot(gx, gy)
+                    local t = grid[gy] and grid[gy][gx] and grid[gy][gx].type
+                    return t == "plot" or t == "downtown_plot"
+                end
+
                 local function addSeg(rx1, ry1, rx2, ry2)
-                    if rx2 == rx1 + 1 then          -- east
-                        if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
-                        zone_seg_h[ry1][rx1 + 1] = true
-                        makeVisible(ry1, rx1 + 1, ry1 + 1, rx1 + 1)
-                    elseif rx2 == rx1 - 1 then      -- west
-                        if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
-                        zone_seg_h[ry1][rx1] = true
-                        makeVisible(ry1, rx1, ry1 + 1, rx1)
-                    elseif ry2 == ry1 + 1 then      -- south
-                        if not zone_seg_v[ry1 + 1] then zone_seg_v[ry1 + 1] = {} end
-                        zone_seg_v[ry1 + 1][rx1] = true
-                        makeVisible(ry1 + 1, rx1, ry1 + 1, rx1 + 1)
-                    elseif ry2 == ry1 - 1 then      -- north
-                        if not zone_seg_v[ry1] then zone_seg_v[ry1] = {} end
-                        zone_seg_v[ry1][rx1] = true
-                        makeVisible(ry1, rx1, ry1, rx1 + 1)
+                    if rx2 == rx1 + 1 then          -- east: zone_seg_h[ry1][rx1+1], cells (ry1,rx1+1)/(ry1+1,rx1+1)
+                        if tileIsPlot(rx1 + 1, ry1) and tileIsPlot(rx1 + 1, ry1 + 1) then
+                            if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
+                            zone_seg_h[ry1][rx1 + 1] = true
+                            makeVisible(ry1, rx1 + 1, ry1 + 1, rx1 + 1)
+                        end
+                    elseif rx2 == rx1 - 1 then      -- west: zone_seg_h[ry1][rx1], cells (ry1,rx1)/(ry1+1,rx1)
+                        if tileIsPlot(rx1, ry1) and tileIsPlot(rx1, ry1 + 1) then
+                            if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
+                            zone_seg_h[ry1][rx1] = true
+                            makeVisible(ry1, rx1, ry1 + 1, rx1)
+                        end
+                    elseif ry2 == ry1 + 1 then      -- south: zone_seg_v[ry1+1][rx1], cells (ry1+1,rx1)/(ry1+1,rx1+1)
+                        if tileIsPlot(rx1, ry1 + 1) and tileIsPlot(rx1 + 1, ry1 + 1) then
+                            if not zone_seg_v[ry1 + 1] then zone_seg_v[ry1 + 1] = {} end
+                            zone_seg_v[ry1 + 1][rx1] = true
+                            makeVisible(ry1 + 1, rx1, ry1 + 1, rx1 + 1)
+                        end
+                    elseif ry2 == ry1 - 1 then      -- north: zone_seg_v[ry1][rx1], cells (ry1,rx1)/(ry1,rx1+1)
+                        if tileIsPlot(rx1, ry1) and tileIsPlot(rx1 + 1, ry1) then
+                            if not zone_seg_v[ry1] then zone_seg_v[ry1] = {} end
+                            zone_seg_v[ry1][rx1] = true
+                            makeVisible(ry1, rx1, ry1, rx1 + 1)
+                        end
                     end
                     if not new_nodes[ry1] then new_nodes[ry1] = {} end; new_nodes[ry1][rx1] = true
                     if not new_nodes[ry2] then new_nodes[ry2] = {} end; new_nodes[ry2][rx2] = true
@@ -931,6 +944,25 @@ function WorldSandboxController:sendToGame()
             new_map.road_nodes  = new_nodes
             new_map.zone_seg_v  = zone_seg_v
             new_map.zone_seg_h  = zone_seg_h
+
+            -- Build tile_nodes so the pathfinder can navigate arterial/highway tiles
+            -- directly (bridging between corner nodes and tile-centre nodes).
+            -- Without this, vehicles can only use zone-boundary streets and cannot
+            -- cross arterials, forcing huge detours around them.
+            local tile_nodes_tbl = {}
+            for tgy = 1, sub_ch do
+                for tgx = 1, sub_cw do
+                    local tt = grid[tgy][tgx].type
+                    if tt == "arterial" or tt == "highway" or
+                       tt == "highway_ring" or tt == "highway_ns" or tt == "highway_ew" then
+                        local tty = tgy - 1
+                        local ttx = tgx - 1
+                        if not tile_nodes_tbl[tty] then tile_nodes_tbl[tty] = {} end
+                        tile_nodes_tbl[tty][ttx] = true
+                    end
+                end
+            end
+            new_map.tile_nodes = tile_nodes_tbl
         end
     end
 

@@ -50,6 +50,16 @@ function InputController:keypressed(key)
         print("DEBUG: hide roads " .. (self.game.debug_hide_roads and "ON" or "OFF"))
         return
     end
+    if key == "m" then
+        self.game.debug_smooth_roads_merged = not (self.game.debug_smooth_roads_merged or false)
+        print("DEBUG: merged street overlay " .. (self.game.debug_smooth_roads_merged and "ON" or "OFF"))
+        return
+    end
+    if key == "j" then
+        self.game.debug_smooth_roads_like = not (self.game.debug_smooth_roads_like or false)
+        print("DEBUG: streets-like-big-roads overlay " .. (self.game.debug_smooth_roads_like and "ON" or "OFF"))
+        return
+    end
     if key == "o" then
         self.game.overlay_only_mode = not (self.game.overlay_only_mode or false)
         print("Overlay-only mode " .. (self.game.overlay_only_mode and "ON" or "OFF"))

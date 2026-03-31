@@ -67,6 +67,10 @@ function love.load()
         game_view = nil,
         ui_view = nil,
         show_districts = true,
+        -- Default overlays: hide road grid, show arterial smooth + J street overlay
+        debug_hide_roads = true,
+        debug_smooth_roads = true,
+        debug_smooth_roads_like = true,
         -- NEW: Storing paths from R and Y keys separately
         arterial_control_paths = {},
         smooth_highway_overlay_paths = {}
