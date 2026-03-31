@@ -3040,8 +3040,8 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
                 local zg_ox   = zg_orig and zg_orig.x or sc_min_x
                 local zg_oy   = zg_orig and zg_orig.y or sc_min_y
                 if zg and is_gap then
-                    local lscx = gscx - zg_ox + 1  -- 1-indexed WFC sub-cell x
-                    local lscy = gscy - zg_oy + 1  -- 1-indexed WFC sub-cell y
+                    local lscx = gscx - zg_ox + 1
+                    local lscy = gscy - zg_oy + 1
                     if ix == 0 and lscx > 1 then
                         local z1 = zg[lscy] and zg[lscy][lscx-1]
                         local z2 = zg[lscy] and zg[lscy][lscx]
@@ -3085,8 +3085,6 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
                 local r, g, b
                 if is_street then
                     r, g, b = 0.88, 0.86, 0.80
-                elseif is_gap then
-                    r, g, b = 0.08, 0.08, 0.10
                 else
                     r, g, b = c[1], c[2], c[3]
                 end

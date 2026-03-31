@@ -40,6 +40,21 @@ function InputController:keypressed(key)
         print("DEBUG: road segments overlay " .. (self.game.debug_road_segments and "ON" or "OFF"))
         return
     end
+    if key == "v" then
+        self.game.debug_smooth_roads = not (self.game.debug_smooth_roads or false)
+        print("DEBUG: smooth road overlay " .. (self.game.debug_smooth_roads and "ON" or "OFF"))
+        return
+    end
+    if key == "n" then
+        self.game.debug_hide_roads = not (self.game.debug_hide_roads or false)
+        print("DEBUG: hide roads " .. (self.game.debug_hide_roads and "ON" or "OFF"))
+        return
+    end
+    if key == "o" then
+        self.game.overlay_only_mode = not (self.game.overlay_only_mode or false)
+        print("Overlay-only mode " .. (self.game.overlay_only_mode and "ON" or "OFF"))
+        return
+    end
 
     -- Force-enable autodispatch (debug cheat)
     if key == "a" then
