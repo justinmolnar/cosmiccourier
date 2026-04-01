@@ -10,6 +10,26 @@ function UpgradeSystem:new(game_state, constants)
     return instance
 end
 
+-- Returns a table keyed by node id whose value is true for every node
+-- the player can currently see (purchased or all prerequisites met).
+function UpgradeSystem:getDisplayableNodes(tree_data)
+    local visible = {}
+    for _, node_data in ipairs(tree_data.tree) do
+        local is_purchased = (self.state.upgrades_purchased[node_data.id] or 0) > 0
+        local prereqs_met = true
+        for _, prereq_id in ipairs(node_data.prerequisites) do
+            if (self.state.upgrades_purchased[prereq_id] or 0) == 0 then
+                prereqs_met = false
+                break
+            end
+        end
+        if is_purchased or prereqs_met then
+            visible[node_data.id] = true
+        end
+    end
+    return visible
+end
+
 function UpgradeSystem:isUpgradeAvailable(upgradeId)
     local upgrade = self.upgrades_data.AllUpgrades[upgradeId]
     if not upgrade then return false end

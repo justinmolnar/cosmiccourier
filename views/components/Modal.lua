@@ -1,6 +1,8 @@
 -- ui/modal.lua
 -- Defines a modal window that can display and interact with a pannable tech tree.
 
+local UpgradeModalViewModel = require("views.UpgradeModalViewModel")
+
 local Modal = {}
 Modal.__index = Modal
 
@@ -89,20 +91,7 @@ function Modal:update(dt, game)
     end
 
     -- Update visible nodes based on game state
-    self.visible_nodes = {}
-    for _, node_data in ipairs(self.tree_data.tree) do
-        local is_purchased = (game.state.upgrades_purchased[node_data.id] or 0) > 0
-        local prereqs_met = true
-        for _, prereq_id in ipairs(node_data.prerequisites) do
-            if (game.state.upgrades_purchased[prereq_id] or 0) == 0 then
-                prereqs_met = false
-                break
-            end
-        end
-        if is_purchased or prereqs_met then
-            self.visible_nodes[node_data.id] = true
-        end
-    end
+    self.visible_nodes = game.state.upgrade_system:getDisplayableNodes(self.tree_data)
 
     -- Update hovered node
     self.hovered_node_id = nil
@@ -161,7 +150,6 @@ end
 function Modal:_drawTree(game)
     if not self.tree_data then return end
 
-    local UpgradeModalViewModel = require("views.UpgradeModalViewModel")
     local display = UpgradeModalViewModel.buildDisplayState(self.tree_data, self.visible_nodes, game.state)
 
     -- 1. Draw connecting lines
@@ -248,7 +236,7 @@ function Modal:_drawTooltip(game)
 
     local mx, my = love.mouse.getPosition()
     local purchased_level = game.state.upgrades_purchased[node_data.id] or 0
-    local cost = node_data.cost * (node_data.cost_multiplier ^ purchased_level)
+    local cost = UpgradeModalViewModel.getNodeCost(node_data, purchased_level)
     
     local text_lines = { node_data.name .. string.format(" (%d/%d)", purchased_level, node_data.max_level), node_data.description }
     if purchased_level < node_data.max_level then table.insert(text_lines, "Cost: $" .. math.floor(cost)) end
@@ -288,7 +276,7 @@ function Modal:handle_mouse_down(x, y, game)
         local node_data = game.state.Upgrades.AllUpgrades[self.hovered_node_id]
         local purchased_level = game.state.upgrades_purchased[self.hovered_node_id] or 0
         local is_available = game.state:isUpgradeAvailable(self.hovered_node_id)
-        local cost = node_data.cost * (node_data.cost_multiplier ^ purchased_level)
+        local cost = UpgradeModalViewModel.getNodeCost(node_data, purchased_level)
         if is_available and purchased_level < node_data.max_level and game.state.money >= cost then
             game.EventBus:publish("ui_purchase_upgrade_clicked", self.hovered_node_id)
         end

@@ -1,6 +1,8 @@
 -- ui/zoom_controls.lua
 -- Google Maps style zoom buttons with unlock progression
 
+local ZoomService = require("services.ZoomService")
+
 local ZoomControls = {}
 ZoomControls.__index = ZoomControls
 
@@ -91,13 +93,8 @@ function ZoomControls:draw(game)
     local transition_alpha = active_map.transition_state.active and 0.4 or 1.0
     
     -- === Zoom Out Button ('+') LOGIC ===
-    local can_afford_license = game.state.money >= C.ZOOM.METRO_LICENSE_COST
     local is_hovered_out = self.hovered_button == "zoom_out"
-
-    local S = C.MAP.SCALES
-    -- Metro license gates downtown→city. All other zoom-out steps are free.
-    local zoom_out_enabled = (current_scale == S.DOWNTOWN and (game.state.metro_license_unlocked or can_afford_license)) or
-                             current_scale == S.CITY or current_scale == S.REGION or current_scale == S.CONTINENT
+    local zoom_out_enabled = ZoomService.canZoomOut(current_scale, game.state, C)
 
     love.graphics.setColor(0, 0, 0, 0.7 * transition_alpha)
     love.graphics.rectangle("fill", self.zoom_out_button.x, self.zoom_out_button.y, self.zoom_out_button.w, self.zoom_out_button.h)
@@ -113,8 +110,7 @@ function ZoomControls:draw(game)
     love.graphics.printf("+", self.zoom_out_button.x, self.zoom_out_button.y + 7, self.zoom_out_button.w, "center")
 
     -- === Zoom In Button ('-') LOGIC ===
-    local zoom_in_enabled = current_scale == S.CITY or current_scale == S.REGION or
-                            current_scale == S.CONTINENT or current_scale == S.WORLD
+    local zoom_in_enabled = ZoomService.canZoomIn(current_scale, game.state, C)
     local is_hovered_in = self.hovered_button == "zoom_in"
 
     love.graphics.setColor(0, 0, 0, 0.7 * transition_alpha)
