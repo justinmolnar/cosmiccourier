@@ -3,23 +3,7 @@
 
 local States = {}
 
---------------------------------------------------------------------------------
--- Chaikin on a flat {x1,y1,x2,y2,...} pixel array, matching buildStreetPathsLike.
---------------------------------------------------------------------------------
-local function chaikin_flat(flat, iters)
-    for _ = 1, iters do
-        local n = {flat[1], flat[2]}
-        for i = 1, #flat / 2 - 1 do
-            local x0, y0 = flat[2*i-1], flat[2*i]
-            local x1, y1 = flat[2*i+1], flat[2*i+2]
-            n[#n+1] = 0.75*x0 + 0.25*x1;  n[#n+1] = 0.75*y0 + 0.25*y1
-            n[#n+1] = 0.25*x0 + 0.75*x1;  n[#n+1] = 0.25*y0 + 0.75*y1
-        end
-        n[#n+1] = flat[#flat-1];  n[#n+1] = flat[#flat]
-        flat = n
-    end
-    return flat
-end
+local chaikin_flat = require("lib.path_utils").chaikin
 
 --------------------------------------------------------------------------------
 -- Build a smooth pixel waypoint list that matches the visual road rendering.

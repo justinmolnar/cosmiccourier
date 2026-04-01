@@ -288,9 +288,13 @@ Update callers:
 
 ---
 
-**Status:** Not started
-**Line count change:** ~+180 new lib/service files / −400 removed inline duplicates (net reduction ~220)
-**Deviation from plan:** —
+**Status:** Complete (commit TBD)
+**Line count change:** +120 new lib/service files / −95 removed inline duplicates (net reduction ~25 — smaller than estimated because most callers were already deleted in Phase 2)
+**Deviation from plan:**
+- Task 3.2 (`lib/rasterize.lua`): all three Bresenham callers (OrganicStreetService, RadialStreetService, and a third) were deleted in Phase 2's dead-code purge. No Bresenham code exists in the codebase. File not created — nothing to absorb.
+- Task 3.1 partial: catmullRom, linearInterpolate, removeDuplicates, fixLightningBolts were all in WfcLabController (deleted Phase 2). Only chaikin and rdp/simplify extracted to `lib/path_utils.lua`.
+- Task 3.5: all six `getDowntownBounds` callers were in the deleted dead-code chain. `CoordinateService.lua` stub created anyway as planned — it is the intended home for Phase 4.1 coordinate work.
+- Task 3.6: `_deepCopyParams` source (MapGenerationService) was deleted in Phase 2. `lib/utils.lua` created anyway for Phase 6.4 use.
 
 ---
 

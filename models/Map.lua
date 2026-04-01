@@ -32,7 +32,8 @@ function Map:isRoad(tile_type)
            tile_type == "highway"
 end
 
-local TilePalette = require("data.tile_palette")
+local TilePalette  = require("data.tile_palette")
+local GridSearch   = require("lib.grid_search")
 local function getTileColor(tile_type, is_in_downtown, C_MAP)
     local entry = TilePalette[tile_type] or TilePalette.default
     local key = is_in_downtown and entry.downtown or entry.city
@@ -43,41 +44,26 @@ function Map:getPlotsFromGrid(grid)
     if not grid or #grid == 0 then return {} end
     local h, w = #grid, #grid[1]
     local plots = {}
-    
+
     local MIN_NETWORK_SIZE = require("data.GameplayConfig").MIN_NETWORK_SIZE
-    local visited_roads = {}
+    local road_visited = {}
     local valid_road_tiles = {}
 
-    local function inBounds(x, y)
-        return x >= 1 and x <= w and y >= 1 and y <= h
-    end
+    local function inBounds(x, y) return x >= 1 and x <= w and y >= 1 and y <= h end
 
     for y = 1, h do
         for x = 1, w do
             local key = y .. "," .. x
-            if self:isRoad(grid[y][x].type) and not visited_roads[key] then
-                local network_tiles = {}
-                local q = {{x=x, y=y}}
-                visited_roads[key] = true
-                
-                while #q > 0 do
-                    local current = table.remove(q, 1)
-                    table.insert(network_tiles, current)
-                    
-                    local neighbors = {{current.x, current.y - 1}, {current.x, current.y + 1}, {current.x - 1, current.y}, {current.x + 1, current.y}}
-                    for _, pos in ipairs(neighbors) do
-                        local nx, ny = pos[1], pos[2]
-                        local nkey = ny .. "," .. nx
-                        if inBounds(nx, ny) and self:isRoad(grid[ny][nx].type) and not visited_roads[nkey] then
-                            visited_roads[nkey] = true
-                            table.insert(q, {x=nx, y=ny})
-                        end
-                    end
+            if self:isRoad(grid[y][x].type) and not road_visited[key] then
+                local network = GridSearch.floodFill(grid, x, y, function(nx, ny)
+                    return self:isRoad(grid[ny][nx].type)
+                end)
+                for _, t in ipairs(network) do
+                    road_visited[t.y .. "," .. t.x] = true
                 end
-
-                if #network_tiles >= MIN_NETWORK_SIZE then
-                    for _, tile in ipairs(network_tiles) do
-                        table.insert(valid_road_tiles, tile)
+                if #network >= MIN_NETWORK_SIZE then
+                    for _, t in ipairs(network) do
+                        valid_road_tiles[#valid_road_tiles+1] = t
                     end
                 end
             end
@@ -86,17 +72,16 @@ function Map:getPlotsFromGrid(grid)
 
     local visited_plots = {}
     for _, road_tile in ipairs(valid_road_tiles) do
-        local neighbors = {{road_tile.x, road_tile.y - 1}, {road_tile.x, road_tile.y + 1}, {road_tile.x - 1, road_tile.y}, {road_tile.x + 1, road_tile.y}}
-        for _, plot_pos in ipairs(neighbors) do
-            local px, py = plot_pos[1], plot_pos[2]
+        for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+            local px, py = road_tile.x+d[1], road_tile.y+d[2]
             local pkey = py .. "," .. px
-            if inBounds(px, py) and (grid[py][px].type == 'plot' or grid[py][px].type == 'downtown_plot') and not visited_plots[pkey] then
-                table.insert(plots, {x=px, y=py})
+            if inBounds(px, py) and (grid[py][px].type == "plot" or grid[py][px].type == "downtown_plot") and not visited_plots[pkey] then
+                plots[#plots+1] = {x=px, y=py}
                 visited_plots[pkey] = true
             end
         end
     end
-    
+
     return plots
 end
 
