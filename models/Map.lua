@@ -96,21 +96,16 @@ end
 function Map:setScale(new_scale, game)
     if not self.C.MAP.SCALE_NAMES[new_scale] then return false end
 
-    game.active_map_key = "city"
     game.state.current_map_scale = new_scale
 
-    -- Apply precomputed world-pixel camera params (mirrors F8 _fitToArea)
-    if game.world_gen_cam_params and game.world_gen_cam_params[new_scale] then
-        local p = game.world_gen_cam_params[new_scale]
-        game.camera.x     = p.x
-        game.camera.y     = p.y
-        game.camera.scale = p.scale
-    else
-        game.camera.x = 0; game.camera.y = 0; game.camera.scale = 1
-    end
-
     if game.EventBus then
-        game.EventBus:publish("map_scale_changed")
+        local cam
+        if game.world_gen_cam_params and game.world_gen_cam_params[new_scale] then
+            cam = game.world_gen_cam_params[new_scale]
+        else
+            cam = { x = 0, y = 0, scale = 1 }
+        end
+        game.EventBus:publish("map_scale_changed", { camera = cam, active_map_key = "city" })
     end
 
     print("Set camera view to", self.C.MAP.SCALE_NAMES[new_scale] or "Unknown Scale")

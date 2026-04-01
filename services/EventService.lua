@@ -120,6 +120,18 @@ function EventService.setupZoomEvents(state, game)
         local next = MapScales.getNext(game.state.current_map_scale, "in")
         if next then game.maps.city:setScale(next, game) end
     end)
+
+    -- Apply camera position and active map key when a scale change is committed.
+    -- Payload is only present when setScale() fires the event; transition-complete
+    -- fires without payload (camera is already in place) so we nil-guard.
+    game.EventBus:subscribe("map_scale_changed", function(data)
+        if data then
+            game.active_map_key = data.active_map_key
+            game.camera.x       = data.camera.x
+            game.camera.y       = data.camera.y
+            game.camera.scale   = data.camera.scale
+        end
+    end)
 end
 
 return EventService

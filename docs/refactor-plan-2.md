@@ -166,7 +166,11 @@ Task 2.3: `applyStatToGameValues` handles multiple stat types beyond speed (capa
 
 ---
 
-**Status:** —
+**Status:** Complete
+**Deviation from plan:** None.
+**Notes:**
+- `Map:update()` also publishes `map_scale_changed` on transition complete with no payload. The new EventService subscriber nil-guards on `data` so transition-complete fires are correctly ignored by the camera handler.
+- `game.active_map_key` is always `"city"` across the entire codebase — the assignment in `setScale()` was redundant. Moved to the event subscriber as planned; behaviour is identical.
 
 ---
 

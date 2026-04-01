@@ -1,11 +1,14 @@
 -- models/UpgradeSystem.lua
+local VehicleUpgradeService = require("services.VehicleUpgradeService")
+
 local UpgradeSystem = {}
 UpgradeSystem.__index = UpgradeSystem
 
-function UpgradeSystem:new(game_state, constants)
+function UpgradeSystem:new(game_state, constants, game)
     local instance = setmetatable({}, UpgradeSystem)
     instance.state = game_state
     instance.C = constants
+    instance.game = game
     instance.upgrades_data = require("data.upgrades")
     return instance
 end
@@ -171,8 +174,7 @@ end
 
 function UpgradeSystem:applyStatToGameValues(stat_name, stat_value)
     -- This function applies upgrade stats to the actual values used by the game
-    -- Get game reference from global (since it's stored as Game in main.lua)
-    local game = Game
+    local game = self.game
     if not game then
         print("ERROR: Cannot access game instance for upgrade application")
         return
@@ -181,20 +183,10 @@ function UpgradeSystem:applyStatToGameValues(stat_name, stat_value)
     if stat_name == "bike_speed" then
         -- stat_value is the accumulated multiplier; push it to all live bikes.
         -- New bikes pick it up in Vehicle:new() from state.upgrades.bike_speed.
-        for _, vehicle in ipairs(game.entities.vehicles) do
-            if vehicle.type == "bike" then
-                vehicle.speed_modifier = stat_value
-                print(string.format("Updated bike %d speed_modifier to %.2f", vehicle.id, stat_value))
-            end
-        end
+        VehicleUpgradeService.applySpeedModifier(game.entities.vehicles, "bike", stat_value)
 
     elseif stat_name == "truck_speed" then
-        for _, vehicle in ipairs(game.entities.vehicles) do
-            if vehicle.type == "truck" then
-                vehicle.speed_modifier = stat_value
-                print(string.format("Updated truck %d speed_modifier to %.2f", vehicle.id, stat_value))
-            end
-        end
+        VehicleUpgradeService.applySpeedModifier(game.entities.vehicles, "truck", stat_value)
         
     elseif stat_name == "vehicle_capacity" then
         -- This one is already used correctly by the game

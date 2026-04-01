@@ -38,7 +38,7 @@ function State:new(C, game)
     instance.metro_license_unlocked = false
 
     -- Create upgrade system
-    instance.upgrade_system = require("models.UpgradeSystem"):new(instance, C)
+    instance.upgrade_system = require("models.UpgradeSystem"):new(instance, C, game)
 
     -- Delegate event setup to EventService
     local EventService = require("services.EventService")
