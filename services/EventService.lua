@@ -1,4 +1,5 @@
 -- services/EventService.lua
+local MapScales = require("data.map_scales")
 local EventService = {}
 
 function EventService.setupGameEvents(state, game)
@@ -121,35 +122,13 @@ function EventService.setupZoomEvents(state, game)
     end)
 
     game.EventBus:subscribe("ui_zoom_out_clicked", function()
-        local current_scale = game.state.current_map_scale
-        local city_map = game.maps.city
-        local S = game.C.MAP.SCALES
-
-        if current_scale == S.DOWNTOWN then
-            city_map:setScale(S.CITY)
-        elseif current_scale == S.CITY then
-            city_map:setScale(S.REGION)
-        elseif current_scale == S.REGION then
-            city_map:setScale(S.CONTINENT)
-        elseif current_scale == S.CONTINENT then
-            city_map:setScale(S.WORLD)
-        end
+        local next = MapScales.getNext(game.state.current_map_scale, "out")
+        if next then game.maps.city:setScale(next) end
     end)
 
     game.EventBus:subscribe("ui_zoom_in_clicked", function()
-        local current_scale = game.state.current_map_scale
-        local city_map = game.maps.city
-        local S = game.C.MAP.SCALES
-
-        if current_scale == S.WORLD then
-            city_map:setScale(S.CONTINENT)
-        elseif current_scale == S.CONTINENT then
-            city_map:setScale(S.REGION)
-        elseif current_scale == S.REGION then
-            city_map:setScale(S.CITY)
-        elseif current_scale == S.CITY then
-            city_map:setScale(S.DOWNTOWN)
-        end
+        local next = MapScales.getNext(game.state.current_map_scale, "in")
+        if next then game.maps.city:setScale(next) end
     end)
 end
 

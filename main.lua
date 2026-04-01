@@ -69,16 +69,10 @@ function love.load()
         debug_hide_roads = true,
         debug_smooth_roads = true,
         debug_smooth_roads_like = true,
-        arterial_control_paths = {},
-        smooth_highway_overlay_paths = {}
     }
 
     local SaveService = require("services.SaveService")
     local save_data = SaveService.loadGame()
-
-    local WfcLabController = require("controllers.WfcLabController")
-    Game.wfc_lab_controller = WfcLabController:new(Game)
-    Game.wfc_lab_hotkeys = Game.wfc_lab_controller:getHandledKeys()
 
     Game.state = require("models.GameState"):new(C, Game)
 
@@ -171,10 +165,6 @@ function love.draw()
     Game.ui_view:draw()
     Game.game_view:draw()
 
-    if Game.debug_lab_grid then
-        Game.game_view:drawLabGrid()
-    end
-
     Game.zoom_controls:draw(Game)
     Game.ui_manager.modal_manager:draw(Game)
 end
@@ -187,11 +177,6 @@ function love.keypressed(key)
 
     if Game.world_sandbox_controller:isActive() then
         Game.world_sandbox_controller:handle_keypressed(key)
-        return
-    end
-
-    if Game.wfc_lab_hotkeys[key] then
-        Game.wfc_lab_controller:keypressed(key)
         return
     end
 

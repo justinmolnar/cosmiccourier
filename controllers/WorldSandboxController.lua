@@ -414,7 +414,7 @@ function WorldSandboxController:sendToGame()
     -- WFC runs here (before road-nodes) so zone-type boundaries can drive streets.
     do
         local WFC = require("lib.wfc")
-        local ZT  = require("data.zone_types")
+        local ZT  = require("data.zones")
 
         -- Assign random district types for this city's pois (once per world gen)
         if not self.city_district_types then self.city_district_types = {} end
@@ -1156,9 +1156,6 @@ function WorldSandboxController:sendToGame()
     -- Stamp onto game
     game.maps.city      = new_map
     game.active_map_key = "city"
-    game.lab_grid       = nil
-    game.wfc_final_grid = nil
-    game.lab_zone_grid  = nil
 
     -- Reset vehicles
     local States    = require("models.vehicles.vehicle_states")
@@ -2803,7 +2800,7 @@ function WorldSandboxController:_gen_streets_for_city(city_idx)
     local w  = self.world_w
     local h  = self.world_h
     local sw = w * 3
-    local ZT = require("data.zone_types")
+    local ZT = require("data.zones")
 
     local function sci_of(gscx, gscy) return gscy * sw + gscx + 1 end
     local function get_poi(wx, wy)

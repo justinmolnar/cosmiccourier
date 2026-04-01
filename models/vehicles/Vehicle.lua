@@ -10,6 +10,7 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
     instance.id = id
     instance.type = vehicleType or "vehicle"
     instance.properties = properties or {}
+    instance.icon = (properties or {}).icon or "❓"
     instance.depot_plot = depot_plot
     
     -- Vehicle now knows its operational map.
@@ -46,8 +47,7 @@ function Vehicle:getMovementCostFor(tileType)
 end
 
 function Vehicle:getIcon()
-    -- Default behavior: return a generic icon
-    return "❓"
+    return self.icon or "❓"
 end
 
 function Vehicle:canTravelTo(destination)
@@ -99,16 +99,12 @@ end
 
 function Vehicle:shouldDrawAtCurrentScale(game)
     local current_scale = game.state.current_map_scale
-    local C_MAP = game.C.MAP
-    
-    if self.type == "bike" then
-        -- Bikes show at downtown and city scale
-        return current_scale == C_MAP.SCALES.DOWNTOWN or current_scale == C_MAP.SCALES.CITY
-    elseif self.type == "truck" then
-        -- Trucks show at all scales
-        return true
+    local S = game.C.MAP.SCALES
+    local scale_keys = { [S.DOWNTOWN]="downtown", [S.CITY]="city", [S.REGION]="region", [S.CONTINENT]="continent", [S.WORLD]="world" }
+    local vcfg = game.C.VEHICLES[self.type:upper()]
+    if vcfg then
+        return vcfg.visible_at_scales[scale_keys[current_scale]] == true
     end
-    
     return true
 end
 
@@ -309,8 +305,8 @@ function Vehicle:shouldUseAbstractedSimulation(game)
     local current_scale = game.state.current_map_scale
     local C_MAP = game.C.MAP
 
-    -- Bikes only run in detailed simulation when viewed in downtown
-    if self.type == "bike" and current_scale ~= C_MAP.SCALES.DOWNTOWN then
+    local vcfg = game.C.VEHICLES[self.type:upper()]
+    if vcfg and vcfg.downtown_only_sim and current_scale ~= C_MAP.SCALES.DOWNTOWN then
         return true
     end
 

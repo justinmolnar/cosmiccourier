@@ -1,29 +1,26 @@
--- data/zone_types.lua
+-- data/zones.lua
 -- Zone type definitions for city WFC generation.
 -- Adjacency is fully permissive (no hard constraints) — clustering comes
 -- entirely from per-cell weights derived from district type + biome.
 
-local ZoneTypes = {}
+local Zones = {}
 
-ZoneTypes.STATES = {"residential", "commercial", "industrial", "park", "none"}
+Zones.STATES = {"residential", "commercial", "industrial", "park", "none"}
 
 -- Muted earthy palette — similar tones, subtle hue differences
-ZoneTypes.COLORS = {
+Zones.COLORS = {
     residential = {0.50, 0.64, 0.46},   -- sage green
     commercial  = {0.44, 0.54, 0.66},   -- dusty slate blue
     industrial  = {0.60, 0.55, 0.40},   -- warm khaki
     park        = {0.36, 0.56, 0.40},   -- forest green
     -- "none" → not rendered
 }
-ZoneTypes.COLOR_ALPHA = 0.78
+Zones.COLOR_ALPHA = 0.78
 
--- Adjacency: zones cluster by type.  Each zone can only border itself and park
--- (or none for non-plot edges).  Park is a universal buffer between any zones.
--- Industrial is strict (industrial-only interior) to create dense factory zones.
--- Contradictions at district edges are handled by the fallback (highest weight).
+-- Adjacency: fully permissive — see module comment above.
 local function dirs(t) return {N=t, S=t, E=t, W=t} end
 local all = {residential=true, commercial=true, industrial=true, park=true, none=true}
-ZoneTypes.ADJACENCY = {
+Zones.ADJACENCY = {
     residential = dirs(all),
     commercial  = dirs(all),
     industrial  = dirs(all),
@@ -33,7 +30,7 @@ ZoneTypes.ADJACENCY = {
 
 -- Base weights per district type.
 -- poi 1 is always "downtown"; other pois get a randomly assigned type.
-ZoneTypes.DISTRICT_WEIGHTS = {
+Zones.DISTRICT_WEIGHTS = {
     downtown    = {residential=2, commercial=9, industrial=1, park=3, none=0},
     residential = {residential=9, commercial=2, industrial=1, park=3, none=0},
     commercial  = {residential=3, commercial=9, industrial=2, park=2, none=0},
@@ -41,10 +38,10 @@ ZoneTypes.DISTRICT_WEIGHTS = {
 }
 
 -- Random assignable types for non-downtown district pois
-ZoneTypes.RANDOM_DISTRICT_TYPES = {"residential", "commercial", "industrial"}
+Zones.RANDOM_DISTRICT_TYPES = {"residential", "commercial", "industrial"}
 
 -- Per-biome weight multipliers (applied on top of district base weights)
-ZoneTypes.BIOME_MULTS = {
+Zones.BIOME_MULTS = {
     ["Boreal / Taiga"]     = {park=3.0, industrial=0.5},
     ["Temp. Rainforest"]   = {park=3.0},
     ["Temp. Forest"]       = {park=2.0},
@@ -68,4 +65,15 @@ ZoneTypes.BIOME_MULTS = {
     -- River/lake handled separately in generator (bd.is_river / bd.is_lake)
 }
 
-return ZoneTypes
+-- Returns true if zone_type matches the given category string.
+-- Categories: "residential", "commercial", "industrial", "park"
+function Zones.isType(zone_type, category)
+    return zone_type == category
+end
+
+-- Returns the category of a zone type (same as the type for this 5-zone system).
+function Zones.getCategory(zone_type)
+    return zone_type
+end
+
+return Zones

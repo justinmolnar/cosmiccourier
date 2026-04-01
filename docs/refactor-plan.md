@@ -70,9 +70,12 @@ Task 1.4 requires judgment — read the file before deciding. Task 1.6 requires 
 
 ---
 
-**Status:** Not started
-**Line count change:** ~+20 / −120 (net reduction from dead code and replaced parsers)
-**Deviation from plan:** —
+**Status:** Complete (commit `3b7d34f`)
+**Line count change:** +239 / −213 (lib/json.lua adds lines; SaveService/GameConfig parsers removed)
+**Deviation from plan:**
+- Tasks 1.1 and 1.7 were implemented via a new `lib/json.lua` (pure-Lua encoder/decoder) rather than an external library like dkjson. Both files now require the same module as intended.
+- Task 1.6: deleted `_createInterCityTrip` rather than wiring it up. The function body itself stated inter-city is disabled until the region map is implemented; it was genuinely dead code with no call sites.
+- Two unplanned bug fixes were added to this commit after testing revealed regressions: `vehicle_states.lua` (endpoint-preserving Chaikin clustered waypoints at every junction causing vehicles to stall at intersections) and `main.lua` (circular font fallback — `uiFontSmall` listed itself — causing tofu icons). Fixed under rule 4; combined into the Phase 1 commit since they were blocking validation of the planned tasks.
 
 ---
 
@@ -173,9 +176,14 @@ Phase 2 is the highest-leverage phase. Every subsequent phase is easier because 
 
 ---
 
-**Status:** Not started
-**Line count change:** ~+250 new data files / −400 scattered inline definitions (net reduction)
-**Deviation from plan:** —
+**Status:** Complete (commit TBD — not yet committed)
+**Line count change:** +340 new data files / −520 scattered inline definitions and dead code (net reduction ~180)
+**Deviation from plan:**
+- Pre-task dead-code purge (not in plan): deleted entire old generation chain before starting data extraction — `MapGenerationService`, `NewCityGenService`, `WFCZoningService`, `BlockSubdivisionService`, `ArterialRoadService`, `GrowthStreetService`, `RadialStreetService`, `OrganicStreetService`, `WfcLabController`. All were unreachable from the F8 world gen flow. Removed associated lab rendering from `GameView` (~350 lines) and lab wiring from `main.lua`. This eliminated the only callers of the WFC 13-zone system, so task 2.1's plan to update `WFCZoningService` was moot — it was deleted instead.
+- Task 2.1: `data/zones.lua` created from `zone_types.lua` with `getCategory()`/`isType()` helpers added. The plan also called for updating `WFCZoningService` and `BlockSubdivisionService` — both deleted (see above). `data/districts.lua` had no hardcoded zone strings requiring update.
+- Task 2.4: plan called for a new `data/vehicle_types.lua`; instead extended `data/constants.lua` VEHICLES entries with the new fields (`icon`, `needs_downtown_speed_scale`, `visible_at_scales`, `downtown_only_sim`, `can_long_distance`) to avoid duplicating data that already lived there. `Bike.lua`/`Truck.lua` now own zero logic — `getIcon()` overrides removed, base `Vehicle:getIcon()` reads `self.icon` which is set from `properties.icon` in `Vehicle:new()`.
+- Task 2.5: `WorldNoiseService` fully integrated — `biome_color_climate` replaced with a name→color lookup against `data/biomes.lua` via a lazily-built cache. `biome_name_climate` is kept as the classification logic (it is logic, not data). `data/biomes.lua` corrected to match canonical name strings from `biome_name_climate` (fixed "Trop. Forest/Savanna/Swamp" → full names; added missing "Cold Highland" and "Boreal Highland" entries).
+- Task 2.7: `WorldGenConfig` and `GameplayConfig` created with the values reachable in the live codebase. Several plan entries (`BlockSubdivisionService` max recursion depth, `WfcBlockService` weight ladder, `ArterialRoadService` divisors) were in the deleted dead-code chain and could not be extracted.
 
 ---
 

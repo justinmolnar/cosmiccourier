@@ -30,8 +30,4 @@ end
 -- The recalculatePixelPosition and draw methods have been removed from this file.
 -- The correct methods will be inherited from Vehicle.lua.
 
-function Truck:getIcon()
-    return "🚚"
-end
-
 return Truck

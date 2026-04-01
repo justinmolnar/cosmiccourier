@@ -1,5 +1,6 @@
 -- services/TripGenerator.lua with debug logging
 local Trip = require("models.Trip")
+local GameplayConfig = require("data.GameplayConfig")
 
 local TripGenerator = {}
 
@@ -31,7 +32,7 @@ function TripGenerator.generateTrip(client_plot, game)
     elseif not metro_unlocked then
         -- Trucks exist but no metro license: only downtown + city trips (no inter-city)
         local rand = love.math.random()
-        if rand < 0.4 then
+        if rand < GameplayConfig.DOWNTOWN_TRIP_CHANCE then
             return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
         else
             return TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
@@ -39,7 +40,7 @@ function TripGenerator.generateTrip(client_plot, game)
     else
         -- Metro unlocked: inter-city disabled until region map is implemented; use city trips
         local rand = love.math.random()
-        if rand < 0.4 then
+        if rand < GameplayConfig.DOWNTOWN_TRIP_CHANCE then
             return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
         else
             return TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)

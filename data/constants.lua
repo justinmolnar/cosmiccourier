@@ -105,7 +105,18 @@ local C = {
                 road = 10,
                 arterial = 20,  -- bikes avoid arterials but can cross them
                 highway = 50,   -- bikes strongly prefer streets; short crossings still viable
-            }
+            },
+            -- Scale at which speed is normalized (bikes are sized for the downtown grid).
+            -- vehicle_states.lua applies a DOWNTOWN_GRID_WIDTH/64 correction when true.
+            icon = "🚲",
+            needs_downtown_speed_scale = true,
+            -- Scales at which this vehicle renders. Trucks appear everywhere; bikes
+            -- are too small to be meaningful beyond city scale.
+            visible_at_scales = { downtown = true, city = true },
+            -- When true, the vehicle uses abstracted simulation outside downtown.
+            downtown_only_sim = true,
+            -- Whether this vehicle type can carry long-distance (inter-city) trips.
+            can_long_distance = false,
         },
         TRUCK = {
             cost = 1200,
@@ -115,7 +126,12 @@ local C = {
                 road = 10,
                 arterial = 5,
                 highway = 1,
-            }
+            },
+            icon = "🚚",
+            needs_downtown_speed_scale = false,
+            visible_at_scales = { downtown = true, city = true, region = true, continent = true, world = true },
+            downtown_only_sim = false,
+            can_long_distance = true,
         }
     },
 

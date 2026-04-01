@@ -18,7 +18,9 @@
       "Bash(grep -rn \"showGraph\\\\|show_graph\\\\|graph.*debug\\\\|debug.*graph\\\\|drawGraph\\\\|draw_graph\\\\|pathGraph\\\\|path.*graph\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
       "Bash(grep -rn \"key.*g\\\\|key.*G\\\\|g\\\\|''''g''''\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
       "Bash(grep -rn pathfinding_costs 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
-      "Bash(grep -rn \"\\\\.speed\\\\b\\\\|properties\\\\.speed\\\\|estimatePathTravelTime\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)"
+      "Bash(grep -rn \"\\\\.speed\\\\b\\\\|properties\\\\.speed\\\\|estimatePathTravelTime\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
+      "Bash(rm services/MapGenerationService.lua services/NewCityGenService.lua services/WFCZoningService.lua services/BlockSubdivisionService.lua services/ArterialRoadService.lua controllers/WfcLabController.lua services/streets/GrowthStreetService.lua services/streets/RadialStreetService.lua services/streets/OrganicStreetService.lua)",
+      "Bash(rmdir services/streets)"
     ]
   }
 }

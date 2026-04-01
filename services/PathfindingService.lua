@@ -1,4 +1,5 @@
 -- services/PathfindingService.lua
+local RoadCategories = require("data.road_categories")
 local PathfindingService = {}
 
 function PathfindingService.findVehiclePath(vehicle, start_node, end_plot, game)
@@ -40,16 +41,9 @@ function PathfindingService.findVehiclePath(vehicle, start_node, end_plot, game)
             -- For tile-centre nodes this IS the highway tile; for corner nodes it
             -- is the SE neighbour tile, which is a reliable proxy for the road type.
             local tile = path_grid[ry + 1] and path_grid[ry + 1][rx + 1]
-            if tile then
-                local t = tile.type
-                if t == "arterial" then
-                    return vehicle:getMovementCostFor("arterial")
-                elseif t == "highway" then
-                    return vehicle:getMovementCostFor("highway")
-                end
-            end
-            -- City-street corner nodes: tile is a plot (roads are lines, not tiles).
-            return vehicle:getMovementCostFor("road")
+            local category = tile and RoadCategories[tile.type]
+            -- City-street corner nodes: tile is a plot (roads are lines, not tiles) → default "road".
+            return vehicle:getMovementCostFor(category or "road")
         end
 
         local function snapToColumn(rx, ry)

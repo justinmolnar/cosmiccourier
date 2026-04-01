@@ -4,34 +4,7 @@
 local WorldSandboxView = {}
 WorldSandboxView.__index = WorldSandboxView
 
--- Biome legend entries: { label, r, g, b }
-local BIOME_LEGEND = {
-    { "Deep Ocean",        0.04, 0.08, 0.30 },
-    { "Ocean",             0.07, 0.15, 0.45 },
-    { "Beach",             0.76, 0.70, 0.48 },
-    { "Tundra",            0.60, 0.64, 0.52 },
-    { "Boreal / Taiga",    0.22, 0.38, 0.24 },
-    { "Temp. Forest",      0.24, 0.46, 0.18 },
-    { "Temp. Rainforest",  0.18, 0.40, 0.16 },
-    { "Grassland",         0.42, 0.58, 0.22 },
-    { "Shrubland",         0.52, 0.46, 0.24 },
-    { "Subtropical Forest",0.16, 0.44, 0.12 },
-    { "Woodland",          0.34, 0.54, 0.20 },
-    { "Savanna",           0.65, 0.60, 0.24 },
-    { "Semi-arid",         0.76, 0.64, 0.32 },
-    { "Jungle",            0.08, 0.30, 0.06 },
-    { "Trop. Forest",      0.20, 0.48, 0.12 },
-    { "Trop. Savanna",     0.68, 0.62, 0.22 },
-    { "Desert",            0.80, 0.66, 0.28 },
-    { "Swamp",             0.22, 0.30, 0.16 },
-    { "Trop. Swamp",       0.18, 0.26, 0.12 },
-    { "Highland",          0.40, 0.44, 0.26 },
-    { "Frozen Rock",       0.65, 0.66, 0.70 },
-    { "Mountain Rock",     0.52, 0.48, 0.42 },
-    { "Snow Cap",          0.88, 0.90, 0.95 },
-    { "River",             0.22, 0.52, 0.88 },
-    { "Lake",              0.07, 0.20, 0.55 },
-}
+local Biomes = require("data.biomes")
 
 function WorldSandboxView:new(game)
     local inst = setmetatable({}, WorldSandboxView)
@@ -199,7 +172,7 @@ function WorldSandboxView:draw()
         local pad       = 6
         local col_w     = 130
         local cols      = 2
-        local rows      = math.ceil(#BIOME_LEGEND / cols)
+        local rows      = math.ceil(#Biomes / cols)
         local panel_w   = cols * col_w + pad * 2
         local panel_h   = rows * row_h + pad * 2 + 14  -- +14 for title
         local lx        = sw - panel_w - 4
@@ -212,17 +185,17 @@ function WorldSandboxView:draw()
         love.graphics.setColor(0.7, 0.8, 1.0)
         love.graphics.setFont(font)
         love.graphics.printf("BIOMES", lx, ly + 3, panel_w, "center")
-        for idx, entry in ipairs(BIOME_LEGEND) do
+        for idx, entry in ipairs(Biomes) do
             local col = (idx - 1) % cols
             local row = math.floor((idx - 1) / cols)
             local ex  = lx + pad + col * col_w
             local ey  = ly + 14 + pad + row * row_h
-            love.graphics.setColor(entry[2], entry[3], entry[4])
+            love.graphics.setColor(entry.r, entry.g, entry.b)
             love.graphics.rectangle("fill", ex, ey + 1, swatch_w, swatch_w)
             love.graphics.setColor(0.6, 0.6, 0.6)
             love.graphics.rectangle("line", ex, ey + 1, swatch_w, swatch_w)
             love.graphics.setColor(0.88, 0.88, 0.88)
-            love.graphics.print(entry[1], ex + swatch_w + 3, ey)
+            love.graphics.print(entry.name, ex + swatch_w + 3, ey)
         end
     end
 

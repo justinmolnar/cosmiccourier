@@ -196,16 +196,6 @@ function GameController:emergencyReset()
         -- Force garbage collection
         collectgarbage("collect")
         
-        -- Reinitialize critical systems if needed
-        -- MODIFIED: Check the maps table
-        if not self.game.maps then
-            self.game.maps = {
-                city = require("models.Map"):new(self.game.C),
-                region = require("models.Map"):new(self.game.C)
-            }
-            self.game.maps.city:generate()
-        end
-        
         if not self.game.entities then
             self.game.entities = require("models.EntityManager"):new()
             self.game.entities:init(self.game)

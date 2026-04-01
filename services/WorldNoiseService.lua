@@ -5,6 +5,17 @@
 
 local WorldNoiseService = {}
 
+local _biome_color_cache
+local function biome_color_lookup()
+    if _biome_color_cache then return _biome_color_cache end
+    local t = {}
+    for _, b in ipairs(require("data.biomes")) do
+        t[b.name] = {b.r, b.g, b.b}
+    end
+    _biome_color_cache = t
+    return t
+end
+
 -- Standard FBM — smooth hills, used for continental shape and moisture.
 local function fbm(px, py, scale, octaves, persistence, lacunarity, ox, oy)
     local val, amp, freq, total = 0, 1, scale, 0
@@ -86,60 +97,10 @@ local function biome_name_climate(h, temp, wet, p)
     end
 end
 
--- Climate-based biome colors.
--- temp: 0=arctic, 1=tropical (latitude + elevation)
--- wet:  0=desert, 1=swamp/jungle (water proximity + moisture noise)
+-- Climate-based biome color — looks up color from data/biomes.lua by name.
 local function biome_color_climate(h, temp, wet, p)
-    if h < p.deep_ocean_max then return { 0.04, 0.08, 0.30 } end
-    if h < p.ocean_max      then return { 0.07, 0.15, 0.45 } end
-    if h < p.coast_max      then return { 0.76, 0.70, 0.48 } end  -- beach
-
-    -- Snow caps (elevation always wins)
-    if h >= p.mountain_max then return { 0.88, 0.90, 0.95 } end
-
-    -- Mountain rock
-    if h >= p.highland_max then
-        if temp < 0.25 then return { 0.65, 0.66, 0.70 } end  -- frozen rock
-        return { 0.52, 0.48, 0.42 }
-    end
-
-    -- Highlands / uplands
-    if h >= p.forest_max then
-        if temp < 0.22 then return { 0.58, 0.62, 0.55 } end  -- cold tundra highland
-        if temp < 0.45 then return { 0.30, 0.42, 0.24 } end  -- boreal highland
-        return { 0.40, 0.44, 0.26 }                           -- dry highland
-    end
-
-    -- Swamp: low elevation + very wet + warm enough
-    if h < p.plains_max and wet > 0.72 and temp > 0.35 then
-        if temp > 0.62 then return { 0.18, 0.26, 0.12 } end  -- tropical swamp
-        return { 0.22, 0.30, 0.16 }                           -- temperate swamp
-    end
-
-    -- Land biome matrix: temperature × wetness
-    if temp < 0.22 then
-        -- Arctic
-        if wet > 0.50 then return { 0.22, 0.38, 0.24 } end   -- boreal/taiga
-        return { 0.60, 0.64, 0.52 }                           -- tundra
-    elseif temp < 0.45 then
-        -- Cold temperate
-        if wet > 0.60 then return { 0.18, 0.40, 0.16 } end   -- temperate rainforest
-        if wet > 0.35 then return { 0.24, 0.46, 0.18 } end   -- temperate forest
-        if wet > 0.15 then return { 0.42, 0.58, 0.22 } end   -- grassland
-        return { 0.52, 0.46, 0.24 }                           -- shrubland
-    elseif temp < 0.68 then
-        -- Warm temperate
-        if wet > 0.60 then return { 0.16, 0.44, 0.12 } end   -- subtropical forest
-        if wet > 0.35 then return { 0.34, 0.54, 0.20 } end   -- woodland
-        if wet > 0.15 then return { 0.65, 0.60, 0.24 } end   -- savanna
-        return { 0.76, 0.64, 0.32 }                           -- semi-arid
-    else
-        -- Tropical
-        if wet > 0.55 then return { 0.08, 0.30, 0.06 } end   -- jungle
-        if wet > 0.30 then return { 0.20, 0.48, 0.12 } end   -- tropical forest
-        if wet > 0.12 then return { 0.68, 0.62, 0.22 } end   -- tropical savanna
-        return { 0.80, 0.66, 0.28 }                           -- desert
-    end
+    local name = biome_name_climate(h, temp, wet, p)
+    return biome_color_lookup()[name] or {0.5, 0.5, 0.5}
 end
 
 -- Discrete biome colors — flat per band, no lerp between biomes.

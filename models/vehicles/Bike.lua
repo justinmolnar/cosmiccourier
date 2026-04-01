@@ -18,8 +18,4 @@ end
 -- The draw method has been removed from this file.
 -- The correct draw method will be inherited from Vehicle.lua.
 
-function Bike:getIcon()
-    return "🚲"
-end
-
 return Bike

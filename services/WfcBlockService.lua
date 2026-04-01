@@ -55,7 +55,7 @@ function WfcBlockService.generateBlocks(params)
 
     -- Influence grid with Arterial Roads using an overwhelming weight
     print("Applying arterial road influences...")
-    local ARTERIAL_MULTIPLIER = 1e9 -- Effectively infinite weight
+    local ARTERIAL_MULTIPLIER = require("data.WorldGenConfig").ARTERIAL_MULTIPLIER
 
     for _, path in ipairs(arterial_paths) do
         for i = 1, #path - 1 do

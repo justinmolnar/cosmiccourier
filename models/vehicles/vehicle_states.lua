@@ -108,7 +108,8 @@ function moveAlongPath(dt, vehicle, game)
     local base_speed = vehicle.properties.speed
     local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / tps
     local normalized_speed = base_speed / speed_normalization_factor
-    if vehicle.type == "bike" then
+    local vcfg = game.C.VEHICLES[vehicle.type:upper()]
+    if vcfg and vcfg.needs_downtown_speed_scale then
         normalized_speed = normalized_speed * (game.C.MAP.DOWNTOWN_GRID_WIDTH / 64)
     end
     local travel_dist = normalized_speed * dt
@@ -330,7 +331,8 @@ function States.GoToDropoff:enter(vehicle, game)
     
     -- Long-distance (inter-city) trips require the metro license.
     -- If one somehow reaches the truck without the license, drop it and move on.
-    if trip and trip.is_long_distance and vehicle.type == "truck" then
+    local vcfg = game.C.VEHICLES[vehicle.type:upper()]
+    if trip and trip.is_long_distance and vcfg and vcfg.can_long_distance then
         if not game.state.metro_license_unlocked then
             print(string.format("DEBUG: %s %d dropping inter-city trip (no metro license)", vehicle.type, vehicle.id))
             table.remove(vehicle.cargo, 1)

@@ -22,14 +22,6 @@ function Map:new(C)
 end
 
 -- =============================================================================
--- == MASTER GENERATION FUNCTION (Now delegates to the service)
--- =============================================================================
-function Map:generate()
-    local MapGenerationService = require("services.MapGenerationService")
-    MapGenerationService.generateMap(self)
-end
-
--- =============================================================================
 -- == UTILITY & HELPER FUNCTIONS
 -- =============================================================================
 
@@ -40,31 +32,11 @@ function Map:isRoad(tile_type)
            tile_type == "highway"
 end
 
+local TilePalette = require("data.tile_palette")
 local function getTileColor(tile_type, is_in_downtown, C_MAP)
-    if tile_type == "arterial" then
-        return C_MAP.COLORS.ARTERIAL
-    end
-    if is_in_downtown then
-        if tile_type == "road" or tile_type == "downtown_road" or
-           tile_type == "highway" then
-            return C_MAP.COLORS.DOWNTOWN_ROAD
-        else
-            return C_MAP.COLORS.DOWNTOWN_PLOT
-        end
-    else
-        if tile_type == "road" or tile_type == "downtown_road" or
-           tile_type == "highway" then
-            return C_MAP.COLORS.ROAD
-        elseif tile_type == "grass" then
-            return C_MAP.COLORS.GRASS
-        elseif tile_type == "water" then
-            return C_MAP.COLORS.WATER
-        elseif tile_type == "mountain" then
-            return C_MAP.COLORS.MOUNTAIN
-        else
-            return C_MAP.COLORS.PLOT
-        end
-    end
+    local entry = TilePalette[tile_type] or TilePalette.default
+    local key = is_in_downtown and entry.downtown or entry.city
+    return C_MAP.COLORS[key]
 end
 
 function Map:getPlotsFromGrid(grid)
@@ -72,7 +44,7 @@ function Map:getPlotsFromGrid(grid)
     local h, w = #grid, #grid[1]
     local plots = {}
     
-    local MIN_NETWORK_SIZE = 10
+    local MIN_NETWORK_SIZE = require("data.GameplayConfig").MIN_NETWORK_SIZE
     local visited_roads = {}
     local valid_road_tiles = {}
 
