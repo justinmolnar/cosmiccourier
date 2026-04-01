@@ -106,87 +106,58 @@ function Vehicle:assignTrip(trip, game)
 end
 
 function Vehicle:_resolveOffScreenState(game)
-    -- This function will continue to process instantaneous state changes
-    -- until the vehicle is in a state that involves travel (and has an ETA).
     local States = require("models.vehicles.vehicle_states")
-    local max_iterations = 10  -- Prevent infinite loops
-    local iterations = 0
-    
-    while iterations < max_iterations do
-        local state_name = self.state.name
-        local old_state = state_name
-        
-        print(string.format("Vehicle %d resolving off-screen state: %s (iteration %d)", self.id, state_name, iterations + 1))
 
-        if state_name == "To Pickup" then
-            self:changeState(States.DoPickup, game)
-            
-        elseif state_name == "To Dropoff" then
-            self:changeState(States.DoDropoff, game)
-            
-        elseif state_name == "Returning" then
-            -- Check if we got new work while returning - if so, go to pickup instead
-            if #self.trip_queue > 0 then
-                print(string.format("Vehicle %d got new work while returning, switching to pickup", self.id))
-                self:changeState(States.GoToPickup, game)
+    -- States that require travel time — resolution stops when one is reached.
+    local TRAVEL_STATES = {
+        ["To Pickup"] = true, ["To Dropoff"] = true, ["Returning"] = true,
+        ["To Highway"] = true, ["On Highway"] = true, ["Exiting Highway"] = true,
+    }
+
+    -- Dispatch table: instant transitions handled here; nil entry = travel/terminal state.
+    local STATE_RESOLUTION = {
+        ["To Pickup"]    = function(v, g) v:changeState(States.DoPickup, g) end,
+        ["To Dropoff"]   = function(v, g) v:changeState(States.DoDropoff, g) end,
+        ["Returning"]    = function(v, g)
+            if #v.trip_queue > 0 then
+                v:changeState(States.GoToPickup, g)
             else
-                -- No new work, arrived back at depot, go idle
-                self:changeState(States.Idle, game)
+                v:changeState(States.Idle, g)
             end
-            
-        elseif state_name == "Picking Up" then
-            -- The DoPickup state's enter method handles the logic and transitions automatically
-            -- No need to call enter again, it was already called by changeState
-            print(string.format("Vehicle %d completed pickup, should be in new state: %s", self.id, self.state.name))
-            
-        elseif state_name == "Dropping Off" then
-            -- The DoDropoff state's enter method handles the logic and transitions automatically
-            -- No need to call enter again, it was already called by changeState
-            print(string.format("Vehicle %d completed dropoff, should be in new state: %s", self.id, self.state.name))
-            
-        elseif state_name == "Deciding" then
-            -- The DecideNextAction state's enter method handles the logic and transitions automatically
-            print(string.format("Vehicle %d completed decision, should be in new state: %s", self.id, self.state.name))
-            
-        elseif state_name == "Idle" then
-            -- Check if we have new work to do
-            if #self.trip_queue > 0 then
-                self:changeState(States.GoToPickup, game)
-            else
-                -- Truly idle, no more state changes needed
-                print(string.format("Vehicle %d is truly idle with no work", self.id))
+        end,
+        ["Idle"]         = function(v, g)
+            if #v.trip_queue > 0 then v:changeState(States.GoToPickup, g) end
+        end,
+        -- Picking Up / Dropping Off / Deciding: changeState already ran enter(); no-op here.
+    }
+
+    local max_iterations = 10
+    for i = 1, max_iterations do
+        local name = self.state.name
+        print(string.format("Vehicle %d resolving off-screen state: %s (iteration %d)", self.id, name, i))
+
+        local handler = STATE_RESOLUTION[name]
+        if handler then
+            local prev = name
+            handler(self, game)
+            if self.state.name == prev then
+                print(string.format("WARNING: Vehicle %d state didn't change from %s", self.id, prev))
                 break
             end
-            
         else
-            -- Vehicle is in a travel state or unknown state, stop resolving
-            print(string.format("Vehicle %d in travel/final state: %s", self.id, state_name))
+            -- Travel state or unknown — stop resolving.
+            print(string.format("Vehicle %d in travel/final state: %s", self.id, name))
             break
         end
-        
-        iterations = iterations + 1
-        
-        -- If state didn't change, we're stuck - break out
-        if self.state.name == old_state then
-            print(string.format("WARNING: Vehicle %d state didn't change from %s, breaking loop", self.id, old_state))
-            break
-        end
-        
-        -- If we're now in a travel state, we're done.
-        -- Updated this check to include the new highway states.
-        if self.state.name == "To Pickup" or 
-           self.state.name == "To Dropoff" or 
-           self.state.name == "Returning" or
-           self.state.name == "To Highway" or
-           self.state.name == "On Highway" or
-           self.state.name == "Exiting Highway" then
+
+        if TRAVEL_STATES[self.state.name] then
             print(string.format("Vehicle %d reached travel state: %s", self.id, self.state.name))
             break
         end
-    end
-    
-    if iterations >= max_iterations then
-        print(string.format("ERROR: Vehicle %d hit max iterations in state resolution!", self.id))
+
+        if i == max_iterations then
+            print(string.format("ERROR: Vehicle %d hit max iterations in state resolution!", self.id))
+        end
     end
 end
 

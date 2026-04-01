@@ -414,7 +414,7 @@ Task 4.3 (StreetPipeline) is the trickiest — the `Game.street_segments = {}` r
 
 ---
 
-## Phase 5 — God Function Decomposition
+## Phase 5 — God Function Decomposition ✅ Complete
 
 **Goal:** Break up every function over ~80 lines that does more than one named thing. After this phase, no function exceeds 80 lines, and every function has one clearly statable responsibility.
 
@@ -507,6 +507,15 @@ The loop body becomes: look up handler, call it, break if travel state reached.
 - Regenerate the world several times; verify visually identical output.
 - Run A* on the road-node map and the sandbox map; verify paths are equivalent to pre-refactor.
 - Off-screen vehicle simulation (abstracted mode) must resolve states identically; test by sending a vehicle on a long trip, switching to region view, and verifying it completes without hanging.
+
+### Deviations
+
+- **5.1**: Kept phases as `generateHeightMap`, `traceRiversAndLakes`, `assignBiomesAndSuitability`, `detectContinentsAndRegions` rather than the originally named functions. River + lake tracing are one pass (inseparable). No `data/biomes.lua` extracted — biome logic lives in the phase functions; the plan's biome separation would have required a larger data reorganization outside Phase 5 scope.
+- **5.2**: Implemented as planned. `_snapToColumn` and `_snapToNearestTraversable` are the shared snap helpers (not `_snapToNearestRoadNode` as named in the plan — name adjusted to reflect actual usage).
+- **5.3**: `ChainWalker.lua` placed in `services/` (not a new split file in `utils/`). `walkRoad` was dead code — removed rather than ported. `DIRS8` and `ROAD_TYPES` remain local to both files as needed.
+- **5.4**: `sendToGame` was ~1035 lines (not 330+ as estimated). Extracted into `_buildZoneGrid`, `_buildRoadNetwork`, `_buildGameImages` using a shared `ctx` table. `sendToGame` reduced to ~304 lines. The 3 helpers range from 100-350 lines each (road network is large due to island connectivity BFS). The plan's names (`_generateTerrain`, `_convertCoordinates`, `_assignDistricts`) did not cleanly map to the actual logical boundaries.
+- **5.5**: Extracted `_drawFloatingTexts`, `_drawTileGridFallback`, `_drawWorldGenMode` from `draw()`. Did not implement a `RENDER_MODES` registry table — the if/else between world-gen and fallback is simple enough that a dispatch table adds indirection without clarity benefit. `draw()` is 20 lines.
+- **5.6**: Implemented as planned.
 
 ### AI Notes
 

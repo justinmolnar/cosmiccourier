@@ -165,6 +165,664 @@ function WorldSandboxController:close()
     self.active = false
 end
 
+-- ── sendToGame helpers ────────────────────────────────────────────────────────
+
+-- WFC zone grid + downtown_subcells.  Mutates new_map.zone_grid, .all_city_plots,
+-- .downtown_subcells; also caches zone grid on self for later image building.
+-- ctx fields: sub_cw, sub_ch, gscx_off, gscy_off, sw, w, start_idx, grid,
+--             city_mn_x, city_mn_y
+function WorldSandboxController:_buildZoneGrid(new_map, ctx)
+    local sub_cw    = ctx.sub_cw;    local sub_ch    = ctx.sub_ch
+    local gscx_off  = ctx.gscx_off;  local gscy_off  = ctx.gscy_off
+    local sw        = ctx.sw;        local w         = ctx.w
+    local start_idx = ctx.start_idx; local grid      = ctx.grid
+    local city_mn_x = ctx.city_mn_x; local city_mn_y = ctx.city_mn_y
+
+    local WFC = require("lib.wfc")
+    local ZT  = require("data.zones")
+
+    if not self.city_district_types then self.city_district_types = {} end
+    if not self.city_district_types[start_idx] then
+        local dtypes  = { [1] = "downtown" }
+        local pois    = self.city_pois_list and self.city_pois_list[start_idx] or {}
+        local choices = ZT.RANDOM_DISTRICT_TYPES
+        for i = 2, #pois do dtypes[i] = choices[love.math.random(1, #choices)] end
+        self.city_district_types[start_idx] = dtypes
+    end
+    local district_types = self.city_district_types[start_idx]
+    local dmap  = self.city_district_maps and self.city_district_maps[start_idx] or {}
+    local bdata = self.biome_data or {}
+
+    local plot_set = {}
+    local all_city_plots = {}
+    for lscy = 0, sub_ch - 1 do
+        local gy = lscy + 1
+        for lscx = 0, sub_cw - 1 do
+            local gx = lscx + 1
+            local t = grid[gy][gx].type
+            if t == "plot" or t == "downtown_plot" then
+                plot_set[gy * 100000 + gx] = true
+                table.insert(all_city_plots, {x=gx, y=gy})
+            end
+        end
+    end
+    new_map.all_city_plots = all_city_plots
+
+    local wfc = WFC.new(sub_cw, sub_ch, ZT.STATES, ZT.ADJACENCY)
+    for lscy = 0, sub_ch - 1 do
+        local gy = lscy + 1
+        for lscx = 0, sub_cw - 1 do
+            local gx = lscx + 1
+            if not plot_set[gy * 100000 + gx] then
+                for _, s in ipairs(ZT.STATES) do wfc.grid[gy][gx][s] = (s == "none") end
+                wfc.entropy_grid[gy][gx] = 1
+            else
+                local gscx2   = gscx_off + lscx
+                local gscy2   = gscy_off + lscy
+                local sci     = gscy2 * sw + gscx2 + 1
+                local poi_idx = dmap[sci]
+                local dtype   = (poi_idx and district_types[poi_idx]) or "residential"
+                local base_w  = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS.residential
+                local wcx2    = city_mn_x + math.floor(lscx / 3)
+                local wcy2    = city_mn_y + math.floor(lscy / 3)
+                local ci2     = (wcy2 - 1) * w + wcx2
+                local bd      = bdata[ci2]
+                local bmul    = (bd and bd.name and ZT.BIOME_MULTS[bd.name]) or {}
+                if bd and (bd.is_river or bd.is_lake) then
+                    bmul = {}
+                    if bd.name and ZT.BIOME_MULTS[bd.name] then
+                        for k, v in pairs(ZT.BIOME_MULTS[bd.name]) do bmul[k] = v end
+                    end
+                    bmul.commercial = (bmul.commercial or 1.0) * 1.8
+                end
+                for _, s in ipairs(ZT.STATES) do
+                    WFC.setWeight(wfc, gx, gy, s, s == "none" and 0 or
+                        math.max(0.01, (base_w[s] or 1) * (bmul[s] or 1.0)))
+                end
+            end
+        end
+    end
+    WFC.solve(wfc)
+    local result = WFC.getResult(wfc)
+
+    -- Fallback for contradiction cells
+    for lscy = 0, sub_ch - 1 do
+        local gy = lscy + 1
+        for lscx = 0, sub_cw - 1 do
+            local gx = lscx + 1
+            if plot_set[gy * 100000 + gx] and not result[gy][gx] then
+                local gscx2   = gscx_off + lscx
+                local gscy2   = gscy_off + lscy
+                local sci     = gscy2 * sw + gscx2 + 1
+                local poi_idx = dmap[sci]
+                local dtype   = (poi_idx and district_types[poi_idx]) or "residential"
+                local base_w  = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS.residential
+                local best, best_w = "residential", 0
+                for _, s in ipairs(ZT.STATES) do
+                    if s ~= "none" and (base_w[s] or 0) > best_w then best = s; best_w = base_w[s] end
+                end
+                result[gy][gx] = best
+            end
+        end
+    end
+    new_map.zone_grid = result
+
+    -- Per-subcell downtown set (district owner == 1) for fog rendering in GameView
+    do
+        local sw2 = w * 3
+        local dt_cells = {}
+        for lscy = 0, sub_ch - 1 do
+            local gscy2 = gscy_off + lscy
+            local gy    = lscy + 1
+            for lscx = 0, sub_cw - 1 do
+                local gscx2 = gscx_off + lscx
+                local sci2  = gscy2 * sw2 + gscx2 + 1
+                if dmap[sci2] == 1 then
+                    if not dt_cells[gy] then dt_cells[gy] = {} end
+                    dt_cells[gy][lscx + 1] = true
+                end
+            end
+        end
+        new_map.downtown_subcells = dt_cells
+    end
+
+    if not self.city_zone_grids   then self.city_zone_grids   = {} end
+    if not self.city_zone_offsets then self.city_zone_offsets = {} end
+    self.city_zone_grids[start_idx]   = result
+    self.city_zone_offsets[start_idx] = {x = gscx_off, y = gscy_off}
+end
+
+-- Connect isolated zone-boundary road clusters to the arterial/highway network.
+-- Mutates zone_seg_v, zone_seg_h, new_nodes (all passed by reference), and
+-- new_map.zone_grid (zg) for visual correctness of bridging segments.
+function WorldSandboxController:_fixIslandConnectivity(new_map, grid, sub_cw, sub_ch, zone_seg_v, zone_seg_h, new_nodes)
+    local zg = new_map.zone_grid
+    if not zg then return end
+
+    -- BFS from arterial/highway nodes along the zone_seg graph
+    local reachable = {}
+    local rq = {}
+    for ry2, row in pairs(new_nodes) do
+        for rx2 in pairs(row) do
+            local t2 = grid[ry2 + 1] and grid[ry2 + 1][rx2 + 1]
+            if t2 and (t2.type == "arterial" or t2.type == "highway") then
+                local k2 = ry2 * 100000 + rx2
+                if not reachable[k2] then reachable[k2] = true; rq[#rq + 1] = {rx2, ry2} end
+            end
+        end
+    end
+    local rqi = 1
+    while rqi <= #rq do
+        local rx2, ry2 = rq[rqi][1], rq[rqi][2]; rqi = rqi + 1
+        local checks = {
+            {rx2,   ry2-1, ry2 >= 1 and zone_seg_v[ry2] and zone_seg_v[ry2][rx2]},
+            {rx2,   ry2+1, zone_seg_v[ry2+1] and zone_seg_v[ry2+1][rx2]},
+            {rx2+1, ry2,   zone_seg_h[ry2] and zone_seg_h[ry2][rx2+1]},
+            {rx2-1, ry2,   rx2 >= 1 and zone_seg_h[ry2] and zone_seg_h[ry2][rx2]},
+        }
+        for _, c in ipairs(checks) do
+            local nx2, ny2, ok = c[1], c[2], c[3]
+            if ok and new_nodes[ny2] and new_nodes[ny2][nx2] then
+                local nk = ny2 * 100000 + nx2
+                if not reachable[nk] then reachable[nk] = true; rq[#rq + 1] = {nx2, ny2} end
+            end
+        end
+    end
+
+    -- Multi-source BFS outward from reachable set to find shortest path to every node
+    local par = {}
+    local pq = {}
+    for ry2, row in pairs(new_nodes) do
+        for rx2 in pairs(row) do
+            local k2 = ry2 * 100000 + rx2
+            if reachable[k2] then par[k2] = true; pq[#pq + 1] = {rx2, ry2} end
+        end
+    end
+    local pqi = 1
+    while pqi <= #pq do
+        local rx2, ry2 = pq[pqi][1], pq[pqi][2]; pqi = pqi + 1
+        for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+            local nx2, ny2 = rx2 + d[1], ry2 + d[2]
+            if nx2 >= 0 and nx2 <= sub_cw - 2 and ny2 >= 0 and ny2 <= sub_ch - 2 then
+                local nk = ny2 * 100000 + nx2
+                if not par[nk] then par[nk] = {rx2, ry2}; pq[#pq + 1] = {nx2, ny2} end
+            end
+        end
+    end
+
+    local function makeVisible(gr1, gc1, gr2, gc2)
+        if not zg[gr1] then zg[gr1] = {} end
+        if not zg[gr2] then zg[gr2] = {} end
+        local z1 = zg[gr1][gc1]
+        local z2 = zg[gr2][gc2]
+        if not z1 or z1 == "none" then z1 = "residential"; zg[gr1][gc1] = z1 end
+        if not z2 or z2 == "none" or z2 == z1 then
+            zg[gr2][gc2] = (z1 ~= "commercial") and "commercial" or "residential"
+        end
+    end
+
+    local function tileIsPlot(gx, gy)
+        local t = grid[gy] and grid[gy][gx] and grid[gy][gx].type
+        return t == "plot" or t == "downtown_plot"
+    end
+
+    local function addSeg(rx1, ry1, rx2, ry2)
+        if rx2 == rx1 + 1 then
+            if tileIsPlot(rx1+1, ry1) and tileIsPlot(rx1+1, ry1+1) then
+                if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
+                zone_seg_h[ry1][rx1+1] = true; makeVisible(ry1, rx1+1, ry1+1, rx1+1)
+            end
+        elseif rx2 == rx1 - 1 then
+            if tileIsPlot(rx1, ry1) and tileIsPlot(rx1, ry1+1) then
+                if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
+                zone_seg_h[ry1][rx1] = true; makeVisible(ry1, rx1, ry1+1, rx1)
+            end
+        elseif ry2 == ry1 + 1 then
+            if tileIsPlot(rx1, ry1+1) and tileIsPlot(rx1+1, ry1+1) then
+                if not zone_seg_v[ry1+1] then zone_seg_v[ry1+1] = {} end
+                zone_seg_v[ry1+1][rx1] = true; makeVisible(ry1+1, rx1, ry1+1, rx1+1)
+            end
+        elseif ry2 == ry1 - 1 then
+            if tileIsPlot(rx1, ry1) and tileIsPlot(rx1+1, ry1) then
+                if not zone_seg_v[ry1] then zone_seg_v[ry1] = {} end
+                zone_seg_v[ry1][rx1] = true; makeVisible(ry1, rx1, ry1, rx1+1)
+            end
+        end
+        if not new_nodes[ry1] then new_nodes[ry1] = {} end; new_nodes[ry1][rx1] = true
+        if not new_nodes[ry2] then new_nodes[ry2] = {} end; new_nodes[ry2][rx2] = true
+    end
+
+    -- Walk parent chain from each unreachable node to the reachable set
+    local unreachable = {}
+    for ry2, row in pairs(new_nodes) do
+        for rx2 in pairs(row) do
+            if not reachable[ry2 * 100000 + rx2] then
+                unreachable[#unreachable + 1] = {rx2, ry2}
+            end
+        end
+    end
+    for _, unode in ipairs(unreachable) do
+        local ux, uy = unode[1], unode[2]
+        if not reachable[uy * 100000 + ux] then
+            local cx, cy = ux, uy
+            for _ = 1, sub_cw + sub_ch do
+                local ck = cy * 100000 + cx
+                if reachable[ck] then break end
+                local p = par[ck]
+                if not p or p == true then break end
+                addSeg(cx, cy, p[1], p[2])
+                reachable[ck] = true
+                cx, cy = p[1], p[2]
+            end
+        end
+    end
+end
+
+-- Road-node graph + zone-boundary streets + island connectivity.
+-- Mutates new_map.road_v_rxs, .road_h_rys, .road_nodes, .zone_seg_v,
+-- .zone_seg_h, .tile_nodes, .building_plots.
+-- Requires new_map.zone_grid to be set first (_buildZoneGrid).
+-- ctx: same fields as _buildZoneGrid.
+function WorldSandboxController:_buildRoadNetwork(new_map, ctx)
+    local sub_cw    = ctx.sub_cw;    local sub_ch    = ctx.sub_ch
+    local gscx_off  = ctx.gscx_off;  local gscy_off  = ctx.gscy_off
+    local sw        = ctx.sw;        local w         = ctx.w
+    local start_idx = ctx.start_idx; local grid      = ctx.grid
+
+    local road_v_rxs = {}
+    local road_h_rys = {}
+    local road_nodes = {}
+
+    -- road_v_rxs / road_h_rys from city_street_maps[start_idx] only.
+    do
+        local smap = self.city_street_maps and self.city_street_maps[start_idx]
+        local miss_cx, miss_cy = {}, {}
+        if smap then
+            for key in pairs(smap.v or {}) do
+                local cx   = math.floor(key / 1000)
+                local lscx = cx * 3 - gscx_off
+                if lscx >= 0 and lscx < sub_cw then road_v_rxs[lscx] = true
+                else miss_cx[cx] = true end
+            end
+            for key in pairs(smap.h or {}) do
+                local cy   = math.floor(key / 1000)
+                local lscy = cy * 3 - gscy_off
+                if lscy >= 0 and lscy < sub_ch then road_h_rys[lscy] = true
+                else miss_cy[cy] = true end
+            end
+        end
+        local miss_cx_list, miss_cy_list = {}, {}
+        for cx in pairs(miss_cx) do table.insert(miss_cx_list, cx) end
+        for cy in pairs(miss_cy) do table.insert(miss_cy_list, cy) end
+        table.sort(miss_cx_list); table.sort(miss_cy_list)
+        if #miss_cx_list > 0 then
+            print(string.format("DEBUG v-streets OUT OF RANGE cx (gscx_off=%d,sub_cw=%d): %s",
+                gscx_off, sub_cw, table.concat(miss_cx_list, ",")))
+        end
+        if #miss_cy_list > 0 then
+            print(string.format("DEBUG h-streets OUT OF RANGE cy (gscy_off=%d,sub_ch=%d): %s",
+                gscy_off, sub_ch, table.concat(miss_cy_list, ",")))
+        end
+    end
+
+    -- road_nodes from city_street_maps[start_idx] (city streets only).
+    do
+        local smap = self.city_street_maps and self.city_street_maps[start_idx]
+        if smap then
+            for key in pairs(smap.v or {}) do
+                local cx    = math.floor(key / 1000)
+                local wy    = key % 1000
+                local lscx  = cx * 3 - gscx_off
+                local lscy0 = (wy - 1) * 3 - gscy_off
+                if lscx >= 0 and lscx < sub_cw then
+                    for dlscy = 0, 2 do
+                        local lscy = lscy0 + dlscy
+                        if lscy >= 0 and lscy < sub_ch then
+                            if not road_nodes[lscy] then road_nodes[lscy] = {} end
+                            road_nodes[lscy][lscx] = true
+                        end
+                    end
+                end
+            end
+            for key in pairs(smap.h or {}) do
+                local cy    = math.floor(key / 1000)
+                local wx    = key % 1000
+                local lscy  = cy * 3 - gscy_off
+                local lscx0 = (wx - 1) * 3 - gscx_off
+                if lscy >= 0 and lscy < sub_ch then
+                    for dlscx = 0, 2 do
+                        local lscx = lscx0 + dlscx
+                        if lscx >= 0 and lscx < sub_cw then
+                            if not road_nodes[lscy] then road_nodes[lscy] = {} end
+                            road_nodes[lscy][lscx] = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Arterial/highway corners: add road_nodes only at inner edges or street junctions.
+    local function is_road_type(x, y)
+        if x < 1 or x > sub_cw or y < 1 or y > sub_ch then return false end
+        local tt = grid[y] and grid[y][x] and grid[y][x].type
+        return tt == "arterial" or tt == "highway"
+    end
+    for gy = 1, sub_ch do
+        for gx = 1, sub_cw do
+            local t = grid[gy][gx].type
+            if t == "arterial" or t == "highway" then
+                for dy2 = 0, 1 do
+                    for dx2 = 0, 1 do
+                        local rx2 = gx - 1 + dx2
+                        local ry2 = gy - 1 + dy2
+                        if rx2 >= 0 and rx2 < sub_cw and ry2 >= 0 and ry2 < sub_ch then
+                            local nx1, ny1 = gx + dx2 - 1, gy
+                            local nx2, ny2 = gx,            gy + dy2 - 1
+                            local nx3, ny3 = gx + dx2 - 1, gy + dy2 - 1
+                            local inner = is_road_type(nx1, ny1) or
+                                          is_road_type(nx2, ny2) or
+                                          is_road_type(nx3, ny3)
+                            local on_street = road_v_rxs[rx2] or road_h_rys[ry2]
+                            if inner or on_street then
+                                if not road_nodes[ry2] then road_nodes[ry2] = {} end
+                                road_nodes[ry2][rx2] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    new_map.road_v_rxs = road_v_rxs
+    new_map.road_h_rys = road_h_rys
+    new_map.road_nodes = road_nodes
+
+    -- Diagnostic
+    do
+        local vc, hc, nc = 0, 0, 0
+        for _ in pairs(road_v_rxs) do vc = vc + 1 end
+        for _ in pairs(road_h_rys) do hc = hc + 1 end
+        for _, row in pairs(road_nodes) do for _ in pairs(row) do nc = nc + 1 end end
+        print(string.format("DEBUG road_v_rxs=%d road_h_rys=%d road_nodes=%d sub_cw=%d sub_ch=%d", vc, hc, nc, sub_cw, sub_ch))
+        local svc, shc = 0, 0
+        for idx2 = 1, #self.city_locations do
+            local smap2 = self.city_street_maps and self.city_street_maps[idx2]
+            if smap2 then
+                for _ in pairs(smap2.v or {}) do svc = svc + 1 end
+                for _ in pairs(smap2.h or {}) do shc = shc + 1 end
+            end
+        end
+        print(string.format("DEBUG city_street_maps total: v=%d h=%d", svc, shc))
+        local vrx_list = {}
+        for rx in pairs(road_v_rxs) do table.insert(vrx_list, rx) end
+        table.sort(vrx_list)
+        print("DEBUG road_v_rxs columns: " .. table.concat(vrx_list, ","))
+        local hry_list = {}
+        for ry in pairs(road_h_rys) do table.insert(hry_list, ry) end
+        table.sort(hry_list)
+        print("DEBUG road_h_rys rows: " .. table.concat(hry_list, ","))
+    end
+
+    -- Building plots: plot/downtown_plot cells beside a street line or arterial/highway.
+    local function is_road_tile(x, y)
+        if x < 1 or x > sub_cw or y < 1 or y > sub_ch then return false end
+        local tt = grid[y] and grid[y][x] and grid[y][x].type
+        return tt == "arterial" or tt == "highway"
+    end
+    local building_plots = {}
+    local seen_b = {}
+    for gy = 1, sub_ch do
+        for gx = 1, sub_cw do
+            local t = grid[gy][gx].type
+            if t == "plot" or t == "downtown_plot" then
+                if road_v_rxs[gx-1] or road_v_rxs[gx] or
+                   road_h_rys[gy-1] or road_h_rys[gy] or
+                   is_road_tile(gx-1,gy) or is_road_tile(gx+1,gy) or
+                   is_road_tile(gx,gy-1) or is_road_tile(gx,gy+1) then
+                    local key = gy * 10000 + gx
+                    if not seen_b[key] then
+                        seen_b[key] = true
+                        table.insert(building_plots, {x=gx, y=gy})
+                    end
+                end
+            end
+        end
+    end
+    print(string.format("DEBUG building_plots=%d (total plot/dt_plot cells scanned in %dx%d grid)", #building_plots, sub_cw, sub_ch))
+    new_map.building_plots = building_plots
+
+    -- Override road_v_rxs / road_h_rys / road_nodes with sub-cell zone boundaries.
+    do
+        local zg = new_map.zone_grid
+        if zg then
+            local zone_seg_v = {}
+            for gy = 1, sub_ch do
+                for rx = 1, sub_cw - 1 do
+                    local z1 = zg[gy][rx]
+                    local z2 = zg[gy][rx + 1]
+                    if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
+                        if not zone_seg_v[gy] then zone_seg_v[gy] = {} end
+                        zone_seg_v[gy][rx] = true
+                    end
+                end
+            end
+            local zone_seg_h = {}
+            for ry = 1, sub_ch - 1 do
+                for gx = 1, sub_cw do
+                    local z1 = zg[ry][gx]
+                    local z2 = zg[ry + 1][gx]
+                    if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
+                        if not zone_seg_h[ry] then zone_seg_h[ry] = {} end
+                        zone_seg_h[ry][gx] = true
+                    end
+                end
+            end
+
+            local new_nodes = {}
+            for ry = 0, sub_ch - 1 do
+                for rx = 0, sub_cw - 1 do
+                    local has_north = ry >= 1 and zone_seg_v[ry] and zone_seg_v[ry][rx]
+                    local has_south = zone_seg_v[ry + 1] and zone_seg_v[ry + 1][rx]
+                    local has_east  = zone_seg_h[ry] and zone_seg_h[ry][rx + 1]
+                    local has_west  = rx >= 1 and zone_seg_h[ry] and zone_seg_h[ry][rx]
+                    if has_north or has_south or has_east or has_west then
+                        if not new_nodes[ry] then new_nodes[ry] = {} end
+                        new_nodes[ry][rx] = true
+                    end
+                end
+            end
+            -- Preserve arterial/highway nodes from the street-based map.
+            for ry, row in pairs(new_map.road_nodes) do
+                for rx in pairs(row) do
+                    local gx2, gy2 = rx + 1, ry + 1
+                    local tile2 = grid[gy2] and grid[gy2][gx2]
+                    if tile2 and (tile2.type == "arterial" or tile2.type == "highway") then
+                        if not new_nodes[ry] then new_nodes[ry] = {} end
+                        new_nodes[ry][rx] = true
+                    end
+                end
+            end
+
+            -- ── Island connectivity ─────────────────────────────────────────────
+            self:_fixIslandConnectivity(new_map, grid, sub_cw, sub_ch, zone_seg_v, zone_seg_h, new_nodes)
+
+            -- road_v_rxs must remain truthy so PathfindingService treats this as a road-node map.
+            new_map.road_v_rxs  = {}
+            new_map.road_h_rys  = {}
+            new_map.road_nodes  = new_nodes
+            new_map.zone_seg_v  = zone_seg_v
+            new_map.zone_seg_h  = zone_seg_h
+
+            -- tile_nodes: bridge between corner nodes and arterial/highway tile-centre nodes.
+            local tile_nodes_tbl = {}
+            for tgy = 1, sub_ch do
+                for tgx = 1, sub_cw do
+                    local tt = grid[tgy][tgx].type
+                    if tt == "arterial" or tt == "highway" then
+                        local tty = tgy - 1
+                        local ttx = tgx - 1
+                        if not tile_nodes_tbl[tty] then tile_nodes_tbl[tty] = {} end
+                        tile_nodes_tbl[tty][ttx] = true
+                    end
+                end
+            end
+            new_map.tile_nodes = tile_nodes_tbl
+        end
+    end
+end
+
+-- Build all zoom-level images and camera-fit params, then stamp them onto game.
+-- Mutates game.world_gen_city_image, .world_gen_cam_params, etc.
+function WorldSandboxController:_buildGameImages(game, start_idx, city_mn_x, city_mx_x, city_mn_y, city_mx_y, w, h)
+    local C  = game.C
+    local ts = C.MAP.TILE_SIZE
+
+    local function buildCityImg(mode, bx1, bx2, by1, by2, scope)
+        local sv_mode  = self.view_mode
+        local sv_scope = self.view_scope
+        self.view_mode  = mode
+        if scope then self.view_scope = scope end
+        self:_buildCityImage(start_idx, bx1, bx2, by1, by2)
+        self.view_mode  = sv_mode
+        self.view_scope = sv_scope
+        return self.city_image
+    end
+
+    local function buildWorldImg(scope, cid, rid)
+        local sv_scope = self.view_scope
+        local sv_cid   = self.selected_continent_id
+        local sv_rid   = self.selected_region_id
+        local sv_mode  = self.view_mode
+        self.view_scope = scope
+        self.selected_continent_id = cid
+        self.selected_region_id    = rid
+        self.view_mode = self.biome_colormap and "biome" or "height"
+        self:_buildImage()
+        self.view_scope = sv_scope
+        self.selected_continent_id = sv_cid
+        self.selected_region_id    = sv_rid
+        self.view_mode = sv_mode
+        return self.world_image
+    end
+
+    local city_mode = (self.city_district_maps and self.city_district_maps[start_idx])
+                      and "districts"
+                      or  (self.biome_colormap and "biome" or "height")
+
+    local cox1 = math.max(1, city_mn_x - 2); local cox2 = math.min(w, city_mx_x + 2)
+    local coy1 = math.max(1, city_mn_y - 2); local coy2 = math.min(h, city_mx_y + 2)
+    game.world_gen_downtown_fogged_image = buildCityImg(city_mode, cox1, cox2, coy1, coy2, "downtown")
+    game.world_gen_city_image            = buildCityImg(city_mode, cox1, cox2, coy1, coy2)
+    game.world_gen_city_img_x            = cox1
+    game.world_gen_city_img_y            = coy1
+    game.world_gen_city_mn_x             = city_mn_x
+    game.world_gen_city_mn_y             = city_mn_y
+
+    local start_loc = self.city_locations[start_idx]
+    local start_ci  = (start_loc.y - 1) * w + start_loc.x
+    local start_cid = self.continent_map and self.continent_map[start_ci]
+    local start_rid = self.region_map    and self.region_map[start_ci]
+
+    game.world_gen_region_image    = buildWorldImg(start_rid and "region" or "world", nil, start_rid)
+    game.world_gen_continent_image = buildWorldImg(start_cid and "continent" or "world", start_cid, nil)
+    game.world_gen_world_image     = buildWorldImg("world", nil, nil)
+
+    game.world_gen_city_img_min_x = self.city_img_min_x
+    game.world_gen_city_img_min_y = self.city_img_min_y
+    game.world_gen_city_img_K     = self.city_img_K
+
+    -- Precompute camera params for all 5 zoom levels
+    do
+        local sw2, sh2 = love.graphics.getDimensions()
+        local vw2 = sw2 - C.UI.SIDEBAR_WIDTH
+
+        local function fitArea(mn_x, mx_x, mn_y, mx_y)
+            local aw = (mx_x - mn_x + 1) * ts
+            local ah = (mx_y - mn_y + 1) * ts
+            return {
+                scale = math.min(vw2 / aw, sh2 / ah) * 0.88,
+                x = ((mn_x + mx_x) * 0.5 - 0.5) * ts,
+                y = ((mn_y + mx_y) * 0.5 - 0.5) * ts,
+            }
+        end
+
+        local cp = {}
+        local S2 = C.MAP.SCALES
+
+        do
+            local dmap2  = self.city_district_maps and self.city_district_maps[start_idx]
+            local sub_w2 = w * 3
+            local sub_h2 = h * 3
+            local mn_scx, mx_scx = sub_w2, -1
+            local mn_scy, mx_scy = sub_h2, -1
+            if dmap2 then
+                for sci2, poi_idx2 in pairs(dmap2) do
+                    if poi_idx2 == 1 then
+                        local gscx2 = (sci2 - 1) % sub_w2
+                        local gscy2 = math.floor((sci2 - 1) / sub_w2)
+                        if gscx2 < mn_scx then mn_scx = gscx2 end
+                        if gscx2 > mx_scx then mx_scx = gscx2 end
+                        if gscy2 < mn_scy then mn_scy = gscy2 end
+                        if gscy2 > mx_scy then mx_scy = gscy2 end
+                    end
+                end
+            end
+            if mx_scx >= mn_scx then
+                local px_x1 = mn_scx / 3 * ts
+                local px_x2 = (mx_scx + 1) / 3 * ts
+                local px_y1 = mn_scy / 3 * ts
+                local px_y2 = (mx_scy + 1) / 3 * ts
+                local area_w2 = px_x2 - px_x1
+                local area_h2 = px_y2 - px_y1
+                cp[S2.DOWNTOWN] = {
+                    scale = math.min(vw2 / area_w2, sh2 / area_h2) * 0.88,
+                    x = (px_x1 + px_x2) * 0.5,
+                    y = (px_y1 + px_y2) * 0.5,
+                }
+            else
+                cp[S2.DOWNTOWN] = fitArea(city_mn_x, city_mx_x, city_mn_y, city_mx_y)
+            end
+        end
+
+        cp[S2.CITY] = fitArea(city_mn_x, city_mx_x, city_mn_y, city_mx_y)
+
+        do
+            local rmin_x, rmax_x, rmin_y, rmax_y = w+1, 0, h+1, 0
+            if start_rid and self.region_map then
+                for i = 1, w*h do
+                    if self.region_map[i] == start_rid then
+                        local rx = (i-1)%w+1; local ry = math.floor((i-1)/w)+1
+                        if rx<rmin_x then rmin_x=rx end; if rx>rmax_x then rmax_x=rx end
+                        if ry<rmin_y then rmin_y=ry end; if ry>rmax_y then rmax_y=ry end
+                    end
+                end
+            end
+            cp[S2.REGION] = (rmax_x >= rmin_x) and fitArea(rmin_x, rmax_x, rmin_y, rmax_y)
+                                                 or  fitArea(1, w, 1, h)
+        end
+
+        do
+            local cmin_x, cmax_x, cmin_y, cmax_y = w+1, 0, h+1, 0
+            if start_cid and self.continent_map then
+                for i = 1, w*h do
+                    if self.continent_map[i] == start_cid then
+                        local cx2 = (i-1)%w+1; local cy2 = math.floor((i-1)/w)+1
+                        if cx2<cmin_x then cmin_x=cx2 end; if cx2>cmax_x then cmax_x=cx2 end
+                        if cy2<cmin_y then cmin_y=cy2 end; if cy2>cmax_y then cmax_y=cy2 end
+                    end
+                end
+            end
+            cp[S2.CONTINENT] = (cmax_x >= cmin_x) and fitArea(cmin_x, cmax_x, cmin_y, cmax_y)
+                                                    or  fitArea(1, w, 1, h)
+        end
+
+        cp[S2.WORLD] = fitArea(1, w, 1, h)
+        game.world_gen_cam_params = cp
+    end
+end
+
 -- ── Send to Game ──────────────────────────────────────────────────────────────
 -- Converts the world sandbox data into a game Map (1 world-cell = 1 game tile)
 -- and replaces game.maps.city, then resets vehicles/clients exactly like F9's
@@ -410,748 +1068,16 @@ function WorldSandboxController:sendToGame()
     new_map.tile_pixel_size = C.MAP.TILE_SIZE / 3   -- 2/3 world px per sub-cell tile
     new_map.building_plots  = {}  -- populated below in road-node block
 
-    -- ── Zone grid + street generation ────────────────────────────────────────
-    -- WFC runs here (before road-nodes) so zone-type boundaries can drive streets.
-    do
-        local WFC = require("lib.wfc")
-        local ZT  = require("data.zones")
-
-        -- Assign random district types for this city's pois (once per world gen)
-        if not self.city_district_types then self.city_district_types = {} end
-        if not self.city_district_types[start_idx] then
-            local dtypes = { [1] = "downtown" }   -- poi 1 is always downtown
-            local pois = self.city_pois_list and self.city_pois_list[start_idx] or {}
-            local choices = ZT.RANDOM_DISTRICT_TYPES
-            for i = 2, #pois do
-                dtypes[i] = choices[love.math.random(1, #choices)]
-            end
-            self.city_district_types[start_idx] = dtypes
-        end
-        local district_types = self.city_district_types[start_idx]
-        local dmap  = self.city_district_maps and self.city_district_maps[start_idx] or {}
-        local bdata = self.biome_data or {}
-
-        -- Build plot lookup from ALL city plot/downtown_plot sub-cells.
-        local plot_set = {}
-        local all_city_plots = {}
-        for lscy = 0, sub_ch - 1 do
-            local gy = lscy + 1
-            for lscx = 0, sub_cw - 1 do
-                local gx = lscx + 1
-                local t = grid[gy][gx].type
-                if t == "plot" or t == "downtown_plot" then
-                    plot_set[gy * 100000 + gx] = true
-                    table.insert(all_city_plots, {x=gx, y=gy})
-                end
-            end
-        end
-        new_map.all_city_plots = all_city_plots
-
-        local wfc = WFC.new(sub_cw, sub_ch, ZT.STATES, ZT.ADJACENCY)
-
-        for lscy = 0, sub_ch - 1 do
-            local gy = lscy + 1
-            for lscx = 0, sub_cw - 1 do
-                local gx = lscx + 1
-                if not plot_set[gy * 100000 + gx] then
-                    for _, s in ipairs(ZT.STATES) do wfc.grid[gy][gx][s] = (s == "none") end
-                    wfc.entropy_grid[gy][gx] = 1
-                else
-                    local gscx2   = gscx_off + lscx
-                    local gscy2   = gscy_off + lscy
-                    local sci     = gscy2 * sw + gscx2 + 1
-                    local poi_idx = dmap[sci]
-                    local dtype   = (poi_idx and district_types[poi_idx]) or "residential"
-                    local base_w  = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS.residential
-                    local wcx2 = city_mn_x + math.floor(lscx / 3)
-                    local wcy2 = city_mn_y + math.floor(lscy / 3)
-                    local ci2  = (wcy2 - 1) * w + wcx2
-                    local bd   = bdata[ci2]
-                    local bmul = (bd and bd.name and ZT.BIOME_MULTS[bd.name]) or {}
-                    if bd and (bd.is_river or bd.is_lake) then
-                        bmul = {}
-                        if bd.name and ZT.BIOME_MULTS[bd.name] then
-                            for k, v in pairs(ZT.BIOME_MULTS[bd.name]) do bmul[k] = v end
-                        end
-                        bmul.commercial = (bmul.commercial or 1.0) * 1.8
-                    end
-                    for _, s in ipairs(ZT.STATES) do
-                        WFC.setWeight(wfc, gx, gy, s, s == "none" and 0 or math.max(0.01, (base_w[s] or 1) * (bmul[s] or 1.0)))
-                    end
-                end
-            end
-        end
-
-        WFC.solve(wfc)
-        local result = WFC.getResult(wfc)
-
-        -- Fallback for contradiction cells
-        for lscy = 0, sub_ch - 1 do
-            local gy = lscy + 1
-            for lscx = 0, sub_cw - 1 do
-                local gx = lscx + 1
-                if plot_set[gy * 100000 + gx] and not result[gy][gx] then
-                    local gscx2   = gscx_off + lscx
-                    local gscy2   = gscy_off + lscy
-                    local sci     = gscy2 * sw + gscx2 + 1
-                    local poi_idx = dmap[sci]
-                    local dtype   = (poi_idx and district_types[poi_idx]) or "residential"
-                    local base_w  = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS.residential
-                    local best, best_w = "residential", 0
-                    for _, s in ipairs(ZT.STATES) do
-                        if s ~= "none" and (base_w[s] or 0) > best_w then best = s; best_w = base_w[s] end
-                    end
-                    result[gy][gx] = best
-                end
-            end
-        end
-        new_map.zone_grid = result
-
-        -- Build per-subcell downtown set (district owner == 1) for fog rendering in GameView
-        do
-            local sw2 = w * 3
-            local dt_cells = {}
-            for lscy = 0, sub_ch - 1 do
-                local gscy2 = gscy_off + lscy
-                local gy    = lscy + 1
-                for lscx = 0, sub_cw - 1 do
-                    local gscx2 = gscx_off + lscx
-                    local sci2  = gscy2 * sw2 + gscx2 + 1
-                    if dmap[sci2] == 1 then
-                        if not dt_cells[gy] then dt_cells[gy] = {} end
-                        dt_cells[gy][lscx + 1] = true
-                    end
-                end
-            end
-            new_map.downtown_subcells = dt_cells
-        end
-
-        -- Store zone grid + its sub-cell origin for _buildCityImage rendering
-        if not self.city_zone_grids   then self.city_zone_grids   = {} end
-        if not self.city_zone_offsets then self.city_zone_offsets = {} end
-        self.city_zone_grids[start_idx]   = result
-        self.city_zone_offsets[start_idx] = {x = gscx_off, y = gscy_off}
-    end
-
-    -- Build road-node graph.
-    -- Roads are LINES between sub-cells, never tiles.  is_street_sc marks every
-    -- sub-cell that was previously a road tile; those positions are exactly the
-    -- road-line locations (road_v columns + road_h rows).
-    -- road_v_rxs[rx]: vertical road line at column rx  ((gx-1)%3==0 city-street column)
-    -- road_h_rys[ry]: horizontal road line at row ry   ((gy-1)%3==0 city-street row)
-    -- road_nodes[ry][rx]: gap position (rx,ry) is on a road line → vehicle can stop here
-    do
-        local road_v_rxs = {}
-        local road_h_rys = {}
-        local road_nodes = {}
-
-        -- road_v_rxs / road_h_rys: ONLY from city_street_maps[start_idx] (actual visible white city streets).
-        -- Only the starting city's streets are relevant; other cities' cx/cy values fall outside this grid.
-        do
-            local smap = self.city_street_maps and self.city_street_maps[start_idx]
-            local miss_cx, miss_cy = {}, {}
-            if smap then
-                for key in pairs(smap.v or {}) do
-                    local cx   = math.floor(key / 1000)
-                    local lscx = cx * 3 - gscx_off
-                    if lscx >= 0 and lscx < sub_cw then
-                        road_v_rxs[lscx] = true
-                    else
-                        miss_cx[cx] = true
-                    end
-                end
-                for key in pairs(smap.h or {}) do
-                    local cy   = math.floor(key / 1000)
-                    local lscy = cy * 3 - gscy_off
-                    if lscy >= 0 and lscy < sub_ch then
-                        road_h_rys[lscy] = true
-                    else
-                        miss_cy[cy] = true
-                    end
-                end
-            end
-            -- Debug: show any out-of-range cx/cy
-            local miss_cx_list, miss_cy_list = {}, {}
-            for cx in pairs(miss_cx) do table.insert(miss_cx_list, cx) end
-            for cy in pairs(miss_cy) do table.insert(miss_cy_list, cy) end
-            table.sort(miss_cx_list); table.sort(miss_cy_list)
-            if #miss_cx_list > 0 then
-                print(string.format("DEBUG v-streets OUT OF RANGE cx (city_mn_x=%d,city_mx_x=%d,gscx_off=%d,sub_cw=%d): %s",
-                    city_mn_x, city_mx_x, gscx_off, sub_cw, table.concat(miss_cx_list, ",")))
-            end
-            if #miss_cy_list > 0 then
-                print(string.format("DEBUG h-streets OUT OF RANGE cy (city_mn_y=%d,city_mx_y=%d,gscy_off=%d,sub_ch=%d): %s",
-                    city_mn_y, city_mx_y, gscy_off, sub_ch, table.concat(miss_cy_list, ",")))
-            end
-        end
-
-        -- road_nodes: from city_street_maps[start_idx] only (actual city streets).
-        -- Arterial/highway road_nodes come from the 4-corners loop below.
-        -- aug_street_maps added boundary nodes for arterial world cells, but those
-        -- positions are in "plot" sub-cells (not actual road tiles), creating spurious
-        -- road_nodes that let the pathfinder route through non-road areas.
-        do
-            local smap = self.city_street_maps and self.city_street_maps[start_idx]
-            if smap then
-                for key in pairs(smap.v or {}) do
-                    local cx    = math.floor(key / 1000)
-                    local wy    = key % 1000
-                    local lscx  = cx * 3 - gscx_off
-                    local lscy0 = (wy - 1) * 3 - gscy_off
-                    if lscx >= 0 and lscx < sub_cw then
-                        for dlscy = 0, 2 do
-                            local lscy = lscy0 + dlscy
-                            if lscy >= 0 and lscy < sub_ch then
-                                if not road_nodes[lscy] then road_nodes[lscy] = {} end
-                                road_nodes[lscy][lscx] = true
-                            end
-                        end
-                    end
-                end
-                for key in pairs(smap.h or {}) do
-                    local cy    = math.floor(key / 1000)
-                    local wx    = key % 1000
-                    local lscy  = cy * 3 - gscy_off
-                    local lscx0 = (wx - 1) * 3 - gscx_off
-                    if lscy >= 0 and lscy < sub_ch then
-                        for dlscx = 0, 2 do
-                            local lscx = lscx0 + dlscx
-                            if lscx >= 0 and lscx < sub_cw then
-                                if not road_nodes[lscy] then road_nodes[lscy] = {} end
-                                road_nodes[lscy][lscx] = true
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        -- Arterial/highway tiles: add road_nodes only at corners that are either:
-        --   (a) shared with another arterial/highway sub-cell (inner edge — vehicle stays on road), or
-        --   (b) at a city-street column/row (junction — vehicle enters/exits arterial from street).
-        -- Pure outer corners (adjacent only to plot sub-cells, not on a street line) are
-        -- skipped so vehicles don't navigate through visible plot areas.
-        local function is_road_type(x, y)
-            if x < 1 or x > sub_cw or y < 1 or y > sub_ch then return false end
-            local tt = grid[y] and grid[y][x] and grid[y][x].type
-            return tt == "arterial" or tt == "highway"
-        end
-        for gy = 1, sub_ch do
-            for gx = 1, sub_cw do
-                local t = grid[gy][gx].type
-                if t == "arterial" or t == "highway" then
-                    -- dx2,dy2 in {0,1}: corner offsets relative to top-left of sub-cell.
-                    -- Corner (rx2,ry2) touches 4 sub-cells; current is always one of them.
-                    -- "Other" neighbors determine if the corner is inner or a street junction.
-                    for dy2 = 0, 1 do
-                        for dx2 = 0, 1 do
-                            local rx2 = gx - 1 + dx2
-                            local ry2 = gy - 1 + dy2
-                            if rx2 >= 0 and rx2 < sub_cw and ry2 >= 0 and ry2 < sub_ch then
-                                -- The 3 sub-cells OTHER than (gx,gy) that share this corner:
-                                --   (gx-1+dx2, gy), (gx, gy-1+dy2), (gx-1+dx2, gy-1+dy2)
-                                -- mapped to 1-indexed: (gx+dx2-1, gy), (gx, gy+dy2-1), (gx+dx2-1, gy+dy2-1)
-                                local nx1, ny1 = gx + dx2 - 1, gy         -- horizontal neighbor
-                                local nx2, ny2 = gx,            gy + dy2 - 1  -- vertical neighbor
-                                local nx3, ny3 = gx + dx2 - 1, gy + dy2 - 1  -- diagonal neighbor
-                                local inner = is_road_type(nx1, ny1) or
-                                              is_road_type(nx2, ny2) or
-                                              is_road_type(nx3, ny3)
-                                local on_street = road_v_rxs[rx2] or road_h_rys[ry2]
-                                if inner or on_street then
-                                    if not road_nodes[ry2] then road_nodes[ry2] = {} end
-                                    road_nodes[ry2][rx2] = true
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        new_map.road_v_rxs = road_v_rxs
-        new_map.road_h_rys = road_h_rys
-        new_map.road_nodes = road_nodes
-
-        -- Diagnostic: print road line counts so we can verify sparsity
-        do
-            local vc, hc, nc = 0, 0, 0
-            for _ in pairs(road_v_rxs) do vc = vc + 1 end
-            for _ in pairs(road_h_rys) do hc = hc + 1 end
-            for _, row in pairs(road_nodes) do for _ in pairs(row) do nc = nc + 1 end end
-            print(string.format("DEBUG road_v_rxs=%d road_h_rys=%d road_nodes=%d sub_cw=%d sub_ch=%d", vc, hc, nc, sub_cw, sub_ch))
-            local svc, shc = 0, 0
-            for idx2 = 1, #self.city_locations do
-                local smap2 = self.city_street_maps and self.city_street_maps[idx2]
-                if smap2 then
-                    for _ in pairs(smap2.v or {}) do svc = svc + 1 end
-                    for _ in pairs(smap2.h or {}) do shc = shc + 1 end
-                end
-            end
-            print(string.format("DEBUG city_street_maps total: v=%d h=%d", svc, shc))
-            -- Print first few road_v_rxs entries to verify positions
-            local vrx_list = {}
-            for rx in pairs(road_v_rxs) do table.insert(vrx_list, rx) end
-            table.sort(vrx_list)
-            print("DEBUG road_v_rxs columns: " .. table.concat(vrx_list, ","))
-            local hry_list = {}
-            for ry in pairs(road_h_rys) do table.insert(hry_list, ry) end
-            table.sort(hry_list)
-            print("DEBUG road_h_rys rows: " .. table.concat(hry_list, ","))
-        end
-
-        -- Building plots: plot/downtown_plot cells beside a city street line OR
-        -- directly adjacent to an arterial/highway tile.
-        local function is_road_tile(x, y)
-            if x < 1 or x > sub_cw or y < 1 or y > sub_ch then return false end
-            local tt = grid[y] and grid[y][x] and grid[y][x].type
-            return tt == "arterial" or tt == "highway"
-        end
-        local building_plots = {}
-        local seen_b = {}
-        for gy = 1, sub_ch do
-            for gx = 1, sub_cw do
-                local t = grid[gy][gx].type
-                if t == "plot" or t == "downtown_plot" then
-                    if road_v_rxs[gx-1] or road_v_rxs[gx] or
-                       road_h_rys[gy-1] or road_h_rys[gy] or
-                       is_road_tile(gx-1,gy) or is_road_tile(gx+1,gy) or
-                       is_road_tile(gx,gy-1) or is_road_tile(gx,gy+1) then
-                        local key = gy * 10000 + gx
-                        if not seen_b[key] then
-                            seen_b[key] = true
-                            table.insert(building_plots, {x=gx, y=gy})
-                        end
-                    end
-                end
-            end
-        end
-        print(string.format("DEBUG building_plots=%d (total plot/dt_plot cells scanned in %dx%d grid)", #building_plots, sub_cw, sub_ch))
-        new_map.building_plots = building_plots
-    end
-
-    -- Override road_v_rxs / road_h_rys / road_nodes with sub-cell zone boundaries.
-    -- A street exists between two adjacent sub-cells with different (non-none) zone types.
-    do
-        local zg = new_map.zone_grid
-        if zg then
-            -- Per-cell road segments derived from zone boundaries.
-            --
-            -- (stale block removed — see updated comments below)
-
-            -- zone_seg_v[gy][rx] = true:
-            --   gap at x = rx*tps in zone row gy, between zone cols rx and rx+1 (1-indexed).
-            --   Requires zg[gy][rx] ~= zg[gy][rx+1].  Vehicle can travel N/S at pixel x=rx*tps.
-            -- zone_seg_h[ry][gx] = true:
-            --   gap at y = ry*tps in zone col gx, between zone rows ry and ry+1 (1-indexed).
-            --   Requires zg[ry][gx] ~= zg[ry+1][gx].  Vehicle can travel E/W at pixel y=ry*tps.
-            --
-            -- Road-node (rx,ry) is at pixel (rx*tps, ry*tps).  Movements:
-            --   North → (rx,ry-1): zone_seg_v[ry][rx]   (gap in zone row ry at x=rx*tps)
-            --   South → (rx,ry+1): zone_seg_v[ry+1][rx] (gap in zone row ry+1)
-            --   East  → (rx+1,ry): zone_seg_h[ry][rx+1] (gap in zone col rx+1 at y=ry*tps)
-            --   West  → (rx-1,ry): zone_seg_h[ry][rx]   (gap in zone col rx)
-            local zone_seg_v = {}
-            for gy = 1, sub_ch do
-                for rx = 1, sub_cw - 1 do
-                    local z1 = zg[gy][rx]
-                    local z2 = zg[gy][rx + 1]
-                    if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
-                        if not zone_seg_v[gy] then zone_seg_v[gy] = {} end
-                        zone_seg_v[gy][rx] = true
-                    end
-                end
-            end
-            local zone_seg_h = {}
-            for ry = 1, sub_ch - 1 do
-                for gx = 1, sub_cw do
-                    local z1 = zg[ry][gx]
-                    local z2 = zg[ry + 1][gx]
-                    if z1 and z1 ~= "none" and z2 and z2 ~= "none" and z1 ~= z2 then
-                        if not zone_seg_h[ry] then zone_seg_h[ry] = {} end
-                        zone_seg_h[ry][gx] = true
-                    end
-                end
-            end
-
-            local new_nodes = {}
-            for ry = 0, sub_ch - 1 do
-                for rx = 0, sub_cw - 1 do
-                    local has_north = ry >= 1 and zone_seg_v[ry] and zone_seg_v[ry][rx]
-                    local has_south = zone_seg_v[ry + 1] and zone_seg_v[ry + 1][rx]
-                    local has_east  = zone_seg_h[ry] and zone_seg_h[ry][rx + 1]
-                    local has_west  = rx >= 1 and zone_seg_h[ry] and zone_seg_h[ry][rx]
-                    if has_north or has_south or has_east or has_west then
-                        if not new_nodes[ry] then new_nodes[ry] = {} end
-                        new_nodes[ry][rx] = true
-                    end
-                end
-            end
-            -- Preserve arterial/highway nodes from the original street map.
-            for ry, row in pairs(new_map.road_nodes) do
-                for rx in pairs(row) do
-                    local gx2, gy2 = rx + 1, ry + 1
-                    local tile2 = grid[gy2] and grid[gy2][gx2]
-                    if tile2 and (tile2.type == "arterial" or tile2.type == "highway") then
-                        if not new_nodes[ry] then new_nodes[ry] = {} end
-                        new_nodes[ry][rx] = true
-                    end
-                end
-            end
-
-            -- ── Island connectivity ─────────────────────────────────────────────
-            -- Some zone-boundary road clusters may be surrounded by same-type or
-            -- "none" cells, making them unreachable from the highway network.
-            -- For each disconnected island, find the nearest reachable node and
-            -- add the minimum road segments to bridge the gap.
-            do
-                -- Step 1: BFS from arterial/highway nodes along zone_seg graph
-                --         to discover the main reachable component.
-                local reachable = {}
-                local rq = {}
-                for ry2, row in pairs(new_nodes) do
-                    for rx2 in pairs(row) do
-                        local gx2, gy2 = rx2 + 1, ry2 + 1
-                        local t2 = grid[gy2] and grid[gy2][gx2]
-                        if t2 and (t2.type == "arterial" or t2.type == "highway") then
-                            local k2 = ry2 * 100000 + rx2
-                            if not reachable[k2] then
-                                reachable[k2] = true
-                                rq[#rq + 1] = {rx2, ry2}
-                            end
-                        end
-                    end
-                end
-                local rqi = 1
-                while rqi <= #rq do
-                    local rx2, ry2 = rq[rqi][1], rq[rqi][2]; rqi = rqi + 1
-                    local checks = {
-                        {rx2,   ry2-1, ry2 >= 1 and zone_seg_v[ry2] and zone_seg_v[ry2][rx2]},
-                        {rx2,   ry2+1, zone_seg_v[ry2+1] and zone_seg_v[ry2+1][rx2]},
-                        {rx2+1, ry2,   zone_seg_h[ry2] and zone_seg_h[ry2][rx2+1]},
-                        {rx2-1, ry2,   rx2 >= 1 and zone_seg_h[ry2] and zone_seg_h[ry2][rx2]},
-                    }
-                    for _, c in ipairs(checks) do
-                        local nx2, ny2, ok = c[1], c[2], c[3]
-                        if ok and new_nodes[ny2] and new_nodes[ny2][nx2] then
-                            local nk = ny2 * 100000 + nx2
-                            if not reachable[nk] then
-                                reachable[nk] = true; rq[#rq + 1] = {nx2, ny2}
-                            end
-                        end
-                    end
-                end
-
-                -- Step 2: Multi-source BFS outward from the reachable set into the
-                --         full road-node grid (not restricted to existing road_nodes)
-                --         to find the shortest Manhattan path from every position to
-                --         the reachable set.
-                local par = {}  -- par[k] = {px, py} or true for seed positions
-                local pq = {}
-                for ry2, row in pairs(new_nodes) do
-                    for rx2 in pairs(row) do
-                        local k2 = ry2 * 100000 + rx2
-                        if reachable[k2] then par[k2] = true; pq[#pq + 1] = {rx2, ry2} end
-                    end
-                end
-                local pqi = 1
-                while pqi <= #pq do
-                    local rx2, ry2 = pq[pqi][1], pq[pqi][2]; pqi = pqi + 1
-                    local k2 = ry2 * 100000 + rx2
-                    for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
-                        local nx2, ny2 = rx2 + d[1], ry2 + d[2]
-                        if nx2 >= 0 and nx2 <= sub_cw - 2 and ny2 >= 0 and ny2 <= sub_ch - 2 then
-                            local nk = ny2 * 100000 + nx2
-                            if not par[nk] then
-                                par[nk] = {rx2, ry2}; pq[#pq + 1] = {nx2, ny2}
-                            end
-                        end
-                    end
-                end
-
-                -- Ensure two zone-grid cells are different non-none types so the gap
-                -- between them renders as a visible road in _buildCityImage.
-                local function makeVisible(gr1, gc1, gr2, gc2)
-                    local function ensureRow(r)
-                        if not zg[r] then zg[r] = {} end
-                    end
-                    ensureRow(gr1); ensureRow(gr2)
-                    local z1 = zg[gr1][gc1]
-                    local z2 = zg[gr2][gc2]
-                    if not z1 or z1 == "none" then z1 = "residential"; zg[gr1][gc1] = z1 end
-                    if not z2 or z2 == "none" or z2 == z1 then
-                        zg[gr2][gc2] = (z1 ~= "commercial") and "commercial" or "residential"
-                    end
-                end
-
-                -- Helper: add a single road segment between two adjacent road-node positions
-                -- and ensure the flanking zone cells differ so the road renders visibly.
-                --
-                -- road-node (rx,ry) is 0-indexed; zone grid (zg) is 1-indexed.
-                --   East  (rx2=rx1+1): zone_seg_h[ry1][rx1+1]  → zg[ry1][rx1+1] vs zg[ry1+1][rx1+1]
-                --   West  (rx2=rx1-1): zone_seg_h[ry1][rx1]    → zg[ry1][rx1]   vs zg[ry1+1][rx1]
-                --   South (ry2=ry1+1): zone_seg_v[ry1+1][rx1]  → zg[ry1+1][rx1] vs zg[ry1+1][rx1+1]
-                --   North (ry2=ry1-1): zone_seg_v[ry1][rx1]    → zg[ry1][rx1]   vs zg[ry1][rx1+1]
-                local function tileIsPlot(gx, gy)
-                    local t = grid[gy] and grid[gy][gx] and grid[gy][gx].type
-                    return t == "plot" or t == "downtown_plot"
-                end
-
-                local function addSeg(rx1, ry1, rx2, ry2)
-                    if rx2 == rx1 + 1 then          -- east: zone_seg_h[ry1][rx1+1], cells (ry1,rx1+1)/(ry1+1,rx1+1)
-                        if tileIsPlot(rx1 + 1, ry1) and tileIsPlot(rx1 + 1, ry1 + 1) then
-                            if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
-                            zone_seg_h[ry1][rx1 + 1] = true
-                            makeVisible(ry1, rx1 + 1, ry1 + 1, rx1 + 1)
-                        end
-                    elseif rx2 == rx1 - 1 then      -- west: zone_seg_h[ry1][rx1], cells (ry1,rx1)/(ry1+1,rx1)
-                        if tileIsPlot(rx1, ry1) and tileIsPlot(rx1, ry1 + 1) then
-                            if not zone_seg_h[ry1] then zone_seg_h[ry1] = {} end
-                            zone_seg_h[ry1][rx1] = true
-                            makeVisible(ry1, rx1, ry1 + 1, rx1)
-                        end
-                    elseif ry2 == ry1 + 1 then      -- south: zone_seg_v[ry1+1][rx1], cells (ry1+1,rx1)/(ry1+1,rx1+1)
-                        if tileIsPlot(rx1, ry1 + 1) and tileIsPlot(rx1 + 1, ry1 + 1) then
-                            if not zone_seg_v[ry1 + 1] then zone_seg_v[ry1 + 1] = {} end
-                            zone_seg_v[ry1 + 1][rx1] = true
-                            makeVisible(ry1 + 1, rx1, ry1 + 1, rx1 + 1)
-                        end
-                    elseif ry2 == ry1 - 1 then      -- north: zone_seg_v[ry1][rx1], cells (ry1,rx1)/(ry1,rx1+1)
-                        if tileIsPlot(rx1, ry1) and tileIsPlot(rx1 + 1, ry1) then
-                            if not zone_seg_v[ry1] then zone_seg_v[ry1] = {} end
-                            zone_seg_v[ry1][rx1] = true
-                            makeVisible(ry1, rx1, ry1, rx1 + 1)
-                        end
-                    end
-                    if not new_nodes[ry1] then new_nodes[ry1] = {} end; new_nodes[ry1][rx1] = true
-                    if not new_nodes[ry2] then new_nodes[ry2] = {} end; new_nodes[ry2][rx2] = true
-                end
-
-                -- Step 3: For each unreachable road node, walk the parent chain to
-                --         the reachable set, adding a segment at each step.
-                local unreachable = {}
-                for ry2, row in pairs(new_nodes) do
-                    for rx2 in pairs(row) do
-                        if not reachable[ry2 * 100000 + rx2] then
-                            unreachable[#unreachable + 1] = {rx2, ry2}
-                        end
-                    end
-                end
-                for _, unode in ipairs(unreachable) do
-                    local ux, uy = unode[1], unode[2]
-                    if not reachable[uy * 100000 + ux] then
-                        local cx, cy = ux, uy
-                        for _ = 1, sub_cw + sub_ch do
-                            local ck = cy * 100000 + cx
-                            if reachable[ck] then break end
-                            local p = par[ck]
-                            if not p or p == true then break end
-                            addSeg(cx, cy, p[1], p[2])
-                            reachable[ck] = true
-                            cx, cy = p[1], p[2]
-                        end
-                    end
-                end
-            end
-
-            -- road_v_rxs must remain a truthy table so PathfindingService treats this as
-            -- a road-node map (not a sandbox tile map).  The actual per-cell segment
-            -- data lives in zone_seg_v / zone_seg_h which the pathfinder reads directly.
-            new_map.road_v_rxs  = {}   -- truthy sentinel only
-            new_map.road_h_rys  = {}   -- truthy sentinel only
-            new_map.road_nodes  = new_nodes
-            new_map.zone_seg_v  = zone_seg_v
-            new_map.zone_seg_h  = zone_seg_h
-
-            -- Build tile_nodes so the pathfinder can navigate arterial/highway tiles
-            -- directly (bridging between corner nodes and tile-centre nodes).
-            -- Without this, vehicles can only use zone-boundary streets and cannot
-            -- cross arterials, forcing huge detours around them.
-            local tile_nodes_tbl = {}
-            for tgy = 1, sub_ch do
-                for tgx = 1, sub_cw do
-                    local tt = grid[tgy][tgx].type
-                    if tt == "arterial" or tt == "highway" then
-                        local tty = tgy - 1
-                        local ttx = tgx - 1
-                        if not tile_nodes_tbl[tty] then tile_nodes_tbl[tty] = {} end
-                        tile_nodes_tbl[tty][ttx] = true
-                    end
-                end
-            end
-            new_map.tile_nodes = tile_nodes_tbl
-        end
-    end
-
-    -- Helper: build city scope image with a specific view_mode (and optional scope), returns love.graphics.Image
-    local function buildCityImg(mode, bx1, bx2, by1, by2, scope)
-        local sv_mode  = self.view_mode
-        local sv_scope = self.view_scope
-        self.view_mode  = mode
-        if scope then self.view_scope = scope end
-        self:_buildCityImage(start_idx, bx1, bx2, by1, by2)
-        self.view_mode  = sv_mode
-        self.view_scope = sv_scope
-        return self.city_image
-    end
-
-    -- Helper: build world_image with specific scope/continent/region
-    local function buildWorldImg(scope, cid, rid)
-        local sv_scope = self.view_scope
-        local sv_cid   = self.selected_continent_id
-        local sv_rid   = self.selected_region_id
-        local sv_mode  = self.view_mode
-        self.view_scope = scope
-        self.selected_continent_id = cid
-        self.selected_region_id    = rid
-        -- world images always use biome (or height as fallback)
-        self.view_mode = self.biome_colormap and "biome" or "height"
-        self:_buildImage()
-        self.view_scope = sv_scope
-        self.selected_continent_id = sv_cid
-        self.selected_region_id    = sv_rid
-        self.view_mode = sv_mode
-        return self.world_image
-    end
-
-    -- Choose richest city-scope colour mode
-    local city_mode = (self.city_district_maps and self.city_district_maps[start_idx])
-                      and "districts"
-                      or  (self.biome_colormap and "biome" or "height")
-
-    -- City F8 image: full city bounds (padded 2 cells)
-    local cox1=math.max(1,city_mn_x-2); local cox2=math.min(w,city_mx_x+2)
-    local coy1=math.max(1,city_mn_y-2); local coy2=math.min(h,city_mx_y+2)
-    -- Downtown fogged version: same bounds as city image but with fog baked in
-    game.world_gen_downtown_fogged_image = buildCityImg(city_mode, cox1, cox2, coy1, coy2, "downtown")
-    -- Unfogged city image
-    game.world_gen_city_image     = buildCityImg(city_mode, cox1, cox2, coy1, coy2)
-    game.world_gen_city_img_x     = cox1
-    game.world_gen_city_img_y     = coy1
-
-    -- Store city origin for vehicle coord mapping
-    game.world_gen_city_mn_x = city_mn_x   -- world cell of city grid top-left
-    game.world_gen_city_mn_y = city_mn_y
-
-    -- Determine starting city's continent and region IDs
-    local start_loc = self.city_locations[start_idx]
-    local start_ci  = (start_loc.y - 1) * w + start_loc.x
-    local start_cid = self.continent_map and self.continent_map[start_ci]
-    local start_rid = self.region_map    and self.region_map[start_ci]
-
-    -- Region image: scope = starting city's region (darkened outside), fallback to world
-    game.world_gen_region_image =
-        buildWorldImg(start_rid and "region" or "world", nil, start_rid)
-
-    -- Continent image: scope = starting city's continent, fallback to world
-    game.world_gen_continent_image =
-        buildWorldImg(start_cid and "continent" or "world", start_cid, nil)
-
-    -- World image: full world
-    game.world_gen_world_image = buildWorldImg("world", nil, nil)
-
-    -- Store city image metadata (set by the last _buildCityImage call = city-scope)
-    game.world_gen_city_img_min_x = self.city_img_min_x   -- cox1
-    game.world_gen_city_img_min_y = self.city_img_min_y   -- coy1
-    game.world_gen_city_img_K     = self.city_img_K       -- 9
-
-    -- Precompute camera params for all 5 zoom levels (world-pixel coords, mirrors _fitToArea)
-    do
-        local ts2 = C.MAP.TILE_SIZE
-        local sw2, sh2 = love.graphics.getDimensions()
-        local vw2 = sw2 - C.UI.SIDEBAR_WIDTH
-
-        local function fitArea(mn_x, mx_x, mn_y, mx_y)
-            local aw = (mx_x - mn_x + 1) * ts2
-            local ah = (mx_y - mn_y + 1) * ts2
-            return {
-                scale = math.min(vw2 / aw, sh2 / ah) * 0.88,
-                x = ((mn_x + mx_x) * 0.5 - 0.5) * ts2,
-                y = ((mn_y + mx_y) * 0.5 - 0.5) * ts2,
-            }
-        end
-
-        local cp = {}
-        local S2 = C.MAP.SCALES
-
-        -- DOWNTOWN: sub-cell bounds of district poi_idx==1 (matches F8 _selectDowntown logic)
-        do
-            local dmap2  = self.city_district_maps and self.city_district_maps[start_idx]
-            local sub_w2 = w * 3
-            local sub_h2 = h * 3
-            local mn_scx, mx_scx = sub_w2, -1
-            local mn_scy, mx_scy = sub_h2, -1
-            if dmap2 then
-                for sci2, poi_idx2 in pairs(dmap2) do
-                    if poi_idx2 == 1 then
-                        local gscx2 = (sci2 - 1) % sub_w2
-                        local gscy2 = math.floor((sci2 - 1) / sub_w2)
-                        if gscx2 < mn_scx then mn_scx = gscx2 end
-                        if gscx2 > mx_scx then mx_scx = gscx2 end
-                        if gscy2 < mn_scy then mn_scy = gscy2 end
-                        if gscy2 > mx_scy then mx_scy = gscy2 end
-                    end
-                end
-            end
-            if mx_scx >= mn_scx then
-                local ts2 = C.MAP.TILE_SIZE
-                local px_x1 = mn_scx / 3 * ts2
-                local px_x2 = (mx_scx + 1) / 3 * ts2
-                local px_y1 = mn_scy / 3 * ts2
-                local px_y2 = (mx_scy + 1) / 3 * ts2
-                local area_w2 = px_x2 - px_x1
-                local area_h2 = px_y2 - px_y1
-                cp[S2.DOWNTOWN] = {
-                    scale = math.min(vw2 / area_w2, sh2 / area_h2) * 0.88,
-                    x = (px_x1 + px_x2) * 0.5,
-                    y = (px_y1 + px_y2) * 0.5,
-                }
-            else
-                -- Fallback: city bounds
-                cp[S2.DOWNTOWN] = fitArea(city_mn_x, city_mx_x, city_mn_y, city_mx_y)
-            end
-        end
-
-        -- CITY: full starting city bounds
-        cp[S2.CITY] = fitArea(city_mn_x, city_mx_x, city_mn_y, city_mx_y)
-
-        -- REGION: bounding box of starting city's region
-        do
-            local rmin_x, rmax_x, rmin_y, rmax_y = w+1, 0, h+1, 0
-            if start_rid and self.region_map then
-                for i = 1, w*h do
-                    if self.region_map[i] == start_rid then
-                        local rx = (i-1)%w+1; local ry = math.floor((i-1)/w)+1
-                        if rx<rmin_x then rmin_x=rx end; if rx>rmax_x then rmax_x=rx end
-                        if ry<rmin_y then rmin_y=ry end; if ry>rmax_y then rmax_y=ry end
-                    end
-                end
-            end
-            cp[S2.REGION] = (rmax_x >= rmin_x) and fitArea(rmin_x, rmax_x, rmin_y, rmax_y)
-                                                 or  fitArea(1, w, 1, h)
-        end
-
-        -- CONTINENT: bounding box of starting city's continent
-        do
-            local cmin_x, cmax_x, cmin_y, cmax_y = w+1, 0, h+1, 0
-            if start_cid and self.continent_map then
-                for i = 1, w*h do
-                    if self.continent_map[i] == start_cid then
-                        local cx2 = (i-1)%w+1; local cy2 = math.floor((i-1)/w)+1
-                        if cx2<cmin_x then cmin_x=cx2 end; if cx2>cmax_x then cmax_x=cx2 end
-                        if cy2<cmin_y then cmin_y=cy2 end; if cy2>cmax_y then cmax_y=cy2 end
-                    end
-                end
-            end
-            cp[S2.CONTINENT] = (cmax_x >= cmin_x) and fitArea(cmin_x, cmax_x, cmin_y, cmax_y)
-                                                    or  fitArea(1, w, 1, h)
-        end
-
-        -- WORLD: full map
-        cp[S2.WORLD] = fitArea(1, w, 1, h)
-
-        game.world_gen_cam_params = cp
-    end
+    -- ── Zone grid, road network, and image building ───────────────────────────
+    local ctx = {
+        sub_cw = sub_cw, sub_ch = sub_ch,
+        gscx_off = gscx_off, gscy_off = gscy_off,
+        sw = sw, w = w, start_idx = start_idx,
+        grid = grid, city_mn_x = city_mn_x, city_mn_y = city_mn_y,
+    }
+    self:_buildZoneGrid(new_map, ctx)
+    self:_buildRoadNetwork(new_map, ctx)
+    self:_buildGameImages(game, start_idx, city_mn_x, city_mx_x, city_mn_y, city_mx_y, w, h)
 
     -- Stamp onto game
     game.maps.city      = new_map

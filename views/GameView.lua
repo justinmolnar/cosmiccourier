@@ -101,26 +101,139 @@ function GameView:_drawEntitiesOnCityImage(ox, oy, scl, img_x, img_y)
     Game.camera.x = old_cx; Game.camera.y = old_cy; Game.camera.scale = old_cs
 end
 
-function GameView:draw()
+function GameView:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
     local Game = self.Game
-    local ui_manager = Game.ui_manager
-    local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
-    local screen_w, screen_h = love.graphics.getDimensions()
-    local DrawingUtils = require("utils.DrawingUtils")
-
-    local active_map = Game.maps[Game.active_map_key]
-    if not active_map then return end
-
-    love.graphics.setScissor(sidebar_w, 0, screen_w - sidebar_w, screen_h)
-
-    local S = Game.C.MAP.SCALES
-    local cur_scale = Game.state.current_map_scale
-
+    if #Game.state.floating_texts == 0 then return end
+    local game_world_w = screen_w - sidebar_w
+    local cx, cy = Game.camera.x, Game.camera.y
+    local cs = Game.camera.scale
+    local ft_ox, ft_oy = 0, 0
     if Game.world_gen_cam_params then
-        -- ── World-gen camera-based rendering (mirrors WorldSandboxView exactly) ──
-        local ts  = Game.C.MAP.TILE_SIZE
-        local vw  = screen_w - sidebar_w
+        local ts = Game.C.MAP.TILE_SIZE
+        ft_ox = ((Game.world_gen_city_mn_x or 1) - 1) * ts
+        ft_oy = ((Game.world_gen_city_mn_y or 1) - 1) * ts
+    end
+    love.graphics.setFont(Game.fonts.ui)
+    for _, ft in ipairs(Game.state.floating_texts) do
+        local sx = sidebar_w + game_world_w / 2 + (ft.x + ft_ox - cx) * cs
+        local sy = screen_h / 2 + (ft.y + ft_oy - cy) * cs
+        love.graphics.setColor(1, 1, 0.3, ft.alpha)
+        love.graphics.printf(ft.text, sx - 60, sy, 120, "center")
+    end
+end
 
+function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
+    local Game = self.Game
+    local DrawingUtils = require("utils.DrawingUtils")
+    love.graphics.push()
+    local game_world_w = screen_w - sidebar_w
+    love.graphics.translate(sidebar_w + game_world_w / 2, screen_h / 2)
+    love.graphics.scale(Game.camera.scale, Game.camera.scale)
+    love.graphics.translate(-Game.camera.x, -Game.camera.y)
+    active_map:draw()
+    -- Fog outside downtown
+    if cur_scale == S.DOWNTOWN then
+        local map = active_map
+        if map.downtown_offset and #map.grid > 0 and #map.grid[1] > 0 then
+            local TS = Game.C.MAP.TILE_SIZE
+            local dt = map.downtown_offset
+            local x1 = (dt.x - 1) * TS;  local y1 = (dt.y - 1) * TS
+            local x2 = (dt.x + Game.C.MAP.DOWNTOWN_GRID_WIDTH  - 1) * TS
+            local y2 = (dt.y + Game.C.MAP.DOWNTOWN_GRID_HEIGHT - 1) * TS
+            local gw = #map.grid[1] * TS; local gh = #map.grid * TS
+            love.graphics.setColor(0, 0, 0, 0.72)
+            love.graphics.rectangle("fill", 0,  0,  x1,      gh)
+            love.graphics.rectangle("fill", x2, 0,  gw-x2,  gh)
+            love.graphics.rectangle("fill", x1, 0,  x2-x1,  y1)
+            love.graphics.rectangle("fill", x1, y2, x2-x1,  gh-y2)
+        end
+    end
+    if Game.active_map_key == "city" then
+        if Game.entities.depot_plot then
+            local dpx, dpy = active_map:getPixelCoords(Game.entities.depot_plot.x, Game.entities.depot_plot.y)
+            DrawingUtils.drawWorldIcon(Game, "🏢", dpx, dpy)
+        end
+        for _, client in ipairs(Game.entities.clients) do
+            DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
+        end
+        Game.event_spawner:draw(Game)
+    end
+    for _, vehicle in ipairs(Game.entities.vehicles) do
+        if vehicle.visible then vehicle:draw(Game) end
+    end
+    if Game.active_map_key == "city" and ui_manager.hovered_trip_index then
+        local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
+        if trip and trip.legs[trip.current_leg] then
+            local leg = trip.legs[trip.current_leg]
+            local path_grid = active_map.grid
+            local is_rn3 = active_map.road_v_rxs ~= nil
+            local function nearestNode(plot)
+                return is_rn3 and active_map:findNearestRoadNode(plot)
+                               or active_map:findNearestRoadTile(plot)
+            end
+            local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1)
+                and nearestNode(Game.entities.depot_plot)
+                or  nearestNode(leg.start_plot)
+            local end_node = nearestNode(leg.end_plot)
+            if start_node and end_node and path_grid then
+                local vp = (leg.vehicleType == "bike") and Game.C.VEHICLES.BIKE or Game.C.VEHICLES.TRUCK
+                local cost_function
+                if is_rn3 then
+                    cost_function = function(rx, ry)
+                        local tile = path_grid[ry+1] and path_grid[ry+1][rx+1]
+                        return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
+                    end
+                else
+                    cost_function = function(x, y)
+                        local tile = path_grid[y] and path_grid[y][x]
+                        return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
+                    end
+                end
+                local path = Game.pathfinder.findPath(path_grid, start_node, end_node, cost_function, active_map)
+                if path then
+                    local pixel_path = {}
+                    local tps_pv2 = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
+                    local is_rn2  = active_map.road_v_rxs ~= nil
+                    for _, node in ipairs(path) do
+                        local px, py
+                        if is_rn2 then
+                            if node.is_tile then
+                                px, py = (node.x + 0.5) * tps_pv2, (node.y + 0.5) * tps_pv2
+                            else
+                                px, py = node.x * tps_pv2, node.y * tps_pv2
+                            end
+                        else
+                            px, py = active_map:getPixelCoords(node.x, node.y)
+                        end
+                        table.insert(pixel_path, px); table.insert(pixel_path, py)
+                    end
+                    love.graphics.setColor(0.2, 0.8, 1, 0.85)
+                    love.graphics.setLineWidth(3 / Game.camera.scale)
+                    love.graphics.line(pixel_path)
+                    love.graphics.setLineWidth(1)
+                    local cr = 5 / Game.camera.scale
+                    love.graphics.setColor(0.2, 0.8, 1, 1)
+                    love.graphics.circle("fill", pixel_path[1], pixel_path[2], cr)
+                    love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], cr)
+                end
+            end
+        end
+    end
+    if Game.debug_mode then
+        for _, vehicle in ipairs(Game.entities.vehicles) do
+            if vehicle.visible then vehicle:drawDebug(Game) end
+        end
+    end
+    love.graphics.pop()
+end
+
+function GameView:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
+    local Game = self.Game
+    local DrawingUtils = require("utils.DrawingUtils")
+    local ts  = Game.C.MAP.TILE_SIZE
+    local vw  = screen_w - sidebar_w
+
+    -- ── World-gen camera-based rendering (mirrors WorldSandboxView exactly) ──
         love.graphics.setColor(0.04, 0.04, 0.07)
         love.graphics.rectangle("fill", sidebar_w, 0, vw, screen_h)
 
@@ -711,140 +824,24 @@ function GameView:draw()
         end
 
         love.graphics.pop()
+end
 
+function GameView:draw()
+    local Game = self.Game
+    local active_map = Game.maps[Game.active_map_key]
+    if not active_map then return end
+    local sidebar_w  = Game.C.UI.SIDEBAR_WIDTH
+    local screen_w, screen_h = love.graphics.getDimensions()
+    local S          = Game.C.MAP.SCALES
+    local cur_scale  = Game.state.current_map_scale
+    local ui_manager = Game.ui_manager
+    love.graphics.setScissor(sidebar_w, 0, screen_w - sidebar_w, screen_h)
+    if Game.world_gen_cam_params then
+        self:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
     else
-        -- ── Tile-grid fallback (no world gen loaded yet) ──
-        love.graphics.push()
-
-        local game_world_w = screen_w - sidebar_w
-        love.graphics.translate(sidebar_w + game_world_w / 2, screen_h / 2)
-        love.graphics.scale(Game.camera.scale, Game.camera.scale)
-        love.graphics.translate(-Game.camera.x, -Game.camera.y)
-
-        active_map:draw()
-
-        -- Fog outside downtown
-        if cur_scale == S.DOWNTOWN then
-            local map = active_map
-            if map.downtown_offset and #map.grid > 0 and #map.grid[1] > 0 then
-                local TS = Game.C.MAP.TILE_SIZE
-                local dt = map.downtown_offset
-                local x1 = (dt.x - 1) * TS;  local y1 = (dt.y - 1) * TS
-                local x2 = (dt.x + Game.C.MAP.DOWNTOWN_GRID_WIDTH  - 1) * TS
-                local y2 = (dt.y + Game.C.MAP.DOWNTOWN_GRID_HEIGHT - 1) * TS
-                local gw = #map.grid[1] * TS; local gh = #map.grid * TS
-                love.graphics.setColor(0, 0, 0, 0.72)
-                love.graphics.rectangle("fill", 0,  0,  x1,      gh)
-                love.graphics.rectangle("fill", x2, 0,  gw-x2,  gh)
-                love.graphics.rectangle("fill", x1, 0,  x2-x1,  y1)
-                love.graphics.rectangle("fill", x1, y2, x2-x1,  gh-y2)
-            end
-        end
-
-        if Game.active_map_key == "city" then
-            if Game.entities.depot_plot then
-                local dpx, dpy = active_map:getPixelCoords(Game.entities.depot_plot.x, Game.entities.depot_plot.y)
-                DrawingUtils.drawWorldIcon(Game, "🏢", dpx, dpy)
-            end
-            for _, client in ipairs(Game.entities.clients) do
-                DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
-            end
-            Game.event_spawner:draw(Game)
-        end
-
-        for _, vehicle in ipairs(Game.entities.vehicles) do
-            if vehicle.visible then vehicle:draw(Game) end
-        end
-
-        if Game.active_map_key == "city" and ui_manager.hovered_trip_index then
-            local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
-            if trip and trip.legs[trip.current_leg] then
-                local leg = trip.legs[trip.current_leg]
-                local path_grid = active_map.grid
-                local is_rn3 = active_map.road_v_rxs ~= nil
-                local function nearestNode(plot)
-                    return is_rn3 and active_map:findNearestRoadNode(plot)
-                                   or active_map:findNearestRoadTile(plot)
-                end
-                local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1)
-                    and nearestNode(Game.entities.depot_plot)
-                    or  nearestNode(leg.start_plot)
-                local end_node = nearestNode(leg.end_plot)
-                if start_node and end_node and path_grid then
-                    local vp = (leg.vehicleType == "bike") and Game.C.VEHICLES.BIKE or Game.C.VEHICLES.TRUCK
-                    local cost_function
-                    if is_rn3 then
-                        cost_function = function(rx, ry)
-                            local tile = path_grid[ry+1] and path_grid[ry+1][rx+1]
-                            return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
-                        end
-                    else
-                        cost_function = function(x, y)
-                            local tile = path_grid[y] and path_grid[y][x]
-                            return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
-                        end
-                    end
-                    local path = Game.pathfinder.findPath(path_grid, start_node, end_node, cost_function, active_map)
-                    if path then
-                        local pixel_path = {}
-                        local tps_pv2 = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
-                        local is_rn2  = active_map.road_v_rxs ~= nil
-                        for _, node in ipairs(path) do
-                            local px, py
-                            if is_rn2 then
-                                if node.is_tile then
-                                    px, py = (node.x + 0.5) * tps_pv2, (node.y + 0.5) * tps_pv2
-                                else
-                                    px, py = node.x * tps_pv2, node.y * tps_pv2
-                                end
-                            else
-                                px, py = active_map:getPixelCoords(node.x, node.y)
-                            end
-                            table.insert(pixel_path, px); table.insert(pixel_path, py)
-                        end
-                        love.graphics.setColor(0.2, 0.8, 1, 0.85)
-                        love.graphics.setLineWidth(3 / Game.camera.scale)
-                        love.graphics.line(pixel_path)
-                        love.graphics.setLineWidth(1)
-                        local cr = 5 / Game.camera.scale
-                        love.graphics.setColor(0.2, 0.8, 1, 1)
-                        love.graphics.circle("fill", pixel_path[1], pixel_path[2], cr)
-                        love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], cr)
-                    end
-                end
-            end
-        end
-
-        if Game.debug_mode then
-            for _, vehicle in ipairs(Game.entities.vehicles) do
-                if vehicle.visible then vehicle:drawDebug(Game) end
-            end
-        end
-
-        love.graphics.pop()
+        self:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
     end
-
-    -- Floating payout texts (screen space)
-    if #Game.state.floating_texts > 0 then
-        local game_world_w = screen_w - sidebar_w
-        local cx, cy = Game.camera.x, Game.camera.y
-        local cs = Game.camera.scale
-        -- World-gen camera is in world-pixel coords; tile-pixel positions need city offset
-        local ft_ox, ft_oy = 0, 0
-        if Game.world_gen_cam_params then
-            local ts = Game.C.MAP.TILE_SIZE
-            ft_ox = ((Game.world_gen_city_mn_x or 1) - 1) * ts
-            ft_oy = ((Game.world_gen_city_mn_y or 1) - 1) * ts
-        end
-        love.graphics.setFont(Game.fonts.ui)
-        for _, ft in ipairs(Game.state.floating_texts) do
-            local sx = sidebar_w + game_world_w / 2 + (ft.x + ft_ox - cx) * cs
-            local sy = screen_h / 2 + (ft.y + ft_oy - cy) * cs
-            love.graphics.setColor(1, 1, 0.3, ft.alpha)
-            love.graphics.printf(ft.text, sx - 60, sy, 120, "center")
-        end
-    end
-
+    self:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
     love.graphics.setScissor()
 end
 

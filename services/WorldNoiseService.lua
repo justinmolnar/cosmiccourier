@@ -4,17 +4,10 @@
 -- No artificial island placement. sea level is implicitly the coast_max threshold.
 
 local WorldNoiseService = {}
+local Biomes = require("data.biomes")
 
-local _biome_color_cache
-local function biome_color_lookup()
-    if _biome_color_cache then return _biome_color_cache end
-    local t = {}
-    for _, b in ipairs(require("data.biomes")) do
-        t[b.name] = {b.r, b.g, b.b}
-    end
-    _biome_color_cache = t
-    return t
-end
+local RIVER_COLOR = { 0.22, 0.52, 0.88 }
+local LAKE_COLOR  = { 0.07, 0.20, 0.55 }
 
 -- Standard FBM — smooth hills, used for continental shape and moisture.
 local function fbm(px, py, scale, octaves, persistence, lacunarity, ox, oy)
@@ -57,52 +50,6 @@ local function edge_mask(x, y, w, h, margin)
     return fx * fy
 end
 
--- Biome name — mirrors biome_color_climate exactly, returns string label.
-local function biome_name_climate(h, temp, wet, p)
-    if h < p.deep_ocean_max then return "Deep Ocean" end
-    if h < p.ocean_max      then return "Ocean" end
-    if h < p.coast_max      then return "Beach" end
-    if h >= p.mountain_max  then return "Snow Cap" end
-    if h >= p.highland_max  then
-        if temp < 0.25 then return "Frozen Rock" end
-        return "Mountain Rock"
-    end
-    if h >= p.forest_max then
-        if temp < 0.22 then return "Cold Highland" end
-        if temp < 0.45 then return "Boreal Highland" end
-        return "Highland"
-    end
-    if h < p.plains_max and wet > 0.72 and temp > 0.35 then
-        if temp > 0.62 then return "Tropical Swamp" end
-        return "Swamp"
-    end
-    if temp < 0.22 then
-        if wet > 0.50 then return "Boreal / Taiga" end
-        return "Tundra"
-    elseif temp < 0.45 then
-        if wet > 0.60 then return "Temp. Rainforest" end
-        if wet > 0.35 then return "Temp. Forest" end
-        if wet > 0.15 then return "Grassland" end
-        return "Shrubland"
-    elseif temp < 0.68 then
-        if wet > 0.60 then return "Subtropical Forest" end
-        if wet > 0.35 then return "Woodland" end
-        if wet > 0.15 then return "Savanna" end
-        return "Semi-arid"
-    else
-        if wet > 0.55 then return "Jungle" end
-        if wet > 0.30 then return "Tropical Forest" end
-        if wet > 0.12 then return "Tropical Savanna" end
-        return "Desert"
-    end
-end
-
--- Climate-based biome color — looks up color from data/biomes.lua by name.
-local function biome_color_climate(h, temp, wet, p)
-    local name = biome_name_climate(h, temp, wet, p)
-    return biome_color_lookup()[name] or {0.5, 0.5, 0.5}
-end
-
 -- Discrete biome colors — flat per band, no lerp between biomes.
 -- This gives crisp colour bands like a classic tile map, not a smooth haze.
 local function biome_color(h, m, p)
@@ -125,9 +72,13 @@ local function biome_color(h, m, p)
     end
 end
 
-function WorldNoiseService.generate(w, h, p)
-    local sx = p.seed_x or 0
-    local sy = p.seed_y or 0
+-- ── Phase 1: heightmap ────────────────────────────────────────────────────────
+-- Generates FBM noise heightmap, normalises, applies edge mask and mountain
+-- ridges.  Returns the heightmap, the initial biome-color colormap, the
+-- pre-ridge smooth heights used by river routing, and the moisture map.
+local function generateHeightMap(w, h, p)
+    local sx     = p.seed_x or 0
+    local sy     = p.seed_y or 0
     local margin = p.edge_margin or 0.22
 
     -- Pass 1: island shapes via smooth FBM only.
@@ -194,6 +145,16 @@ function WorldNoiseService.generate(w, h, p)
         end
     end
 
+    return heightmap, colormap, pre_ridge, moisture_map
+end
+
+-- ── Phase 2: rivers + lakes ───────────────────────────────────────────────────
+-- Traces rivers downstream and fills pits as lakes.  Modifies colormap
+-- in-place for water cells.  Returns painted (river+lake set) and is_lake.
+local function traceRiversAndLakes(w, h, p, heightmap, colormap, pre_ridge)
+    local sx = p.seed_x or 0
+    local sy = p.seed_y or 0
+
     -- Pass 3: Source-tracing rivers with fill-and-spill lakes.
     --
     -- Pick N well-spaced highland sources.  Trace each downstream via strict
@@ -202,8 +163,6 @@ function WorldNoiseService.generate(w, h, p)
     -- then continue the river from that rim — rivers never end mid-land.
     -- Two traces that reach the same cell merge naturally.
     -- Hoisted so Pass 4 (biome map) can read which cells are water.
-    local RIVER_COLOR = { 0.22, 0.52, 0.88 }
-    local LAKE_COLOR  = { 0.07, 0.20, 0.55 }
     local painted = {}   -- river + lake cell indices
     local is_lake = {}   -- lake-only subset for merging
 
@@ -489,6 +448,15 @@ function WorldNoiseService.generate(w, h, p)
         end
     end
 
+    return painted, is_lake
+end
+
+-- ── Phase 3: biomes + suitability ─────────────────────────────────────────────
+-- Builds climate biome colormap (Pass 4) and city-suitability scores (Pass 5).
+local function assignBiomesAndSuitability(w, h, p, heightmap, pre_ridge, moisture_map, painted, is_lake)
+    local sx = p.seed_x or 0
+    local sy = p.seed_y or 0
+
     -- Pass 4: Water-proximity biome map.
     -- Multi-source BFS from all river/lake cells.  Cells close to water get
     -- high fertility (lush green); cells far away get low fertility (arid brown).
@@ -553,8 +521,8 @@ function WorldNoiseService.generate(w, h, p)
                     local temp = math.max(0, math.min(1, temp_base - elev_t * 0.4))
                     -- Wetness: water proximity (fertility) blended with moisture noise
                     local wet = math.max(0, math.min(1, fert * 0.7 + moist * 0.3))
-                    biome_colormap[y][x] = biome_color_climate(h_val, temp, wet, p)
-                    biome_data[i] = { name = biome_name_climate(h_val, temp, wet, p),
+                    biome_colormap[y][x] = Biomes.getColor(h_val, temp, wet, p)
+                    biome_data[i] = { name = Biomes.getName(h_val, temp, wet, p),
                                       temp = temp, wet = wet, is_river = false, is_lake = false }
                 end
             end
@@ -733,6 +701,16 @@ function WorldNoiseService.generate(w, h, p)
             end
         end
     end
+
+    return biome_colormap, biome_data, suitability_colormap, raw_suit
+end
+
+-- ── Phase 4: continents + regions ─────────────────────────────────────────────
+-- BFS continent labelling (Pass 6) then weighted-Dijkstra region subdivision
+-- (Pass 7).
+local function detectContinentsAndRegions(w, h, p, heightmap, pre_ridge, painted)
+    local sx = p.seed_x or 0
+    local sy = p.seed_y or 0
 
     -- Pass 6: Continent detection via BFS flood fill.
     -- Every connected land component (pre_ridge > ocean_max) is one continent.
@@ -1033,16 +1011,39 @@ function WorldNoiseService.generate(w, h, p)
         end
     end
 
-    return { heightmap = heightmap, colormap = colormap,
-             biome_colormap = biome_colormap, biome_data = biome_data,
-             suitability_colormap = suitability_colormap,
-             suitability_scores   = raw_suit,
-             continent_colormap   = continent_colormap,
-             continent_map        = continent_map,
-             continents           = continents,
-             region_colormap      = region_colormap,
-             region_map           = region_map,
-             regions_list         = regions_list }
+    return continent_colormap, continent_map, continents,
+           region_colormap, region_map, regions_list
+end
+
+-- ── Public entry point ────────────────────────────────────────────────────────
+function WorldNoiseService.generate(w, h, p)
+    local heightmap, colormap, pre_ridge, moisture_map =
+        generateHeightMap(w, h, p)
+
+    local painted, is_lake =
+        traceRiversAndLakes(w, h, p, heightmap, colormap, pre_ridge)
+
+    local biome_colormap, biome_data, suitability_colormap, raw_suit =
+        assignBiomesAndSuitability(w, h, p, heightmap, pre_ridge, moisture_map, painted, is_lake)
+
+    local continent_colormap, continent_map, continents,
+          region_colormap, region_map, regions_list =
+        detectContinentsAndRegions(w, h, p, heightmap, pre_ridge, painted)
+
+    return {
+        heightmap            = heightmap,
+        colormap             = colormap,
+        biome_colormap       = biome_colormap,
+        biome_data           = biome_data,
+        suitability_colormap = suitability_colormap,
+        suitability_scores   = raw_suit,
+        continent_colormap   = continent_colormap,
+        continent_map        = continent_map,
+        continents           = continents,
+        region_colormap      = region_colormap,
+        region_map           = region_map,
+        regions_list         = regions_list,
+    }
 end
 
 return WorldNoiseService
