@@ -208,6 +208,12 @@ function ErrorService.clearLogs()
     ErrorService.logInfo("ErrorService", "Log history cleared")
 end
 
+-- Reset all mutable state — intended for test isolation between runs.
+function ErrorService.reset()
+    log_entries = {}
+    error_counts = {}
+end
+
 function ErrorService.setLogLevel(level)
     if type(level) == "string" then
         level = ERROR_LEVELS[level:upper()]

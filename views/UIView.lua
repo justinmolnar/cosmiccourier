@@ -1,4 +1,9 @@
 -- views/UIView.lua
+local TripsPanelView    = require("views.components.TripsPanelView")
+local UpgradesPanelView = require("views.components.UpgradesPanelView")
+local VehiclesPanelView = require("views.components.VehiclesPanelView")
+local ClientsPanelView  = require("views.components.ClientsPanelView")
+
 local UIView = {}
 UIView.__index = UIView
 
@@ -16,12 +21,6 @@ function UIView:draw()
     local sidebar_w = C.UI.SIDEBAR_WIDTH
     local screen_h = love.graphics.getHeight()
     
-    -- Require all the new view components
-    local TripsPanelView = require("views.components.TripsPanelView")
-    local UpgradesPanelView = require("views.components.UpgradesPanelView")
-    local VehiclesPanelView = require("views.components.VehiclesPanelView")
-    local ClientsPanelView = require("views.components.ClientsPanelView")
-
     love.graphics.setScissor(0, 0, sidebar_w, screen_h)
     love.graphics.setColor(C.MAP.COLORS.UI_BG)
     love.graphics.rectangle("fill", 0, 0, sidebar_w, screen_h)

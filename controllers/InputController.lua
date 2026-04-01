@@ -26,45 +26,21 @@ function InputController:keypressed(key)
         return
     end
 
-    -- Debug overlays
-    if key == "b" then
-        self.game.debug_building_plots = not (self.game.debug_building_plots or false)
-        print("DEBUG: building_plots overlay " .. (self.game.debug_building_plots and "ON" or "OFF"))
-        return
-    end
-    if key == "p" then
-        self.game.debug_pickup_locations = not (self.game.debug_pickup_locations or false)
-        print("DEBUG: pickup/client overlay " .. (self.game.debug_pickup_locations and "ON" or "OFF"))
-        return
-    end
-    if key == "g" then
-        self.game.debug_road_segments = not (self.game.debug_road_segments or false)
-        print("DEBUG: road segments overlay " .. (self.game.debug_road_segments and "ON" or "OFF"))
-        return
-    end
-    if key == "v" then
-        self.game.debug_smooth_roads = not (self.game.debug_smooth_roads or false)
-        print("DEBUG: smooth road overlay " .. (self.game.debug_smooth_roads and "ON" or "OFF"))
-        return
-    end
-    if key == "n" then
-        self.game.debug_hide_roads = not (self.game.debug_hide_roads or false)
-        print("DEBUG: hide roads " .. (self.game.debug_hide_roads and "ON" or "OFF"))
-        return
-    end
-    if key == "m" then
-        self.game.debug_smooth_roads_merged = not (self.game.debug_smooth_roads_merged or false)
-        print("DEBUG: merged street overlay " .. (self.game.debug_smooth_roads_merged and "ON" or "OFF"))
-        return
-    end
-    if key == "j" then
-        self.game.debug_smooth_roads_like = not (self.game.debug_smooth_roads_like or false)
-        print("DEBUG: streets-like-big-roads overlay " .. (self.game.debug_smooth_roads_like and "ON" or "OFF"))
-        return
-    end
-    if key == "o" then
-        self.game.overlay_only_mode = not (self.game.overlay_only_mode or false)
-        print("Overlay-only mode " .. (self.game.overlay_only_mode and "ON" or "OFF"))
+    -- Debug overlay toggles
+    local DEBUG_TOGGLES = {
+        b = { field = "debug_building_plots",      label = "building plots overlay" },
+        p = { field = "debug_pickup_locations",    label = "pickup/client overlay" },
+        g = { field = "debug_road_segments",       label = "road segments overlay" },
+        v = { field = "debug_smooth_roads",        label = "smooth road overlay" },
+        n = { field = "debug_hide_roads",          label = "hide roads" },
+        m = { field = "debug_smooth_roads_merged", label = "merged street overlay" },
+        j = { field = "debug_smooth_roads_like",   label = "streets-like-big-roads overlay" },
+        o = { field = "overlay_only_mode",         label = "overlay-only mode" },
+    }
+    local toggle = DEBUG_TOGGLES[key]
+    if toggle then
+        self.game[toggle.field] = not (self.game[toggle.field] or false)
+        print("DEBUG: " .. toggle.label .. " " .. (self.game[toggle.field] and "ON" or "OFF"))
         return
     end
 

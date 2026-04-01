@@ -2,6 +2,7 @@
 -- Updated to render edge-based streets between grid cells
 local Bike = require("models.vehicles.Bike")
 local Truck = require("models.vehicles.Truck")
+local FloatingTextSystem = require("services.FloatingTextSystem")
 
 
 local GameView = {}
@@ -103,7 +104,8 @@ end
 
 function GameView:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
     local Game = self.Game
-    if #Game.state.floating_texts == 0 then return end
+    local texts = FloatingTextSystem.getTexts()
+    if #texts == 0 then return end
     local game_world_w = screen_w - sidebar_w
     local cx, cy = Game.camera.x, Game.camera.y
     local cs = Game.camera.scale
@@ -114,7 +116,7 @@ function GameView:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
         ft_oy = ((Game.world_gen_city_mn_y or 1) - 1) * ts
     end
     love.graphics.setFont(Game.fonts.ui)
-    for _, ft in ipairs(Game.state.floating_texts) do
+    for _, ft in ipairs(texts) do
         local sx = sidebar_w + game_world_w / 2 + (ft.x + ft_ox - cx) * cs
         local sy = screen_h / 2 + (ft.y + ft_oy - cy) * cs
         love.graphics.setColor(1, 1, 0.3, ft.alpha)

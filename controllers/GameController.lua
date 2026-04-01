@@ -1,6 +1,8 @@
 -- controllers/GameController.lua
 -- Main game controller that manages all game systems and updates
 
+local FloatingTextSystem = require("services.FloatingTextSystem")
+
 local GameController = {}
 GameController.__index = GameController
 
@@ -41,6 +43,10 @@ function GameController:update(dt)
     self.game.error_service.withErrorHandling(function()
         self.game.state:update(scaled_dt, self.game)
     end, "Game State Update")
+
+    self.game.error_service.withErrorHandling(function()
+        FloatingTextSystem.update(scaled_dt, self.game)
+    end, "Floating Text Update")
     
     self.game.error_service.withErrorHandling(function()
         self.game.time:update(scaled_dt, self.game)

@@ -19,8 +19,7 @@ local SAVE_SCHEMA = {
     },
     regenerated_data = {
         "income_history",
-        "trip_creation_history", 
-        "floating_texts",
+        "trip_creation_history",
         "rush_hour",
         "entities" -- All vehicles, clients, trips regenerated
     }

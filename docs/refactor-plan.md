@@ -707,9 +707,13 @@ Task 7.2 requires adding error handling around every handler body — this is th
 
 ---
 
-**Status:** Not started
-**Line count change:** ~+50 / −150 (net reduction ~100)
-**Deviation from plan:** —
+**Status:** Complete (not yet committed — awaiting testing)
+**Line count change:** +75 new service/lib code / −120 removed inline duplicates (net ~−45)
+**Deviation from plan:**
+- **7.2 skipped:** `WfcLabController` was deleted in Phase 2 pre-purge. No keypressed chain exists to replace.
+- **7.6 skipped:** Both `_createEmptyGrid` sources (`MapGenerationService`, `NewCityGenService`) were deleted in Phase 2. `lib/grid_search.lua` already exists from Phase 3 but has no grid-creation helper; nothing to absorb.
+- **7.5 implementation:** `FloatingTextSystem` is a module-level singleton (single `_texts` table) rather than an instantiable class — sufficient for a single-game-instance process. `GameState` no longer holds or updates `floating_texts`. `EventService` calls `FloatingTextSystem.emit()`. `GameController` calls `FloatingTextSystem.update()`. The plan specified `FloatingTextSystem.draw()` — instead implemented `FloatingTextSystem.getTexts()` and left rendering in `GameView._drawFloatingTexts`; services should not render. `SaveService`'s `regenerated_data` entry for `floating_texts` removed (was dead — field no longer exists in state).
+- **7.1 implementation:** `InputDispatcher` uses a predicate-per-handler model rather than a priority-ordered controller list. Each handler registers a predicate (e.g., `wsc:isActive()`) and a handler fn; dispatch stops at the first match. The f8 toggle is registered as its own handler with `key == "f8"` predicate, keeping it distinct from the active-sandbox check. Registration lives in a `do` block in `love.load()` immediately after all controllers are created.
 
 ---
 

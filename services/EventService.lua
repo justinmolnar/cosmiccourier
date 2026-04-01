@@ -1,6 +1,7 @@
 -- services/EventService.lua
 local MapScales = require("data.map_scales")
 local TripEligibilityService = require("services.TripEligibilityService")
+local FloatingTextSystem = require("services.FloatingTextSystem")
 local EventService = {}
 
 function EventService.setupGameEvents(state, game)
@@ -21,13 +22,7 @@ function EventService.setupDeliveryEvents(state, game)
         local bonus_text = string.format("$%.f", data.bonus)
         local transit_text = data.transit_time and string.format(" (%.1fs)", data.transit_time) or ""
         local payout_text = string.format("$%.f\n+ %s\nSpeed Bonus!%s", data.base, bonus_text, transit_text)
-        table.insert(state.floating_texts, { 
-            text = payout_text, 
-            x = data.x, 
-            y = data.y, 
-            timer = game.C.EFFECTS.PAYOUT_TEXT_LIFESPAN_SEC, 
-            alpha = 1 
-        })
+        FloatingTextSystem.emit(payout_text, data.x, data.y, game.C)
     end)
 end
 

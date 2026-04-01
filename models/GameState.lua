@@ -34,7 +34,6 @@ function State:new(C, game)
     }
     
     instance.rush_hour = { active = false, timer = 0 }
-    instance.floating_texts = {}
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
     instance.metro_license_unlocked = false
 
@@ -67,16 +66,6 @@ function State:update(dt, game)
         end
     end
 
-    for i = #self.floating_texts, 1, -1 do
-        local text = self.floating_texts[i]
-        text.y = text.y + (C.EFFECTS.PAYOUT_TEXT_FLOAT_SPEED / game.camera.scale) * dt
-        text.timer = text.timer - dt
-        text.alpha = text.timer / C.EFFECTS.PAYOUT_TEXT_LIFESPAN_SEC
-        
-        if text.timer <= 0 then
-            table.remove(self.floating_texts, i)
-        end
-    end
 end
 
 return State

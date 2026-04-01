@@ -97,6 +97,54 @@ function love.load()
     Game.world_sandbox_view        = require("views.WorldSandboxView"):new(Game)
     Game.world_sandbox_sidebar_view = require("views.WorldSandboxSidebarView"):new(Game)
 
+    -- Register input dispatcher (must be after all controllers are created)
+    do
+        local InputDispatcher = require("lib.input_dispatcher")
+        Game.input_dispatcher = InputDispatcher:new()
+        local wsc = Game.world_sandbox_controller
+        local ic  = Game.input_controller
+
+        -- keypressed: f8 toggles sandbox; sandbox gets priority when active; fallback to input_controller
+        Game.input_dispatcher:on("keypressed",
+            function(k) return k == "f8" end,
+            function()  wsc:toggle() end)
+        Game.input_dispatcher:on("keypressed",
+            function()  return wsc:isActive() end,
+            function(k) wsc:handle_keypressed(k) end)
+        Game.input_dispatcher:on("keypressed", nil,
+            function(k) ic:keypressed(k) end)
+
+        Game.input_dispatcher:on("mousewheelmoved",
+            function()    return wsc:isActive() end,
+            function(x,y) wsc:handle_mouse_wheel(x,y) end)
+        Game.input_dispatcher:on("mousewheelmoved", nil,
+            function(x,y) ic:mousewheelmoved(x,y) end)
+
+        Game.input_dispatcher:on("mousepressed",
+            function()      return wsc:isActive() end,
+            function(x,y,b) wsc:handle_mouse_down(x,y,b) end)
+        Game.input_dispatcher:on("mousepressed", nil,
+            function(x,y,b) ic:mousepressed(x,y,b) end)
+
+        Game.input_dispatcher:on("mousereleased",
+            function()      return wsc:isActive() end,
+            function(x,y,b) wsc:handle_mouse_up(x,y,b) end)
+        Game.input_dispatcher:on("mousereleased", nil,
+            function(x,y,b) ic:mousereleased(x,y,b) end)
+
+        Game.input_dispatcher:on("mousemoved",
+            function()          return wsc:isActive() end,
+            function(x,y,dx,dy) wsc:handle_mouse_moved(x,y,dx,dy) end)
+        Game.input_dispatcher:on("mousemoved", nil,
+            function(x,y,dx,dy) ic:mousemoved(x,y,dx,dy) end)
+
+        Game.input_dispatcher:on("textinput",
+            function()  return wsc:isActive() end,
+            function(t) wsc:handle_textinput(t) end)
+        Game.input_dispatcher:on("textinput", nil,
+            function(t) ic:textinput(t) end)
+    end
+
     Game.entities:init(Game)
 
     ErrorService.withErrorHandling(function()
@@ -169,59 +217,12 @@ function love.draw()
     Game.ui_manager.modal_manager:draw(Game)
 end
 
-function love.keypressed(key)
-    if key == "f8" then
-        Game.world_sandbox_controller:toggle()
-        return
-    end
-
-    if Game.world_sandbox_controller:isActive() then
-        Game.world_sandbox_controller:handle_keypressed(key)
-        return
-    end
-
-    Game.input_controller:keypressed(key)
-end
-
-function love.mousewheelmoved(x, y)
-    if Game.world_sandbox_controller:isActive() then
-        Game.world_sandbox_controller:handle_mouse_wheel(x, y)
-        return
-    end
-    Game.input_controller:mousewheelmoved(x, y)
-end
-
-function love.mousepressed(x, y, button)
-    if Game.world_sandbox_controller:isActive() then
-        Game.world_sandbox_controller:handle_mouse_down(x, y, button)
-        return
-    end
-    Game.input_controller:mousepressed(x, y, button)
-end
-
-function love.mousereleased(x, y, button)
-    if Game.world_sandbox_controller:isActive() then
-        Game.world_sandbox_controller:handle_mouse_up(x, y, button)
-        return
-    end
-    Game.input_controller:mousereleased(x, y, button)
-end
-
-function love.mousemoved(x, y, dx, dy)
-    if Game.world_sandbox_controller:isActive() then
-        Game.world_sandbox_controller:handle_mouse_moved(x, y, dx, dy)
-        return
-    end
-    Game.input_controller:mousemoved(x, y, dx, dy)
-end
-
-function love.textinput(text)
-    if Game.world_sandbox_controller:isActive() then
-        Game.world_sandbox_controller:handle_textinput(text)
-        return
-    end
-    Game.input_controller:textinput(text)
-end
+function love.keypressed(key)          Game.input_dispatcher:dispatch("keypressed", key) end
+function love.mousewheelmoved(x, y)    Game.input_dispatcher:dispatch("mousewheelmoved", x, y) end
+function love.mousepressed(x, y, b)    Game.input_dispatcher:dispatch("mousepressed", x, y, b) end
+function love.mousereleased(x, y, b)   Game.input_dispatcher:dispatch("mousereleased", x, y, b) end
+function love.mousemoved(x, y, dx, dy) Game.input_dispatcher:dispatch("mousemoved", x, y, dx, dy) end
+function love.textinput(text)          Game.input_dispatcher:dispatch("textinput", text) end
 
 function love.quit()
     Game.error_service.logInfo("Main", "Game shutting down...")
