@@ -192,6 +192,74 @@ function WFC._propagate(wfc, startX, startY)
     end
 end
 
+-- Graph-based propagation (arbitrary neighbor map instead of N/S/E/W grid).
+-- neighbors: {[x] = {[nx] = true}}  (all at y=1)
+-- allowed_pairs: {[state_a] = {[state_b] = true}}  (symmetric, direction-independent)
+function WFC._propagateGraph(wfc, start_x, neighbors, allowed_pairs)
+    local stack = {start_x}
+    while #stack > 0 do
+        local cx = table.remove(stack)
+        for nx in pairs(neighbors[cx] or {}) do
+            if wfc.entropy_grid[1][nx] > 1 then
+                local changed = false
+                for state, is_possible in pairs(wfc.grid[1][nx]) do
+                    if is_possible then
+                        local supported = false
+                        for cx_state, cx_ok in pairs(wfc.grid[1][cx]) do
+                            if cx_ok and allowed_pairs[cx_state] and allowed_pairs[cx_state][state] then
+                                supported = true; break
+                            end
+                        end
+                        if not supported then
+                            wfc.grid[1][nx][state] = false
+                            changed = true
+                        end
+                    end
+                end
+                if changed then
+                    local e = 0
+                    for _, ip in pairs(wfc.grid[1][nx]) do if ip then e = e + 1 end end
+                    wfc.entropy_grid[1][nx] = e
+                    table.insert(stack, nx)
+                end
+            end
+        end
+    end
+end
+
+-- Solves WFC on an arbitrary graph (all cells at y=1, indexed by x).
+-- Pre-collapse any cells before calling. Returns true on success, false on contradiction.
+function WFC.solveGraph(wfc, neighbors, allowed_pairs)
+    for _ = 1, wfc.width do
+        local cell = WFC._findLowestEntropyCell(wfc)
+        if not cell then
+            for x = 1, wfc.width do
+                if wfc.entropy_grid[1][x] == 0 then return false end
+            end
+            return true
+        end
+        local x = cell.x
+        local valid, total_w = {}, 0
+        for state, ok in pairs(wfc.grid[1][x]) do
+            if ok then
+                local w = wfc.weights[1][x][state] or 1
+                table.insert(valid, {state=state, weight=w})
+                total_w = total_w + w
+            end
+        end
+        if #valid == 0 then return false end
+        local r, chosen, cum = love.math.random() * total_w, valid[#valid].state, 0
+        for _, item in ipairs(valid) do
+            cum = cum + item.weight
+            if r <= cum then chosen = item.state; break end
+        end
+        for state in pairs(wfc.grid[1][x]) do wfc.grid[1][x][state] = (state == chosen) end
+        wfc.entropy_grid[1][x] = 1
+        WFC._propagateGraph(wfc, x, neighbors, allowed_pairs)
+    end
+    return true
+end
+
 -- Returns the final grid of collapsed state IDs
 function WFC.getResult(wfc)
     local result = {}

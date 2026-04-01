@@ -1,0 +1,10 @@
+{
+  "road":          {"downtown": "DOWNTOWN_ROAD", "city": "ROAD"},
+  "downtown_road": {"downtown": "DOWNTOWN_ROAD", "city": "ROAD"},
+  "highway":       {"downtown": "DOWNTOWN_ROAD", "city": "ROAD"},
+  "arterial":      {"downtown": "ARTERIAL",      "city": "ARTERIAL"},
+  "grass":         {"downtown": "DOWNTOWN_PLOT",  "city": "GRASS"},
+  "water":         {"downtown": "DOWNTOWN_PLOT",  "city": "WATER"},
+  "mountain":      {"downtown": "DOWNTOWN_PLOT",  "city": "MOUNTAIN"},
+  "default":       {"downtown": "DOWNTOWN_PLOT",  "city": "PLOT"}
+}

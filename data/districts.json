@@ -1,0 +1,216 @@
+[
+  {
+    "id": "downtown",
+    "assignable": false,
+    "weights": {
+      "office_tower": 9, "office_low": 7, "mixed_use": 7, "condo_tower": 6,
+      "retail_strip": 6, "luxury_retail": 5, "restaurant_row": 5, "transit_hub": 5,
+      "courthouse": 4, "plaza": 4, "shopping_mall": 4, "fine_dining": 4,
+      "embassy": 3, "theater": 3, "rooftop_bar": 3, "entertainment": 3,
+      "casino": 2, "apartment_high": 2, "clock_tower": 2, "government": 2,
+      "town_hall": 2, "coffee_shop": 3, "hotel": 1
+    },
+    "cannot": ["rural_outskirts", "warehouse", "slums", "industrial"]
+  },
+  {
+    "id": "residential",
+    "assignable": true,
+    "weights": {
+      "detached_housing": 9, "townhouse": 7, "rowhouse": 5, "apartment_low": 5,
+      "park": 4, "school": 3, "religious": 3, "community_center": 3,
+      "dog_park": 3, "fire_station": 2, "clinic": 2, "mixed_use": 2,
+      "sports_field": 2, "post_office": 2
+    },
+    "cannot": []
+  },
+  {
+    "id": "commercial",
+    "assignable": true,
+    "weights": {
+      "retail_strip": 9, "office_low": 8, "mixed_use": 7, "shopping_mall": 6,
+      "restaurant_row": 5, "market": 4, "office_tower": 3, "big_box_store": 5,
+      "fast_food_strip": 4, "car_dealership": 3, "food_court": 3,
+      "boutique_shops": 3, "farmers_market": 2, "coworking_space": 2,
+      "transit_hub": 2, "coffee_shop": 3
+    },
+    "cannot": []
+  },
+  {
+    "id": "industrial",
+    "assignable": true,
+    "weights": {
+      "factory": 9, "warehouse_zone": 7, "workshop": 5, "chemical_plant": 5,
+      "power_plant": 4, "freight_yard": 5, "shipyard": 3, "recycling_plant": 3,
+      "auto_repair": 3, "water_treatment": 2, "printing_press": 2,
+      "data_center": 2, "tech_campus": 2, "vacant": 4, "salvage_yard": 2
+    },
+    "cannot": ["upper_class", "rural_outskirts", "riverfront", "waterfront"]
+  },
+  {
+    "id": "upper_class",
+    "assignable": true,
+    "weights": {
+      "mansion": 9, "gated_community": 7, "detached_housing": 5,
+      "botanical_garden": 5, "golf_course": 5, "park": 4, "fine_dining": 5,
+      "luxury_retail": 5, "boutique_shops": 4, "plaza": 4, "art_gallery": 3,
+      "sports_field": 2, "school": 3, "religious": 2, "arts": 2,
+      "embassy": 3, "cathedral": 2, "townhouse": 2
+    },
+    "cannot": ["industrial", "warehouse", "slums", "working_class", "tech_park"]
+  },
+  {
+    "id": "art_district",
+    "assignable": true,
+    "weights": {
+      "arts": 9, "art_gallery": 9, "artist_loft": 8, "museum": 7,
+      "theater": 7, "concert_hall": 6, "coffee_shop": 6, "apartment_low": 5,
+      "mixed_use": 5, "boutique_shops": 5, "restaurant_row": 5,
+      "entertainment": 4, "nightclub": 4, "food_truck_lot": 4,
+      "comedy_club": 4, "retail_strip": 3, "plaza": 3,
+      "coworking_space": 3, "brewpub": 3, "skate_park": 2
+    },
+    "cannot": ["warehouse", "rural_outskirts", "industrial"]
+  },
+  {
+    "id": "historic",
+    "assignable": true,
+    "weights": {
+      "cathedral": 8, "historic_monument": 8, "museum": 7, "heritage_site": 7,
+      "market_square": 7, "government": 6, "clock_tower": 6, "library": 5,
+      "religious": 5, "mixed_use": 5, "rowhouse": 5, "detached_housing": 4,
+      "antique_shop": 5, "restaurant_row": 3, "arts": 3, "park": 3,
+      "ruins": 4, "fine_dining": 3, "courthouse": 4, "embassy": 3,
+      "town_hall": 3, "school": 2
+    },
+    "cannot": ["warehouse", "tech_park", "industrial"]
+  },
+  {
+    "id": "entertainment",
+    "assignable": true,
+    "weights": {
+      "nightclub": 9, "entertainment": 9, "casino": 8, "concert_hall": 8,
+      "theater": 7, "arena": 7, "restaurant_row": 7, "rooftop_bar": 6,
+      "cinema": 6, "comedy_club": 5, "arcade": 5, "retail_strip": 5,
+      "mixed_use": 4, "plaza": 3, "arts": 3, "dive_bar": 5,
+      "brewpub": 3, "food_truck_lot": 3, "transit_hub": 2, "stadium": 4
+    },
+    "cannot": ["rural_outskirts", "industrial", "warehouse"]
+  },
+  {
+    "id": "riverfront",
+    "assignable": true,
+    "weights": {
+      "waterfront": 9, "marina": 8, "canal_district": 7, "park": 7,
+      "fishing_dock": 5, "ferry_terminal": 5, "restaurant_row": 5,
+      "pier": 4, "retail_strip": 4, "mixed_use": 3, "plaza": 3,
+      "arts": 2, "fine_dining": 3, "rooftop_bar": 3, "boatyard": 2
+    },
+    "cannot": ["industrial", "warehouse", "slums", "working_class"]
+  },
+  {
+    "id": "rural_outskirts",
+    "assignable": true,
+    "weights": {
+      "forest": 9, "nature_reserve": 8, "vacant": 7, "urban_farm": 5,
+      "detached_housing": 4, "sports_field": 4, "park": 3, "cemetery": 3,
+      "workshop": 2, "mobile_home_park": 4, "golf_course": 2,
+      "ruins": 2, "farmers_market": 2
+    },
+    "cannot": ["downtown", "warehouse", "tech_park", "entertainment", "art_district", "university"]
+  },
+  {
+    "id": "suburb",
+    "assignable": true,
+    "weights": {
+      "detached_housing": 9, "townhouse": 6, "school": 5, "park": 4,
+      "sports_field": 4, "religious": 3, "mixed_use": 2, "dog_park": 4,
+      "big_box_store": 4, "fast_food_strip": 4, "car_dealership": 3,
+      "community_center": 3, "fire_station": 2, "farmers_market": 3,
+      "post_office": 2, "clinic": 2
+    },
+    "cannot": []
+  },
+  {
+    "id": "civic",
+    "assignable": true,
+    "weights": {
+      "government": 9, "school": 8, "hospital": 8, "library": 7,
+      "courthouse": 7, "town_hall": 8, "park": 5, "plaza": 4,
+      "transit_hub": 4, "museum": 5, "community_center": 5,
+      "police_station": 4, "fire_station": 4, "clinic": 4,
+      "post_office": 3, "religious": 2, "water_treatment": 2
+    },
+    "cannot": ["warehouse", "industrial", "slums"]
+  },
+  {
+    "id": "working_class",
+    "assignable": true,
+    "weights": {
+      "social_housing": 8, "apartment_low": 6, "rowhouse": 4, "workshop": 5,
+      "factory": 4, "market": 4, "retail_strip": 4, "vacant": 3,
+      "auto_repair": 5, "pawn_shop": 5, "clinic": 3, "dive_bar": 5,
+      "fast_food_strip": 4, "food_truck_lot": 3, "street_vendor": 4,
+      "laundromat": 4, "flea_market": 4, "community_center": 2,
+      "check_cashing": 3, "trade_school": 3, "printing_press": 2
+    },
+    "cannot": ["upper_class", "riverfront", "waterfront"]
+  },
+  {
+    "id": "warehouse",
+    "assignable": true,
+    "weights": {
+      "warehouse_zone": 9, "factory": 6, "workshop": 4, "vacant": 5,
+      "power_plant": 3, "freight_yard": 7, "salvage_yard": 5,
+      "recycling_plant": 4, "auto_repair": 3, "printing_press": 3,
+      "brewery": 3, "distillery": 2, "data_center": 2, "tech_campus": 2
+    },
+    "cannot": ["upper_class", "rural_outskirts", "civic", "university", "art_district", "riverfront", "waterfront", "downtown"]
+  },
+  {
+    "id": "tech_park",
+    "assignable": true,
+    "weights": {
+      "tech_campus": 9, "research_lab": 9, "data_center": 8, "startup_hub": 8,
+      "innovation_center": 7, "office_low": 7, "coworking_space": 6,
+      "server_farm": 5, "office_tower": 4, "workshop": 3,
+      "park": 3, "vacant": 3, "coffee_shop": 4
+    },
+    "cannot": ["upper_class", "rural_outskirts", "art_district", "historic"]
+  },
+  {
+    "id": "university",
+    "assignable": true,
+    "weights": {
+      "school": 8, "library": 7, "park": 6, "dormitory": 8,
+      "student_union": 7, "research_lab": 6, "apartment_low": 5,
+      "arts": 4, "government": 3, "sports_field": 4, "coffee_shop": 5,
+      "fraternity_row": 4, "student_housing": 6, "museum": 4,
+      "community_center": 3, "coworking_space": 3
+    },
+    "cannot": ["warehouse", "rural_outskirts", "slums", "industrial"]
+  },
+  {
+    "id": "waterfront",
+    "assignable": true,
+    "weights": {
+      "waterfront": 9, "marina": 9, "beach": 8, "pier": 7,
+      "restaurant_row": 7, "retail_strip": 5, "mixed_use": 4,
+      "park": 4, "plaza": 3, "entertainment": 3, "fine_dining": 5,
+      "ferry_terminal": 4, "casino": 3, "rooftop_bar": 4, "boatyard": 2,
+      "fishing_dock": 3
+    },
+    "cannot": ["industrial", "warehouse", "slums", "working_class"]
+  },
+  {
+    "id": "slums",
+    "assignable": true,
+    "weights": {
+      "social_housing": 9, "vacant": 8, "apartment_low": 5, "market": 4,
+      "workshop": 3, "warehouse_zone": 3, "street_vendor": 7,
+      "pawn_shop": 6, "check_cashing": 6, "flea_market": 5,
+      "makeshift_market": 5, "laundromat": 4, "dive_bar": 4,
+      "clinic": 3, "auto_repair": 2, "salvage_yard": 2
+    },
+    "cannot": ["upper_class", "rural_outskirts", "riverfront", "waterfront", "civic", "university", "tech_park"]
+  }
+]

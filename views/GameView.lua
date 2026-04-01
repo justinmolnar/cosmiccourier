@@ -851,6 +851,174 @@ function GameView:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sideba
         love.graphics.pop()
 end
 
+function GameView:_drawDistrictOverlay(active_map, S, cur_scale, sidebar_w, screen_w, screen_h)
+    local Game = self.Game
+    if not Game.debug_district_overlay then return end
+    if cur_scale ~= S.DOWNTOWN and cur_scale ~= S.CITY then return end
+    if not active_map.district_map then return end
+
+    local CoordSvc  = require("services.CoordinateService")
+    local ZT        = require("data.zones")
+    local ts        = Game.C.MAP.TILE_SIZE
+    local tps       = active_map.tile_pixel_size or ts
+    local city_mn_x = Game.world_gen_city_mn_x or 1
+    local city_mn_y = Game.world_gen_city_mn_y or 1
+    local dmap      = active_map.district_map
+    local dtypes    = active_map.district_types
+    local dcolors   = active_map.district_colors
+    local pois      = active_map.district_pois
+    local font      = Game.fonts and Game.fonts.ui_small
+
+    -- Resolve hovered district first so tint pass can use it
+    local hovered_poi = nil
+    local mx, my = love.mouse.getPosition()
+    if mx >= sidebar_w then
+        local wx, wy = CoordSvc.screenToWorld(mx, my, Game.C, Game.camera)
+        local lscx = math.floor((wx - (city_mn_x - 1) * ts) / tps)
+        local lscy = math.floor((wy - (city_mn_y - 1) * ts) / tps)
+        local gx, gy = lscx + 1, lscy + 1
+        local grid_h = #active_map.grid
+        local grid_w = grid_h > 0 and #(active_map.grid[1] or {}) or 0
+        if gx >= 1 and gx <= grid_w and gy >= 1 and gy <= grid_h then
+            local sci = ((active_map.zone_gscy_off or 0) + lscy) * (active_map.zone_sw or 1)
+                      + (active_map.zone_gscx_off or 0) + lscx + 1
+            hovered_poi = dmap[sci]
+        end
+    end
+
+    -- Build excluded set: districts that cannot coexist with the hovered district
+    local excluded = {}
+    if hovered_poi and dtypes then
+        local htype = dtypes[hovered_poi]
+        local rules = ZT.DISTRICT_RULES or {}
+        for other_poi, other_type in pairs(dtypes) do
+            if other_poi ~= hovered_poi then
+                local blocked = false
+                local hr = rules[htype]
+                if hr then
+                    for _, c in ipairs(hr.cannot or {}) do
+                        if c == other_type then blocked = true; break end
+                    end
+                end
+                if not blocked then
+                    local or_ = rules[other_type]
+                    if or_ then
+                        for _, c in ipairs(or_.cannot or {}) do
+                            if c == htype then blocked = true; break end
+                        end
+                    end
+                end
+                if blocked then excluded[other_poi] = true end
+            end
+        end
+    end
+
+    local is_hovering = hovered_poi ~= nil
+
+    -- Tint + interaction pass (inside camera transform)
+    local vw = screen_w - sidebar_w
+    love.graphics.push()
+    love.graphics.translate(sidebar_w + vw / 2, screen_h / 2)
+    love.graphics.scale(Game.camera.scale, Game.camera.scale)
+    love.graphics.translate(-Game.camera.x, -Game.camera.y)
+    if cur_scale == S.DOWNTOWN then
+        love.graphics.translate((city_mn_x - 1) * ts, (city_mn_y - 1) * ts)
+    end
+
+    local ox  = cur_scale == S.CITY and (city_mn_x - 1) * ts or 0
+    local oy  = cur_scale == S.CITY and (city_mn_y - 1) * ts or 0
+    local lw  = math.max(0.5, tps * 0.18)  -- hatch line width
+    love.graphics.setLineWidth(lw)
+
+    for gy = 1, #active_map.grid do
+        for gx = 1, #active_map.grid[gy] do
+            local lscx    = gx - 1
+            local lscy    = gy - 1
+            local sci     = ((active_map.zone_gscy_off or 0) + lscy) * (active_map.zone_sw or 1)
+                          + (active_map.zone_gscx_off or 0) + lscx + 1
+            local poi_idx = dmap[sci]
+            local col     = poi_idx and dcolors and dcolors[poi_idx]
+            if col then
+                local cx = ox + lscx * tps
+                local cy = oy + lscy * tps
+                if poi_idx == hovered_poi then
+                    -- Hovered: bright tint
+                    love.graphics.setColor(col[1], col[2], col[3], 0.45)
+                    love.graphics.rectangle("fill", cx, cy, tps, tps)
+                elseif excluded[poi_idx] then
+                    -- Excluded: dark tint + diagonal hatch lines
+                    love.graphics.setColor(col[1] * 0.4, col[2] * 0.4, col[3] * 0.4, 0.55)
+                    love.graphics.rectangle("fill", cx, cy, tps, tps)
+                    love.graphics.setColor(0, 0, 0, 0.55)
+                    love.graphics.line(cx, cy, cx + tps, cy + tps)
+                    love.graphics.line(cx + tps, cy, cx, cy + tps)
+                elseif is_hovering then
+                    -- Other districts: slightly dimmed
+                    love.graphics.setColor(col[1], col[2], col[3], 0.07)
+                    love.graphics.rectangle("fill", cx, cy, tps, tps)
+                else
+                    -- No hover active: normal tint
+                    love.graphics.setColor(col[1], col[2], col[3], 0.15)
+                    love.graphics.rectangle("fill", cx, cy, tps, tps)
+                end
+            end
+        end
+    end
+    love.graphics.setLineWidth(1)
+    love.graphics.pop()
+
+    -- District name labels (screen space)
+    if pois and dtypes and dcolors and font then
+        love.graphics.setFont(font)
+        for poi_idx, poi in ipairs(pois) do
+            local dtype = (dtypes[poi_idx] or "?"):gsub("_", " ")
+            local wx = (poi.x - 1) * ts + ts * 0.5
+            local wy = (poi.y - 1) * ts + ts * 0.5
+            local sx, sy = CoordSvc.worldToScreen(wx, wy, Game.C, Game.camera)
+            if sx > sidebar_w and sx < screen_w and sy > 0 and sy < screen_h then
+                local col  = dcolors[poi_idx] or {1,1,1}
+                local dim  = is_hovering and poi_idx ~= hovered_poi and not excluded[poi_idx]
+                local tw   = font:getWidth(dtype)
+                local th   = font:getHeight()
+                local alpha = dim and 0.35 or 1.0
+                love.graphics.setColor(0, 0, 0, 0.6 * alpha)
+                love.graphics.rectangle("fill", sx - tw/2 - 3, sy - th/2 - 2, tw + 6, th + 4, 3)
+                love.graphics.setColor(col[1], col[2], col[3], alpha)
+                love.graphics.print(dtype, sx - tw/2, sy - th/2)
+            end
+        end
+    end
+
+    -- Hover tooltip
+    if hovered_poi and font then
+        local wx, wy = CoordSvc.screenToWorld(mx, my, Game.C, Game.camera)
+        local lscx = math.floor((wx - (city_mn_x - 1) * ts) / tps)
+        local lscy = math.floor((wy - (city_mn_y - 1) * ts) / tps)
+        local gx, gy = lscx + 1, lscy + 1
+        local grid_h = #active_map.grid
+        local grid_w = grid_h > 0 and #(active_map.grid[1] or {}) or 0
+        if gx >= 1 and gx <= grid_w and gy >= 1 and gy <= grid_h then
+            local zone     = (active_map.zone_grid and active_map.zone_grid[gy] and active_map.zone_grid[gy][gx]) or "none"
+            local district = (dtypes and dtypes[hovered_poi] or "residential"):gsub("_", " ")
+            local line1 = "District: " .. district
+            local line2 = "Zone: " .. zone
+            local tw  = math.max(font:getWidth(line1), font:getWidth(line2))
+            local th  = font:getHeight()
+            local pad = 6
+            local bx  = math.min(mx + 14, screen_w - tw - pad * 2 - 4)
+            local by  = math.min(my + 14, screen_h - th * 2 - pad * 2 - 8)
+            love.graphics.setFont(font)
+            love.graphics.setColor(0, 0, 0, 0.78)
+            love.graphics.rectangle("fill", bx - pad, by - pad, tw + pad * 2, th * 2 + pad * 2 + 4, 4)
+            love.graphics.setColor(1, 1, 1, 0.95)
+            love.graphics.print(line1, bx, by)
+            love.graphics.print(line2, bx, by + th + 4)
+        end
+    end
+
+    love.graphics.setColor(1, 1, 1)
+end
+
 function GameView:draw()
     local Game = self.Game
     local active_map = Game.maps[Game.active_map_key]
@@ -863,6 +1031,7 @@ function GameView:draw()
     love.graphics.setScissor(sidebar_w, 0, screen_w - sidebar_w, screen_h)
     if Game.world_gen_cam_params then
         self:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
+        self:_drawDistrictOverlay(active_map, S, cur_scale, sidebar_w, screen_w, screen_h)
     else
         self:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
     end

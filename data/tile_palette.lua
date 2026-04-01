@@ -7,16 +7,9 @@
 -- "city" is the color used elsewhere.
 -- If a tile type has only one entry it uses the same color in both contexts.
 
-local TilePalette = {
-    road         = { downtown = "DOWNTOWN_ROAD", city = "ROAD" },
-    downtown_road= { downtown = "DOWNTOWN_ROAD", city = "ROAD" },
-    highway      = { downtown = "DOWNTOWN_ROAD", city = "ROAD" },
-    arterial     = { downtown = "ARTERIAL",      city = "ARTERIAL" },
-    grass        = { downtown = "DOWNTOWN_PLOT",  city = "GRASS" },
-    water        = { downtown = "DOWNTOWN_PLOT",  city = "WATER" },
-    mountain     = { downtown = "DOWNTOWN_PLOT",  city = "MOUNTAIN" },
-    -- default (plots and any unlisted type)
-    default      = { downtown = "DOWNTOWN_PLOT",  city = "PLOT" },
-}
+local json = require("lib.json")
+
+local raw        = love.filesystem.read("data/tile_palette.json")
+local TilePalette = json.decode(raw)
 
 return TilePalette

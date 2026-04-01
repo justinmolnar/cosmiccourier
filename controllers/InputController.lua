@@ -36,6 +36,7 @@ function InputController:keypressed(key)
         m = { field = "debug_smooth_roads_merged", label = "merged street overlay" },
         j = { field = "debug_smooth_roads_like",   label = "streets-like-big-roads overlay" },
         o = { field = "overlay_only_mode",         label = "overlay-only mode" },
+        d = { field = "debug_district_overlay",    label = "district overlay" },
     }
     local toggle = DEBUG_TOGGLES[key]
     if toggle then

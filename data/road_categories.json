@@ -1,0 +1,6 @@
+{
+  "road":          "road",
+  "downtown_road": "road",
+  "arterial":      "arterial",
+  "highway":       "highway"
+}

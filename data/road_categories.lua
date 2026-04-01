@@ -4,11 +4,9 @@
 -- Valid categories match the keys in each vehicle's pathfinding_costs table
 -- in data/constants.lua VEHICLES: "road", "arterial", "highway".
 
-local RoadCategories = {
-    road          = "road",
-    downtown_road = "road",
-    arterial      = "arterial",
-    highway       = "highway",
-}
+local json = require("lib.json")
+
+local raw           = love.filesystem.read("data/road_categories.json")
+local RoadCategories = json.decode(raw)
 
 return RoadCategories

@@ -1,0 +1,22 @@
+{
+  "Boreal / Taiga":     { "forest": 3.0, "nature_reserve": 2.5, "park": 2.0, "vacant": 1.5, "factory": 0.5, "warehouse_zone": 0.5, "mansion": 0.3 },
+  "Temp. Rainforest":   { "forest": 3.0, "nature_reserve": 2.0, "park": 2.0 },
+  "Temp. Forest":       { "forest": 2.0, "nature_reserve": 1.5, "park": 1.5 },
+  "Subtropical Forest": { "forest": 1.8, "nature_reserve": 1.3, "park": 1.5 },
+  "Tropical Forest":    { "forest": 1.8, "nature_reserve": 1.5, "park": 1.5 },
+  "Jungle":             { "forest": 2.5, "nature_reserve": 2.0, "park": 2.0, "factory": 0.4, "warehouse_zone": 0.4 },
+  "Woodland":           { "forest": 1.5, "nature_reserve": 1.2, "park": 1.3 },
+  "Swamp":              { "forest": 1.5, "nature_reserve": 1.5, "park": 1.2, "ruins": 1.5, "detached_housing": 0.5, "mansion": 0.3, "vacant": 1.5 },
+  "Tropical Swamp":     { "forest": 1.5, "nature_reserve": 1.5, "park": 1.2, "ruins": 1.3, "detached_housing": 0.4, "mansion": 0.3, "vacant": 1.8 },
+  "Grassland":          { "detached_housing": 1.5, "sports_field": 1.3, "townhouse": 1.2, "urban_farm": 1.5, "golf_course": 1.3 },
+  "Savanna":            { "detached_housing": 1.3, "sports_field": 1.2, "urban_farm": 1.2 },
+  "Tropical Savanna":   { "detached_housing": 1.2, "sports_field": 1.1, "urban_farm": 1.1 },
+  "Shrubland":          { "detached_housing": 1.2, "vacant": 1.3, "salvage_yard": 1.2, "auto_repair": 1.1 },
+  "Tundra":             { "factory": 1.5, "warehouse_zone": 1.3, "chemical_plant": 1.3, "detached_housing": 0.5, "mansion": 0.3, "park": 0.3, "forest": 0.5, "vacant": 2.0 },
+  "Cold Highland":      { "factory": 1.4, "warehouse_zone": 1.3, "detached_housing": 0.6, "vacant": 1.5, "ruins": 1.2 },
+  "Boreal Highland":    { "forest": 1.5, "nature_reserve": 1.5, "park": 1.3, "factory": 1.2, "warehouse_zone": 1.2 },
+  "Highland":           { "factory": 1.3, "workshop": 1.3, "vacant": 1.3, "ruins": 1.2, "cemetery": 1.2 },
+  "Desert":             { "factory": 2.0, "warehouse_zone": 1.5, "chemical_plant": 1.5, "salvage_yard": 1.5, "park": 0.2, "forest": 0.1, "detached_housing": 0.5, "vacant": 2.5 },
+  "Semi-arid":          { "factory": 1.5, "warehouse_zone": 1.2, "salvage_yard": 1.2, "park": 0.4, "forest": 0.2, "vacant": 1.8 },
+  "Beach":              { "beach": 4.0, "waterfront": 3.0, "marina": 2.5, "pier": 2.0, "fishing_dock": 1.5, "restaurant_row": 2.0, "fine_dining": 1.5, "rooftop_bar": 1.3, "retail_strip": 1.5, "detached_housing": 1.3 }
+}

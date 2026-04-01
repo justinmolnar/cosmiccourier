@@ -1,5 +1,4 @@
 -- controllers/WorldSandboxController.lua
--- F8 world generation sandbox. Completely standalone; no effect on main game or F9 sandbox.
 
 local WorldSandboxController = {}
 WorldSandboxController.__index = WorldSandboxController
@@ -181,16 +180,90 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
     local WFC = require("lib.wfc")
     local ZT  = require("data.zones")
 
+    local dmap  = self.city_district_maps and self.city_district_maps[start_idx] or {}
+
     if not self.city_district_types then self.city_district_types = {} end
     if not self.city_district_types[start_idx] then
-        local dtypes  = { [1] = "downtown" }
         local pois    = self.city_pois_list and self.city_pois_list[start_idx] or {}
+        local rules   = ZT.DISTRICT_RULES or {}
         local choices = ZT.RANDOM_DISTRICT_TYPES
-        for i = 2, #pois do dtypes[i] = choices[love.math.random(1, #choices)] end
+
+        -- Build POI neighbor graph from dmap (check right + down neighbors only; symmetric)
+        local neighbors = {}  -- neighbors[poi_idx] = {[neighbor_poi_idx] = true}
+        for sci, poi_idx in pairs(dmap) do
+            for _, offset in ipairs({1, sw}) do
+                local nbr = dmap[sci + offset]
+                if nbr and nbr ~= poi_idx then
+                    if not neighbors[poi_idx] then neighbors[poi_idx] = {} end
+                    if not neighbors[nbr]     then neighbors[nbr]     = {} end
+                    neighbors[poi_idx][nbr] = true
+                    neighbors[nbr][poi_idx] = true
+                end
+            end
+        end
+
+
+        -- Build allowed_pairs: symmetric, derived from DISTRICT_RULES
+        local all_types = {"downtown"}
+        for _, c in ipairs(choices) do all_types[#all_types+1] = c end
+        local allowed_pairs = {}
+        for _, ta in ipairs(all_types) do
+            allowed_pairs[ta] = {}
+            for _, tb in ipairs(all_types) do
+                local blocked = false
+                local ra = rules[ta]
+                if ra then for _, c in ipairs(ra.cannot or {}) do if c == tb then blocked = true; break end end end
+                if not blocked then
+                    local rb = rules[tb]
+                    if rb then for _, c in ipairs(rb.cannot or {}) do if c == ta then blocked = true; break end end end
+                end
+                allowed_pairs[ta][tb] = not blocked
+            end
+        end
+
+        -- Convert POI neighbor graph to WFC x-coords (poi_idx = x, y always 1)
+        local wfc_neighbors = {}
+        for poi_idx, nbrs in pairs(neighbors) do
+            wfc_neighbors[poi_idx] = {}
+            for nbr in pairs(nbrs) do wfc_neighbors[poi_idx][nbr] = true end
+        end
+
+        -- Attempt WFC solve with retries on contradiction
+        local MAX_ATTEMPTS = 10
+        local dtypes
+        for attempt = 1, MAX_ATTEMPTS do
+            local wfc = WFC.new(#pois, 1, all_types, {})
+
+            -- Pre-collapse poi 1 to downtown; zero downtown weight on all others
+            for _, s in ipairs(all_types) do
+                wfc.grid[1][1][s] = (s == "downtown")
+            end
+            wfc.entropy_grid[1][1] = 1
+            for x = 2, #pois do
+                WFC.setWeight(wfc, x, 1, "downtown", 0)
+            end
+
+            WFC._propagateGraph(wfc, 1, wfc_neighbors, allowed_pairs)
+
+            if WFC.solveGraph(wfc, wfc_neighbors, allowed_pairs) then
+                local result = WFC.getResult(wfc)
+                dtypes = {}
+                for x = 1, #pois do
+                    dtypes[x] = result[1][x] or choices[love.math.random(1, #choices)]
+                end
+                break
+            end
+        end
+
+        -- Hard fallback if all attempts failed
+        if not dtypes then
+            dtypes = { [1] = "downtown" }
+            for i = 2, #pois do dtypes[i] = choices[love.math.random(1, #choices)] end
+        end
+
         self.city_district_types[start_idx] = dtypes
     end
     local district_types = self.city_district_types[start_idx]
-    local dmap  = self.city_district_maps and self.city_district_maps[start_idx] or {}
     local bdata = self.biome_data or {}
 
     local plot_set = {}
@@ -233,11 +306,13 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
                     if bd.name and ZT.BIOME_MULTS[bd.name] then
                         for k, v in pairs(ZT.BIOME_MULTS[bd.name]) do bmul[k] = v end
                     end
-                    bmul.commercial = (bmul.commercial or 1.0) * 1.8
+                    bmul.waterfront     = (bmul.waterfront     or 1.0) * 2.5
+                    bmul.restaurant_row = (bmul.restaurant_row or 1.0) * 1.8
+                    bmul.retail_strip   = (bmul.retail_strip   or 1.0) * 1.3
                 end
                 for _, s in ipairs(ZT.STATES) do
-                    WFC.setWeight(wfc, gx, gy, s, s == "none" and 0 or
-                        math.max(0.01, (base_w[s] or 1) * (bmul[s] or 1.0)))
+                    local w = s == "none" and 0 or ((base_w[s] or 0) * (bmul[s] or 1.0))
+                    WFC.setWeight(wfc, gx, gy, s, w > 0 and math.max(0.01, w) or 0)
                 end
             end
         end
@@ -257,7 +332,7 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
                 local poi_idx = dmap[sci]
                 local dtype   = (poi_idx and district_types[poi_idx]) or "residential"
                 local base_w  = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS.residential
-                local best, best_w = "residential", 0
+                local best, best_w = ZT.STATES[1], 0
                 for _, s in ipairs(ZT.STATES) do
                     if s ~= "none" and (base_w[s] or 0) > best_w then best = s; best_w = base_w[s] end
                 end
@@ -350,14 +425,21 @@ function WorldSandboxController:_fixIslandConnectivity(new_map, grid, sub_cw, su
         end
     end
 
+    local ZT = require("data.zones")
+    local _road_z0 = ZT.STATES[1]
+    local _road_z1 = _road_z0
+    for _, s in ipairs(ZT.STATES) do
+        if s ~= "none" and s ~= _road_z0 then _road_z1 = s; break end
+    end
+
     local function makeVisible(gr1, gc1, gr2, gc2)
         if not zg[gr1] then zg[gr1] = {} end
         if not zg[gr2] then zg[gr2] = {} end
         local z1 = zg[gr1][gc1]
         local z2 = zg[gr2][gc2]
-        if not z1 or z1 == "none" then z1 = "residential"; zg[gr1][gc1] = z1 end
+        if not z1 or z1 == "none" then z1 = _road_z0; zg[gr1][gc1] = z1 end
         if not z2 or z2 == "none" or z2 == z1 then
-            zg[gr2][gc2] = (z1 ~= "commercial") and "commercial" or "residential"
+            zg[gr2][gc2] = (z1 ~= _road_z1) and _road_z1 or _road_z0
         end
     end
 
@@ -1077,6 +1159,15 @@ function WorldSandboxController:sendToGame()
     self:_buildZoneGrid(new_map, ctx)
     self:_buildRoadNetwork(new_map, ctx)
     self:_buildGameImages(game, start_idx, city_mn_x, city_mx_x, city_mn_y, city_mx_y, w, h)
+
+    -- Store district data on map for the district overlay in GameView
+    new_map.district_map    = self.city_district_maps and self.city_district_maps[start_idx]
+    new_map.district_types  = self.city_district_types and self.city_district_types[start_idx]
+    new_map.district_colors = self.city_district_colors and self.city_district_colors[start_idx]
+    new_map.district_pois   = self.city_pois_list and self.city_pois_list[start_idx]
+    new_map.zone_gscx_off   = gscx_off
+    new_map.zone_gscy_off   = gscy_off
+    new_map.zone_sw         = sw
 
     -- Stamp onto game
     game.maps.city      = new_map
@@ -2714,7 +2805,6 @@ end
 -- Street key format: v[cx*1000+cy]  h[cy*1000+cx]  (unchanged)
 
 local ZONE_BLOCK = 2        -- world cells per block side (controls block coarseness)
-local ZONE_STATES = {"residential", "commercial", "industrial", "park"}
 
 function WorldSandboxController:_gen_streets_for_city(city_idx)
     local bounds   = self.city_bounds_list   and self.city_bounds_list[city_idx]
@@ -2726,6 +2816,10 @@ function WorldSandboxController:_gen_streets_for_city(city_idx)
     local h  = self.world_h
     local sw = w * 3
     local ZT = require("data.zones")
+    local ZONE_STATES = {}
+    for _, s in ipairs(ZT.STATES) do
+        if s ~= "none" then ZONE_STATES[#ZONE_STATES + 1] = s end
+    end
 
     local function sci_of(gscx, gscy) return gscy * sw + gscx + 1 end
     local function get_poi(wx, wy)
