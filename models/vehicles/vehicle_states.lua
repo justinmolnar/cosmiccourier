@@ -4,58 +4,192 @@
 local States = {}
 
 --------------------------------------------------------------------------------
+-- Chaikin on a flat {x1,y1,x2,y2,...} pixel array, matching buildStreetPathsLike.
+--------------------------------------------------------------------------------
+local function chaikin_flat(flat, iters)
+    for _ = 1, iters do
+        local n = {flat[1], flat[2]}
+        for i = 1, #flat / 2 - 1 do
+            local x0, y0 = flat[2*i-1], flat[2*i]
+            local x1, y1 = flat[2*i+1], flat[2*i+2]
+            n[#n+1] = 0.75*x0 + 0.25*x1;  n[#n+1] = 0.75*y0 + 0.25*y1
+            n[#n+1] = 0.25*x0 + 0.75*x1;  n[#n+1] = 0.25*y0 + 0.75*y1
+        end
+        n[#n+1] = flat[#flat-1];  n[#n+1] = flat[#flat]
+        flat = n
+    end
+    return flat
+end
+
+--------------------------------------------------------------------------------
+-- Build a smooth pixel waypoint list that matches the visual road rendering.
+-- Splits the A* path at degree ≥ 3 junctions (exactly as buildStreetPathsLike
+-- does with mergeChains), then Chaikens each sub-segment with 4 iterations.
+-- Tile nodes (arterials) are passed straight through — they have their own
+-- visual curves built by buildPaths and Chaikening their tile positions again
+-- would produce a different, wrong curve.
+--------------------------------------------------------------------------------
+local function buildSmoothPath(vehicle, game)
+    if not vehicle.path or #vehicle.path == 0 then
+        vehicle.smooth_path = nil
+        return
+    end
+    local map = game.maps[vehicle.operational_map_key]
+    if not map or not map.road_v_rxs then
+        vehicle.smooth_path = nil
+        return
+    end
+    local tps = map.tile_pixel_size or game.C.MAP.TILE_SIZE
+    local zsv = map.zone_seg_v
+    local zsh = map.zone_seg_h or {}
+    if not zsv then
+        vehicle.smooth_path = nil
+        return
+    end
+
+    -- Degree of a J-street node (rx,ry) = number of zone_seg edges touching it.
+    -- zone_seg_v[gy][rx] = vertical segment (rx,gy-1)→(rx,gy).
+    -- zone_seg_h[ry][gx] = horizontal segment (gx-1,ry)→(gx,ry).
+    local function node_deg(rx, ry)
+        local d = 0
+        local v_ry  = zsv[ry]
+        local v_ry1 = zsv[ry+1]
+        local h_ry  = zsh[ry]
+        if v_ry  and v_ry[rx]   then d = d + 1 end  -- N
+        if v_ry1 and v_ry1[rx]  then d = d + 1 end  -- S
+        if h_ry  and h_ry[rx]   then d = d + 1 end  -- W  (gx==rx → seg from rx-1,ry)
+        if h_ry  and h_ry[rx+1] then d = d + 1 end  -- E  (gx==rx+1 → seg from rx,ry)
+        return d
+    end
+
+    local smooth = {}
+    local function add(x, y)
+        local s = smooth[#smooth]
+        if not s or s[1] ~= x or s[2] ~= y then table.insert(smooth, {x, y}) end
+    end
+
+    -- Flush a flat-pixel chain through Chaikin and append to smooth.
+    local function flush_chain(flat)
+        if #flat < 4 then
+            -- Only one point (start), nothing to add
+            if #flat >= 2 then add(flat[#flat-1], flat[#flat]) end
+            return
+        end
+        local s = chaikin_flat(flat, 4)
+        for i = 2, #s / 2 do   -- skip first point (already in smooth)
+            add(s[2*i-1], s[2*i])
+        end
+    end
+
+    -- Start with current pixel position as first control point.
+    local chain = {vehicle.px, vehicle.py}
+
+    for idx, node in ipairs(vehicle.path) do
+        local npx, npy = node.x * tps, node.y * tps
+        if node.is_tile then
+            -- Flush pending J-street chain, then add tile node straight.
+            flush_chain(chain)
+            add(npx, npy)
+            -- Resume next J-street chain from this tile position.
+            chain = {npx, npy}
+        else
+            chain[#chain+1] = npx
+            chain[#chain+1] = npy
+            -- Split chain at degree ≥ 3 junctions (matches buildStreetPathsLike behaviour).
+            local deg = node_deg(node.x, node.y)
+            if deg >= 3 and idx < #vehicle.path then
+                flush_chain(chain)
+                chain = {npx, npy}
+            end
+        end
+    end
+    flush_chain(chain)
+
+    -- Drop first entry (current vehicle position) so movement starts forward.
+    vehicle.smooth_path = {}
+    for k = 2, #smooth do
+        table.insert(vehicle.smooth_path, smooth[k])
+    end
+    if #vehicle.smooth_path == 0 then vehicle.smooth_path = nil end
+end
+
+--------------------------------------------------------------------------------
 -- A shared function for any state that needs to move along a path.
 -- This encapsulates the movement logic so we don't repeat it.
 --------------------------------------------------------------------------------
 function moveAlongPath(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then return end
-
-    -- Use the vehicle's operational map, not a hard-coded one.
     local map_for_pathing = game.maps[vehicle.operational_map_key]
     if not map_for_pathing then return end
 
-    local target_node = vehicle.path[1]
-    -- Road-node maps: path nodes are road-node coords, pixel = rx*tps.
-    -- Sandbox maps: path nodes are sub-cell coords, pixel = tile centre.
-    local target_px, target_py
-    local tps_check = map_for_pathing.tile_pixel_size or game.C.MAP.TILE_SIZE
-    if map_for_pathing.road_v_rxs then
-        -- Road-node map: path nodes are road-node coords, pixel = rx*tps
-        target_px, target_py = target_node.x * tps_check, target_node.y * tps_check
-    else
-        target_px, target_py = map_for_pathing:getPixelCoords(target_node.x, target_node.y)
-    end
-
-    local angle = math.atan2(target_py - vehicle.py, target_px - vehicle.px)
-
-    -- Step 1: Get the correct base speed for the vehicle type from the vehicle's properties
-    local base_speed = vehicle.properties.speed
-
-    -- Step 2: Normalize speed relative to the map's actual tile pixel size so that
-    -- screen-space speed stays consistent across maps with different tile scales.
     local tps = map_for_pathing.tile_pixel_size or game.C.MAP.TILE_SIZE
+    local base_speed = vehicle.properties.speed
     local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / tps
     local normalized_speed = base_speed / speed_normalization_factor
-
-    -- Step 3: For bikes (downtown-only), scale speed proportionally to downtown size
-    -- so screen-space speed stays constant regardless of how small/large downtown is.
-    -- Camera zoom scales inversely with downtown width, so grid speed must scale with it.
     if vehicle.type == "bike" then
         normalized_speed = normalized_speed * (game.C.MAP.DOWNTOWN_GRID_WIDTH / 64)
     end
-
-    -- Step 4: Calculate the distance to travel in world units using the normalized speed
     local travel_dist = normalized_speed * dt
+
+    -- Smooth visual movement along Chaikin-curved waypoints.
+    if vehicle.smooth_path and #vehicle.smooth_path > 0 then
+        local target = vehicle.smooth_path[1]
+        local dx = target[1] - vehicle.px
+        local dy = target[2] - vehicle.py
+        local dist_sq = dx * dx + dy * dy
+        if dist_sq <= travel_dist * travel_dist then
+            vehicle.px, vehicle.py = target[1], target[2]
+            table.remove(vehicle.smooth_path, 1)
+            if #vehicle.smooth_path == 0 then
+                -- Smooth path exhausted: sync grid_anchor to last node and signal arrival.
+                if vehicle.path and #vehicle.path > 0 then
+                    local last = vehicle.path[#vehicle.path]
+                    vehicle.grid_anchor = {x = last.x, y = last.y}
+                end
+                vehicle.path = {}
+                vehicle.current_path_eta = nil  -- don't let abstracted sim delay the transition
+            end
+        else
+            local dist = math.sqrt(dist_sq)
+            vehicle.px = vehicle.px + (dx / dist) * travel_dist
+            vehicle.py = vehicle.py + (dy / dist) * travel_dist
+        end
+
+        -- Keep grid_anchor walking forward so mid-path rerouting starts near the
+        -- vehicle's actual position, not the stale start of the previous trip.
+        -- We pop all but the last node so vehicle.path never empties prematurely.
+        if vehicle.path and #vehicle.path > 1 then
+            local head = vehicle.path[1]
+            local hdx = head.x * tps - vehicle.px
+            local hdy = head.y * tps - vehicle.py
+            if hdx * hdx + hdy * hdy < (tps * 0.5) * (tps * 0.5) then
+                vehicle.grid_anchor = {x = head.x, y = head.y}
+                table.remove(vehicle.path, 1)
+            end
+        end
+        return
+    end
+
+    -- Fallback: straight-line movement between grid nodes (sandbox maps, or no smooth path).
+    if not vehicle.path or #vehicle.path == 0 then return end
+
+    local target_node = vehicle.path[1]
+    local target_px, target_py
+    if map_for_pathing.road_v_rxs then
+        target_px, target_py = target_node.x * tps, target_node.y * tps
+    else
+        target_px, target_py = map_for_pathing:getPixelCoords(target_node.x, target_node.y)
+    end
 
     local dist_x = target_px - vehicle.px
     local dist_y = target_py - vehicle.py
     local dist_sq = dist_x * dist_x + dist_y * dist_y
 
-    if dist_sq < travel_dist * travel_dist then
+    if dist_sq <= travel_dist * travel_dist then
         vehicle.grid_anchor = {x = target_node.x, y = target_node.y}
         vehicle:recalculatePixelPosition(game)
         table.remove(vehicle.path, 1)
     else
+        local angle = math.atan2(dist_y, dist_x)
         vehicle.px = vehicle.px + math.cos(angle) * travel_dist
         vehicle.py = vehicle.py + math.sin(angle) * travel_dist
     end
@@ -79,7 +213,8 @@ function State:exit(vehicle, game) end
 States.Idle = State:new()
 States.Idle.name = "Idle"
 function States.Idle:enter(vehicle, game)
-    vehicle.path = {} -- An idle vehicle has no path.
+    vehicle.path = {}
+    vehicle.smooth_path = nil
 end
 function States.Idle:update(dt, vehicle, game)
     -- If we have been assigned work, change state.
@@ -99,13 +234,14 @@ function States.ReturningToDepot:enter(vehicle, game)
     print(string.format("%s %d returning to depot.", vehicle.type, vehicle.id))
     
     vehicle.path = PathfindingService.findPathToDepot(vehicle, game)
-    
+
     if not vehicle.path then
         vehicle:changeState(States.Stuck, game)
         return
     end
 
     vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
+    buildSmoothPath(vehicle, game)
 end
 
 function States.ReturningToDepot:update(dt, vehicle, game)
@@ -118,6 +254,9 @@ function States.ReturningToDepot:update(dt, vehicle, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
+    if not vehicle.path or #vehicle.path == 0 then
+        vehicle:changeState(States.Idle, game)
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -137,13 +276,14 @@ function States.GoToPickup:enter(vehicle, game)
     end
     
     vehicle.path = PathfindingService.findPathToPickup(vehicle, trip_to_get, game)
-    
+
     if not vehicle.path then
         vehicle:changeState(States.Stuck, game)
         return
     end
 
     vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
+    buildSmoothPath(vehicle, game)
 end
 
 function States.GoToPickup:update(dt, vehicle, game)
@@ -152,6 +292,9 @@ function States.GoToPickup:update(dt, vehicle, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
+    if not vehicle.path or #vehicle.path == 0 then
+        vehicle:changeState(States.DoPickup, game)
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -230,6 +373,7 @@ function States.GoToDropoff:enter(vehicle, game)
 
     vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
     print(string.format("DEBUG: %s %d path to dropoff: %d nodes, ETA: %.2fs", vehicle.type, vehicle.id, #vehicle.path, vehicle.current_path_eta))
+    buildSmoothPath(vehicle, game)
 end
 
 function States.GoToDropoff:update(dt, vehicle, game)
@@ -238,6 +382,9 @@ function States.GoToDropoff:update(dt, vehicle, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
+    if not vehicle.path or #vehicle.path == 0 then
+        vehicle:changeState(States.DoDropoff, game)
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -321,16 +468,20 @@ function States.GoToNetworkEntry:enter(vehicle, game, params)
 
     -- Store the parameters so we can pass them to the next state upon arrival.
     vehicle.network_travel_params = params
+    buildSmoothPath(vehicle, game)
 end
 
 function States.GoToNetworkEntry:update(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then
-        -- Arrived at the network entry point. Now, begin the main journey.
         vehicle:changeState(States.TravelingOnNetwork, game, vehicle.network_travel_params)
-        vehicle.network_travel_params = nil -- Clean up stored params
+        vehicle.network_travel_params = nil
         return
     end
     moveAlongPath(dt, vehicle, game)
+    if not vehicle.path or #vehicle.path == 0 then
+        vehicle:changeState(States.TravelingOnNetwork, game, vehicle.network_travel_params)
+        vehicle.network_travel_params = nil
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -392,15 +543,18 @@ function States.TravelingOnNetwork:enter(vehicle, game, params)
     -- Store data needed for the return trip to the city map
     vehicle.final_destination_plot = final_destination_plot
     vehicle.destination_city_data = destination_city_data
+    buildSmoothPath(vehicle, game)
 end
 
 function States.TravelingOnNetwork:update(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then
-        -- Arrived at the network exit point. Time to switch back to a local map.
         vehicle:changeState(States.ExitingNetwork, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
+    if not vehicle.path or #vehicle.path == 0 then
+        vehicle:changeState(States.ExitingNetwork, game)
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -467,15 +621,18 @@ function States.ExitingNetwork:enter(vehicle, game)
     -- Clear the stored destination data.
     vehicle.final_destination_plot = nil
     vehicle.destination_city_data = nil
+    buildSmoothPath(vehicle, game)
 end
 
 function States.ExitingNetwork:update(dt, vehicle, game)
-     if not vehicle.path or #vehicle.path == 0 then
-        -- Arrived at the final destination.
+    if not vehicle.path or #vehicle.path == 0 then
         vehicle:changeState(States.DoDropoff, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
+    if not vehicle.path or #vehicle.path == 0 then
+        vehicle:changeState(States.DoDropoff, game)
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -484,6 +641,7 @@ end
 States.Stuck = State:new()
 States.Stuck.name = "Stuck"
 function States.Stuck:enter(vehicle, game)
+    vehicle.smooth_path = nil
     -- When a vehicle gets stuck, remember what it was trying to do.
     -- Use previous_state (saved before the transition) not vehicle.state (which is already Stuck).
     vehicle.last_state_before_stuck = vehicle.previous_state

@@ -302,6 +302,10 @@ function Vehicle:isAvailable(game)
 end
 
 function Vehicle:shouldUseAbstractedSimulation(game)
+    -- Always animate when there is an active path or smooth path to follow.
+    if self.path and #self.path > 0 then return false end
+    if self.smooth_path and #self.smooth_path > 0 then return false end
+
     local current_scale = game.state.current_map_scale
     local C_MAP = game.C.MAP
 
