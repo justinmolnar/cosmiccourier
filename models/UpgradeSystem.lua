@@ -121,55 +121,49 @@ function UpgradeSystem:applyUpgradeEffect(upgradeId)
     end
 end
 
-function UpgradeSystem:applyDataDrivenEffect(upgrade)
-    local effect_type = upgrade.effect_type
-    local target = upgrade.effect_target
-    local value = upgrade.effect_value
-    
-    print(string.format("Applying effect: %s -> %s = %s", effect_type, target, tostring(value)))
-    
-    if effect_type == "set_flag" then
-        -- Set a boolean flag in upgrades
-        self.state.upgrades[target] = value
-        print(string.format("Set flag: upgrades.%s = %s", target, tostring(value)))
-        
-    elseif effect_type == "add_stat" then
-        -- Add to a numeric stat
-        local current = self.state.upgrades[target] or 0
-        self.state.upgrades[target] = current + value
-        print(string.format("Added stat: upgrades.%s = %s (was %s)", target, self.state.upgrades[target], current))
-        
-        -- Apply the stat change to actual game values
-        self:applyStatToGameValues(target, self.state.upgrades[target])
-        
-    elseif effect_type == "multiply_stat" then
-        -- Multiply a numeric stat
-        local current = self.state.upgrades[target] or 1
-        self.state.upgrades[target] = current * value
-        print(string.format("Multiplied stat: upgrades.%s = %s (was %s)", target, self.state.upgrades[target], current))
-        
-        -- Apply the stat change to actual game values
-        self:applyStatToGameValues(target, self.state.upgrades[target])
-        
-    elseif effect_type == "multiply_stats" then
-        -- Multiply multiple stats (targets should be an array)
-        local targets = upgrade.effect_targets or {target}
+local EFFECT_HANDLERS = {
+    set_flag = function(system, upgrade)
+        system.state.upgrades[upgrade.effect_target] = upgrade.effect_value
+        print(string.format("Set flag: upgrades.%s = %s", upgrade.effect_target, tostring(upgrade.effect_value)))
+    end,
+
+    add_stat = function(system, upgrade)
+        local current = system.state.upgrades[upgrade.effect_target] or 0
+        system.state.upgrades[upgrade.effect_target] = current + upgrade.effect_value
+        print(string.format("Added stat: upgrades.%s = %s (was %s)", upgrade.effect_target, system.state.upgrades[upgrade.effect_target], current))
+        system:applyStatToGameValues(upgrade.effect_target, system.state.upgrades[upgrade.effect_target])
+    end,
+
+    multiply_stat = function(system, upgrade)
+        local current = system.state.upgrades[upgrade.effect_target] or 1
+        system.state.upgrades[upgrade.effect_target] = current * upgrade.effect_value
+        print(string.format("Multiplied stat: upgrades.%s = %s (was %s)", upgrade.effect_target, system.state.upgrades[upgrade.effect_target], current))
+        system:applyStatToGameValues(upgrade.effect_target, system.state.upgrades[upgrade.effect_target])
+    end,
+
+    multiply_stats = function(system, upgrade)
+        local targets = upgrade.effect_targets or {upgrade.effect_target}
         for _, stat_target in ipairs(targets) do
-            local current = self.state.upgrades[stat_target] or 1
-            self.state.upgrades[stat_target] = current * value
-            print(string.format("Multiplied stat: upgrades.%s = %s (was %s)", stat_target, self.state.upgrades[stat_target], current))
-            
-            -- Apply the stat change to actual game values
-            self:applyStatToGameValues(stat_target, self.state.upgrades[stat_target])
+            local current = system.state.upgrades[stat_target] or 1
+            system.state.upgrades[stat_target] = current * upgrade.effect_value
+            print(string.format("Multiplied stat: upgrades.%s = %s (was %s)", stat_target, system.state.upgrades[stat_target], current))
+            system:applyStatToGameValues(stat_target, system.state.upgrades[stat_target])
         end
-        
-    elseif effect_type == "special" then
-        -- Handle special effects that need custom logic
-        self:applySpecialEffect(upgrade)
-        
-    else
-        print("ERROR: Unknown effect_type: " .. tostring(effect_type))
+    end,
+
+    special = function(system, upgrade)
+        system:applySpecialEffect(upgrade)
+    end,
+}
+
+function UpgradeSystem:applyDataDrivenEffect(upgrade)
+    print(string.format("Applying effect: %s -> %s = %s", upgrade.effect_type, upgrade.effect_target, tostring(upgrade.effect_value)))
+    local handler = EFFECT_HANDLERS[upgrade.effect_type]
+    if not handler then
+        print("ERROR: Unknown effect_type: " .. tostring(upgrade.effect_type))
+        return
     end
+    handler(self, upgrade)
 end
 
 function UpgradeSystem:applyStatToGameValues(stat_name, stat_value)

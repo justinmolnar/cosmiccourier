@@ -4,48 +4,65 @@ local GameplayConfig = require("data.GameplayConfig")
 
 local TripGenerator = {}
 
+-- Maps trip type string → creator function.
+-- Adding a new trip type is adding one entry here and one entry in getAvailableTripTypes.
+local TRIP_CREATORS = {
+    downtown = function(client_plot, base_payout, speed_bonus, game)
+        return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
+    end,
+    city = function(client_plot, base_payout, speed_bonus, game)
+        return TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
+    end,
+    -- intercity = function(...) end  -- add here when region map is implemented
+}
+
+-- Returns a weighted list of available trip types given the current game state.
+-- Branching logic lives here; generateTrip does not know which types are available.
+local function getAvailableTripTypes(trucks_exist)
+    if not trucks_exist then
+        return { { type = "downtown", weight = 1.0 } }
+    end
+    return {
+        { type = "downtown", weight = GameplayConfig.DOWNTOWN_TRIP_CHANCE },
+        { type = "city",     weight = 1.0 - GameplayConfig.DOWNTOWN_TRIP_CHANCE },
+        -- { type = "intercity", weight = ... }  -- add here when region map is implemented
+    }
+end
+
+-- Picks a random entry from a weighted list { { type, weight }, ... }.
+local function weightedRandom(entries)
+    local total = 0
+    for _, e in ipairs(entries) do total = total + e.weight end
+    local r = love.math.random() * total
+    local cumulative = 0
+    for _, e in ipairs(entries) do
+        cumulative = cumulative + e.weight
+        if r <= cumulative then return e end
+    end
+    return entries[#entries]
+end
+
 function TripGenerator.generateTrip(client_plot, game)
     local C_GAMEPLAY = game.C.GAMEPLAY
     local upgrades = game.state.upgrades
-    
+
     -- Check if we're at the trip limit
     if #game.entities.trips.pending >= upgrades.max_pending_trips then
         return nil
     end
-    
+
     local base_payout = C_GAMEPLAY.BASE_TRIP_PAYOUT
     local speed_bonus = C_GAMEPLAY.INITIAL_SPEED_BONUS
-    
-    -- Check if trucks exist
+
     local trucks_exist = false
     for _, v in ipairs(game.entities.vehicles) do
-        if v.type == "truck" then
-            trucks_exist = true
-            break
-        end
+        if v.type == "truck" then trucks_exist = true; break end
     end
 
-    local metro_unlocked = game.state.metro_license_unlocked
-
-    if not trucks_exist then
-        return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
-    elseif not metro_unlocked then
-        -- Trucks exist but no metro license: only downtown + city trips (no inter-city)
-        local rand = love.math.random()
-        if rand < GameplayConfig.DOWNTOWN_TRIP_CHANCE then
-            return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
-        else
-            return TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
-        end
-    else
-        -- Metro unlocked: inter-city disabled until region map is implemented; use city trips
-        local rand = love.math.random()
-        if rand < GameplayConfig.DOWNTOWN_TRIP_CHANCE then
-            return TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
-        else
-            return TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
-        end
-    end
+    local available = getAvailableTripTypes(trucks_exist)
+    local selected  = weightedRandom(available)
+    local creator   = TRIP_CREATORS[selected.type]
+    return creator(client_plot, base_payout, speed_bonus, game)
 end
 
 function TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)

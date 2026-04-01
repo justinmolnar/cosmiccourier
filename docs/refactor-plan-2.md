@@ -262,7 +262,12 @@ end
 
 ---
 
-**Status:** —
+**Status:** Complete
+**Deviation from plan:** None.
+**Notes:**
+- EFFECT_HANDLERS entries take `(system, upgrade)` rather than the plan's sketch of `(effect, state)` — handlers call instance methods (`system:applyStatToGameValues`, `system:applySpecialEffect`) so `self` must be passed. The dispatch function calls `handler(self, upgrade)`.
+- `getAvailableTripTypes` takes `trucks_exist` bool (computed in `generateTrip`) rather than full `game_state` — the only state it needs is whether trucks are present. Keeps the function pure and easy to test.
+- The metro_unlocked branch was identical to the non-metro branch; collapsed into one case as planned. The commented intercity entry marks the insertion point for when region map is implemented.
 
 ---
 
