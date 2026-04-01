@@ -228,6 +228,46 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
             for nbr in pairs(nbrs) do wfc_neighbors[poi_idx][nbr] = true end
         end
 
+        -- Tally world tile composition per POI from dmap + biome_data
+        local bdata = self.biome_data or {}
+        local poi_biome = {}
+        for sci, poi_idx in pairs(dmap) do
+            if not poi_biome[poi_idx] then
+                poi_biome[poi_idx] = { total=0, river=0, lake=0, forest=0, beach=0, desert=0 }
+            end
+            local t = poi_biome[poi_idx]
+            t.total = t.total + 1
+            local sci0  = sci - 1
+            local gscx2 = sci0 % sw
+            local gscy2 = math.floor(sci0 / sw)
+            local lscx  = gscx2 - gscx_off
+            local lscy  = gscy2 - gscy_off
+            local wcx   = city_mn_x + math.floor(lscx / 3)
+            local wcy   = city_mn_y + math.floor(lscy / 3)
+            local bd    = bdata[(wcy - 1) * w + wcx]
+            if bd then
+                if bd.is_river then t.river = t.river + 1 end
+                if bd.is_lake  then t.lake  = t.lake  + 1 end
+                local bn = bd.name or ""
+                if bn:find("Forest") or bn == "Woodland" or bn == "Jungle"
+                   or bn:find("Rainforest") or bn:find("Taiga") then
+                    t.forest = t.forest + 1
+                end
+                if bn == "Beach"                         then t.beach  = t.beach  + 1 end
+                if bn == "Desert" or bn:find("arid")     then t.desert = t.desert + 1 end
+            end
+        end
+
+        -- Hard-ban a district from a WFC cell (removes from possibility space)
+        local function ban(wfc, x, dtype)
+            if wfc.grid[1][x] and wfc.grid[1][x][dtype] then
+                wfc.grid[1][x][dtype] = false
+                local e = 0
+                for _, ok in pairs(wfc.grid[1][x]) do if ok then e = e + 1 end end
+                wfc.entropy_grid[1][x] = e
+            end
+        end
+
         -- Attempt WFC solve with retries on contradiction
         local MAX_ATTEMPTS = 10
         local dtypes
@@ -241,6 +281,34 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
             wfc.entropy_grid[1][1] = 1
             for x = 2, #pois do
                 WFC.setWeight(wfc, x, 1, "downtown", 0)
+
+                -- Apply biome-based bans and weight boosts per POI
+                local t     = poi_biome[x] or { total=1, river=0, lake=0, forest=0, beach=0, desert=0 }
+                local total = math.max(1, t.total)
+                local rf    = t.river  / total
+                local lf    = t.lake   / total
+                local ff    = t.forest / total
+                local bf    = t.beach  / total
+                local df    = t.desert / total
+                local wf    = rf + lf + bf  -- total water fraction
+
+                -- Hard bans: district literally requires these tile types
+                if rf < 0.05 then ban(wfc, x, "riverfront") end
+                if wf < 0.05 then ban(wfc, x, "waterfront") end
+
+                -- Soft boosts proportional to tile composition
+                if rf >= 0.05 then
+                    WFC.setWeight(wfc, x, 1, "riverfront", 1 + rf * 8)
+                end
+                if wf >= 0.05 then
+                    WFC.setWeight(wfc, x, 1, "waterfront", 1 + wf * 8)
+                end
+                if ff >= 0.2 then
+                    WFC.setWeight(wfc, x, 1, "rural_outskirts", 1 + ff * 6)
+                end
+                if df >= 0.3 then
+                    WFC.setWeight(wfc, x, 1, "industrial", 1 + df * 3)
+                end
             end
 
             WFC._propagateGraph(wfc, 1, wfc_neighbors, allowed_pairs)
@@ -1168,6 +1236,14 @@ function WorldSandboxController:sendToGame()
     new_map.zone_gscx_off   = gscx_off
     new_map.zone_gscy_off   = gscy_off
     new_map.zone_sw         = sw
+
+    -- Store world biome data for the biome overlay in GameView
+    new_map.world_biome_data = self.biome_data
+    new_map.world_city_mn_x  = city_mn_x
+    new_map.world_city_mn_y  = city_mn_y
+    new_map.world_city_mx_x  = city_mx_x
+    new_map.world_city_mx_y  = city_mx_y
+    new_map.world_w          = w
 
     -- Stamp onto game
     game.maps.city      = new_map

@@ -1019,6 +1019,127 @@ function GameView:_drawDistrictOverlay(active_map, S, cur_scale, sidebar_w, scre
     love.graphics.setColor(1, 1, 1)
 end
 
+function GameView:_drawBiomeOverlay(active_map, S, cur_scale, sidebar_w, screen_w, screen_h)
+    local Game = self.Game
+    if not Game.debug_biome_overlay then return end
+    if cur_scale ~= S.DOWNTOWN and cur_scale ~= S.CITY then return end
+    if not active_map.world_biome_data then return end
+
+    local CoordSvc = require("services.CoordinateService")
+    local ts       = Game.C.MAP.TILE_SIZE
+    local tps      = active_map.tile_pixel_size or ts
+    local bdata    = active_map.world_biome_data
+    local world_w  = active_map.world_w or 1
+    local mn_x     = active_map.world_city_mn_x or (Game.world_gen_city_mn_x or 1)
+    local mn_y     = active_map.world_city_mn_y or (Game.world_gen_city_mn_y or 1)
+    local mx_x     = active_map.world_city_mx_x or mn_x
+    local mx_y     = active_map.world_city_mx_y or mn_y
+    local font     = Game.fonts and Game.fonts.ui_small
+    local cell_px  = tps * 3  -- pixels per world tile in city sub-cell space
+
+    local BCOLORS = {
+        ["River"]              = {0.25, 0.50, 0.95},
+        ["Lake"]               = {0.20, 0.42, 0.88},
+        ["Beach"]              = {0.92, 0.86, 0.50},
+        ["Desert"]             = {0.92, 0.72, 0.36},
+        ["Semi-arid"]          = {0.82, 0.68, 0.44},
+        ["Tundra"]             = {0.76, 0.84, 0.90},
+        ["Cold Highland"]      = {0.70, 0.78, 0.82},
+        ["Highland"]           = {0.65, 0.70, 0.62},
+        ["Boreal Highland"]    = {0.52, 0.70, 0.60},
+        ["Boreal / Taiga"]     = {0.30, 0.56, 0.42},
+        ["Temp. Rainforest"]   = {0.20, 0.54, 0.34},
+        ["Temp. Forest"]       = {0.26, 0.56, 0.36},
+        ["Subtropical Forest"] = {0.28, 0.58, 0.36},
+        ["Tropical Forest"]    = {0.24, 0.60, 0.36},
+        ["Jungle"]             = {0.18, 0.58, 0.30},
+        ["Woodland"]           = {0.36, 0.62, 0.40},
+        ["Swamp"]              = {0.32, 0.50, 0.44},
+        ["Tropical Swamp"]     = {0.28, 0.48, 0.40},
+        ["Grassland"]          = {0.62, 0.82, 0.42},
+        ["Savanna"]            = {0.74, 0.80, 0.42},
+        ["Tropical Savanna"]   = {0.72, 0.76, 0.40},
+        ["Shrubland"]          = {0.66, 0.74, 0.48},
+    }
+
+    -- Resolve hovered world tile
+    local hover_wx, hover_wy, hover_bd
+    local mx, my = love.mouse.getPosition()
+    if mx >= sidebar_w then
+        local wpx, wpy = CoordSvc.screenToWorld(mx, my, Game.C, Game.camera)
+        local lscx = math.floor((wpx - (mn_x - 1) * ts) / tps)
+        local lscy = math.floor((wpy - (mn_y - 1) * ts) / tps)
+        local twx  = mn_x + math.floor(lscx / 3)
+        local twy  = mn_y + math.floor(lscy / 3)
+        if twx >= mn_x and twx <= mx_x and twy >= mn_y and twy <= mx_y then
+            hover_wx = twx
+            hover_wy = twy
+            hover_bd = bdata[(twy - 1) * world_w + twx]
+        end
+    end
+
+    -- Tile tints (inside camera transform)
+    local vw = screen_w - sidebar_w
+    love.graphics.push()
+    love.graphics.translate(sidebar_w + vw / 2, screen_h / 2)
+    love.graphics.scale(Game.camera.scale, Game.camera.scale)
+    love.graphics.translate(-Game.camera.x, -Game.camera.y)
+    if cur_scale == S.DOWNTOWN then
+        love.graphics.translate((mn_x - 1) * ts, (mn_y - 1) * ts)
+    end
+
+    local ox = cur_scale == S.CITY and (mn_x - 1) * ts or 0
+    local oy = cur_scale == S.CITY and (mn_y - 1) * ts or 0
+
+    for wy = mn_y, mx_y do
+        for wx = mn_x, mx_x do
+            local bd = bdata[(wy - 1) * world_w + wx]
+            if bd then
+                local col     = BCOLORS[bd.name] or {0.55, 0.55, 0.55}
+                local px      = ox + (wx - mn_x) * cell_px
+                local py      = oy + (wy - mn_y) * cell_px
+                local hovered = hover_wx == wx and hover_wy == wy
+                love.graphics.setColor(col[1], col[2], col[3], hovered and 0.72 or 0.45)
+                love.graphics.rectangle("fill", px, py, cell_px, cell_px)
+                if hovered then
+                    love.graphics.setColor(1, 1, 1, 0.9)
+                    love.graphics.setLineWidth(math.max(1, tps * 0.15))
+                    love.graphics.rectangle("line", px, py, cell_px, cell_px)
+                    love.graphics.setLineWidth(1)
+                end
+            end
+        end
+    end
+    love.graphics.pop()
+
+    -- Hover tooltip (screen space)
+    if hover_bd and font then
+        local bn   = hover_bd.name or "Unknown"
+        local line1 = "Biome: " .. bn
+        local line2
+        if hover_bd.is_river then
+            line2 = "Tile: river"
+        elseif hover_bd.is_lake then
+            line2 = "Tile: lake"
+        else
+            line2 = string.format("temp %.2f   wet %.2f", hover_bd.temp or 0, hover_bd.wet or 0)
+        end
+        local tw  = math.max(font:getWidth(line1), font:getWidth(line2))
+        local th  = font:getHeight()
+        local pad = 6
+        local bx  = math.min(mx + 14, screen_w - tw - pad * 2 - 4)
+        local by  = math.min(my + 14, screen_h - th * 2 - pad * 2 - 8)
+        love.graphics.setFont(font)
+        love.graphics.setColor(0, 0, 0, 0.78)
+        love.graphics.rectangle("fill", bx - pad, by - pad, tw + pad * 2, th * 2 + pad * 2 + 4, 4)
+        love.graphics.setColor(1, 1, 1, 0.95)
+        love.graphics.print(line1, bx, by)
+        love.graphics.print(line2, bx, by + th + 4)
+    end
+
+    love.graphics.setColor(1, 1, 1)
+end
+
 function GameView:draw()
     local Game = self.Game
     local active_map = Game.maps[Game.active_map_key]
@@ -1032,6 +1153,7 @@ function GameView:draw()
     if Game.world_gen_cam_params then
         self:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
         self:_drawDistrictOverlay(active_map, S, cur_scale, sidebar_w, screen_w, screen_h)
+        self:_drawBiomeOverlay(active_map, S, cur_scale, sidebar_w, screen_w, screen_h)
     else
         self:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
     end
