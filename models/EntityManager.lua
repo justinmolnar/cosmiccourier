@@ -1,5 +1,6 @@
 -- models/EntityManager.lua
 local Client = require("models.Client")
+local CoordinateService = require("services.CoordinateService")
 
 local Entities = {}
 Entities.__index = Entities
@@ -97,21 +98,36 @@ end
 function Entities:handle_click(x, y, game)
     -- vehicle.px/py are city-map-local tile pixels; world coords include the city world-pixel offset
     local ts = game.C.MAP.TILE_SIZE
-    local city_off_x = ((game.world_gen_city_mn_x or 1) - 1) * ts
-    local city_off_y = ((game.world_gen_city_mn_y or 1) - 1) * ts
+    local city_origin = {x = game.world_gen_city_mn_x or 1, y = game.world_gen_city_mn_y or 1}
+    local city_off_x, city_off_y = CoordinateService.applyRegionOffset(0, 0, city_origin, ts)
     local local_x = x - city_off_x
     local local_y = y - city_off_y
+    local radius_sq = game.C.UI.VEHICLE_CLICK_RADIUS * game.C.UI.VEHICLE_CLICK_RADIUS
+    local candidates = {}
     for _, vehicle in ipairs(self.vehicles) do
         local dist_sq = (local_x - vehicle.px)^2 + (local_y - vehicle.py)^2
-        if dist_sq < game.C.UI.VEHICLE_CLICK_RADIUS * game.C.UI.VEHICLE_CLICK_RADIUS then
-            self.selected_vehicle = vehicle
-            print("Selected " .. vehicle.type .. " " .. vehicle.id)
-            return true
+        if dist_sq < radius_sq then
+            candidates[#candidates + 1] = vehicle
         end
     end
 
-    self.selected_vehicle = nil
-    return false
+    if #candidates == 0 then
+        self.selected_vehicle = nil
+        return false
+    end
+
+    -- If only one candidate or none is currently selected, pick the first.
+    -- If the current selection is in the candidate list, advance to the next one (cycling).
+    local pick = candidates[1]
+    for i, v in ipairs(candidates) do
+        if v == self.selected_vehicle then
+            pick = candidates[(i % #candidates) + 1]
+            break
+        end
+    end
+    self.selected_vehicle = pick
+    print("Selected " .. pick.type .. " " .. pick.id)
+    return true
 end
 
 return Entities

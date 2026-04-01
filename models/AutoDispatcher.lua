@@ -1,5 +1,6 @@
 -- models/AutoDispatcher.lua with debug logging
 
+local TripEligibilityService = require("services.TripEligibilityService")
 local AutoDispatcher = {}
 AutoDispatcher.__index = AutoDispatcher
 
@@ -44,37 +45,37 @@ function AutoDispatcher:dispatch(game)
     -- For each pending trip, try to find a matching vehicle
     for i = #game.entities.trips.pending, 1, -1 do
         local trip_to_assign = game.entities.trips.pending[i]
-        if not trip_to_assign.legs[trip_to_assign.current_leg] then 
+        if not trip_to_assign.legs[trip_to_assign.current_leg] then
             print(string.format("AutoDispatcher: Trip %d has no valid current leg", i))
-            goto continue 
+            goto continue
         end
-        
-        local required_type = trip_to_assign.legs[trip_to_assign.current_leg].vehicleType
+
         local current_leg = trip_to_assign.current_leg
         local total_legs = #trip_to_assign.legs
-        
-        print(string.format("AutoDispatcher: Trip %d needs %s for leg %d/%d (long_distance: %s)", 
+        local required_type = trip_to_assign.legs[current_leg].vehicleType
+
+        print(string.format("AutoDispatcher: Trip %d needs %s for leg %d/%d (long_distance: %s)",
               i, required_type, current_leg, total_legs, tostring(trip_to_assign.is_long_distance)))
 
         -- Find an available vehicle of the required type
         local found_vehicle = nil
         local available_vehicles = {}
         local total_vehicles_of_type = 0
-        
+
         for _, vehicle in ipairs(game.entities.vehicles) do
             if vehicle.type == required_type then
                 total_vehicles_of_type = total_vehicles_of_type + 1
-                local is_available = vehicle:isAvailable(game)
+                local can_assign = TripEligibilityService.canAssign(vehicle, trip_to_assign, game)
                 local capacity_info = string.format("(%d/%d)", #vehicle.trip_queue + #vehicle.cargo, game.state.upgrades.vehicle_capacity)
-                table.insert(available_vehicles, string.format("%s %d %s (available: %s, state: %s)", 
-                             vehicle.type, vehicle.id, capacity_info, tostring(is_available), vehicle.state.name))
-                if is_available and not found_vehicle then 
+                table.insert(available_vehicles, string.format("%s %d %s (eligible: %s, state: %s)",
+                             vehicle.type, vehicle.id, capacity_info, tostring(can_assign), vehicle.state.name))
+                if can_assign and not found_vehicle then
                     found_vehicle = vehicle
                 end
             end
         end
-        
-        print(string.format("AutoDispatcher: Found %d %s vehicles: %s", 
+
+        print(string.format("AutoDispatcher: Found %d %s vehicles: %s",
               total_vehicles_of_type, required_type, table.concat(available_vehicles, ", ")))
 
         if found_vehicle then

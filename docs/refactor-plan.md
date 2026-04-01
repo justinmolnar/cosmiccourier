@@ -404,9 +404,13 @@ Task 4.3 (StreetPipeline) is the trickiest — the `Game.street_segments = {}` r
 
 ---
 
-**Status:** Not started
-**Line count change:** ~+250 new service files / −400 removed duplicates and inline logic (net reduction ~150)
-**Deviation from plan:** —
+**Status:** Complete (commit TBD)
+**Line count change:** ~+150 new service files / −200 removed duplicates and inline logic (net reduction ~50)
+**Deviation from plan:**
+- **4.1 caller migration:** CoordinateService fully implemented and CoordinateSystem.lua deleted. Camera.lua, Vehicle.lua (`:new`, `:recalculatePixelPosition`, `:_getRegionDrawPosition`), and EntityManager.lua (`:handle_click`) all updated. InputController.lua had no coordinate math to migrate. GameView.lua's coordinate math was removed as part of the lab/WFC draw function purge.
+- **4.3 skipped:** GrowthStreetService, OrganicStreetService, and RadialStreetService were all dead code and deleted in Phase 2 pre-purge. StreetPipeline is moot.
+- **4.6 partial:** No `ZoomService.lua` created. `MapScales.getNext()` called directly from EventService — one line each, no added indirection justified creating a wrapper service.
+- **4.7 skipped:** ArterialRoadService deleted in Phase 2 pre-purge as dead code.
 
 ---
 

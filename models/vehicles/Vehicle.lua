@@ -1,4 +1,5 @@
 -- models/vehicles/Vehicle.lua
+local CoordinateService = require("services.CoordinateService")
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
@@ -26,8 +27,7 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
         local tps = home_map.tile_pixel_size or home_map.C.MAP.TILE_SIZE
         local rx, ry = depot_plot.x - 1, depot_plot.y - 1
         instance.grid_anchor = {x = rx, y = ry}
-        instance.px = rx * tps
-        instance.py = ry * tps
+        instance.px, instance.py = CoordinateService.roadNodeToPixel(rx, ry, tps, false)
     else
         instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
         instance.px, instance.py = home_map:getPixelCoords(depot_plot.x, depot_plot.y)
@@ -61,15 +61,8 @@ function Vehicle:recalculatePixelPosition(game)
     if home_map then
         local tps = home_map.tile_pixel_size or home_map.C.MAP.TILE_SIZE
         if home_map.road_v_rxs then
-            -- Road-node map: grid_anchor holds road-node coords (rx, ry).
-            -- Tile-centre nodes (is_tile=true) are offset by half a cell.
-            if self.grid_anchor.is_tile then
-                self.px = (self.grid_anchor.x + 0.5) * tps
-                self.py = (self.grid_anchor.y + 0.5) * tps
-            else
-                self.px = self.grid_anchor.x * tps
-                self.py = self.grid_anchor.y * tps
-            end
+            self.px, self.py = CoordinateService.roadNodeToPixel(
+                self.grid_anchor.x, self.grid_anchor.y, tps, self.grid_anchor.is_tile)
         else
             self.px, self.py = home_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
         end
@@ -79,21 +72,7 @@ end
 function Vehicle:_getRegionDrawPosition(game)
     local region_map = game.maps.region
     local tile_size = region_map.C.MAP.TILE_SIZE
-
-    -- Get the region grid coordinates where the city map begins.
-    local city_start_in_region_x = region_map.main_city_offset.x
-    local city_start_in_region_y = region_map.main_city_offset.y
-    
-    -- Calculate the pixel coordinate of the top-left corner of the city's area within the region map.
-    local city_top_left_px_in_region = (city_start_in_region_x - 1) * tile_size
-    local city_top_left_py_in_region = (city_start_in_region_y - 1) * tile_size
-
-    -- The vehicle's self.px and self.py are its pixel coordinates relative to the city map's origin.
-    -- We add them to the city's top-left pixel position within the region to get the final, smooth draw position.
-    local final_draw_px = city_top_left_px_in_region + self.px
-    local final_draw_py = city_top_left_py_in_region + self.py
-    
-    return final_draw_px, final_draw_py
+    return CoordinateService.applyRegionOffset(self.px, self.py, region_map.main_city_offset, tile_size)
 end
 
 

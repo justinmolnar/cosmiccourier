@@ -11,9 +11,7 @@ function Camera:new(x, y, scale)
 end
 
 function Camera:screenToWorld(x, y, game)
-    local CoordinateSystem = require("utils.CoordinateSystem")
-    local coord_system = CoordinateSystem.new(game.C)
-    return coord_system:screenToWorld(x, y, self)
+    return require("services.CoordinateService").screenToWorld(x, y, game.C, self)
 end
 
 function Camera:apply()

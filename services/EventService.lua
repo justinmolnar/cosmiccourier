@@ -1,5 +1,6 @@
 -- services/EventService.lua
 local MapScales = require("data.map_scales")
+local TripEligibilityService = require("services.TripEligibilityService")
 local EventService = {}
 
 function EventService.setupGameEvents(state, game)
@@ -46,14 +47,8 @@ function EventService.setupTripEvents(state, game)
 
         if not trip_to_assign then return end
 
-        if not selected_vehicle:isAvailable(game) then
-            print("TRIP ASSIGNMENT FAILED: Vehicle " .. selected_vehicle.id .. " is at full capacity.")
-            return
-        end
-
-        local required_type = trip_to_assign.legs[trip_to_assign.current_leg].vehicleType
-        if selected_vehicle.type ~= required_type then
-            print(string.format("TRIP ASSIGNMENT FAILED: Trip requires a %s, but a %s is selected.", required_type, selected_vehicle.type))
+        if not TripEligibilityService.canAssign(selected_vehicle, trip_to_assign, game) then
+            print(string.format("TRIP ASSIGNMENT FAILED: Vehicle %d cannot take this trip.", selected_vehicle.id))
             return
         end
 
