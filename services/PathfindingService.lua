@@ -44,8 +44,7 @@ function PathfindingService.findVehiclePath(vehicle, start_node, end_plot, game)
                 local t = tile.type
                 if t == "arterial" then
                     return vehicle:getMovementCostFor("arterial")
-                elseif t == "highway" or t == "highway_ring" or
-                       t == "highway_ns" or t == "highway_ew" then
+                elseif t == "highway" then
                     return vehicle:getMovementCostFor("highway")
                 end
             end

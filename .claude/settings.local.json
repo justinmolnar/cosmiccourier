@@ -9,7 +9,16 @@
       "Bash(grep -rn \"truck\\\\|vehicleType\\\\|vehicle_type\\\\|multi.*leg\\\\|city.*trip\\\\|spawn.*trip\\\\|generate.*trip\\\\|createTrip\\\\|TripFactory\" 'C:/Users/chate/Documents/cosmic courier/models/' --include=*.lua)",
       "Bash(grep -rn \"is_long_distance\\\\|addLeg\\\\|truck.*trip\\\\|city.*trip\\\\|spawnTrip\\\\|new_trip\\\\|Trip:new\\\\|Trip\\\\.new\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
       "Bash(grep -rn .vehicless*= 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
-      "Bash(xargs ls:*)"
+      "Bash(xargs ls:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(grep -r \"drawGrid\\\\|city_image\\\\|world_gen_city\" 'C:\\\\Users\\\\chate\\\\Documents\\\\cosmic courier' --include=*.lua -l)",
+      "Bash(grep -rn \"debug\\\\|Debug\\\\|G\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua -l)",
+      "Bash(grep -rn \"showGraph\\\\|show_graph\\\\|graph.*debug\\\\|debug.*graph\\\\|drawGraph\\\\|draw_graph\\\\|pathGraph\\\\|path.*graph\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
+      "Bash(grep -rn \"key.*g\\\\|key.*G\\\\|g\\\\|''''g''''\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
+      "Bash(grep -rn pathfinding_costs 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)",
+      "Bash(grep -rn \"\\\\.speed\\\\b\\\\|properties\\\\.speed\\\\|estimatePathTravelTime\" 'C:/Users/chate/Documents/cosmic courier/' --include=*.lua)"
     ]
   }
 }

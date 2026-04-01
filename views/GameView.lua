@@ -366,9 +366,7 @@ function GameView:draw()
                                 local nx, ny = hgx+d[1], hgy+d[2]
                                 if nx >= 1 and nx <= grid_w and ny >= 1 and ny <= grid_h then
                                     local tt = active_map.grid[ny][nx].type
-                                    if tt == "arterial" or tt == "highway" or
-                                       tt == "highway_ring" or tt == "highway_ns" or
-                                       tt == "highway_ew" then
+                                    if tt == "arterial" or tt == "highway" then
                                         love.graphics.setColor(0, 1, 0, 0.6)
                                         love.graphics.rectangle("fill",
                                             (nx-1)*tps_dbg, (ny-1)*tps_dbg,
@@ -520,8 +518,7 @@ function GameView:draw()
                         local col = zrow and ZT.COLORS[zrow[gx]]
                         if not col then
                             local t = row[gx].type
-                            if t == "arterial" or t == "highway" or t == "highway_ring"
-                               or t == "highway_ns" or t == "highway_ew" then
+                            if t == "arterial" or t == "highway" then
                                 for _, d in ipairs(dirs) do
                                     local nz = zg[gy+d[2]] and zg[gy+d[2]][gx+d[1]]
                                     if nz then col = ZT.COLORS[nz]; if col then break end end
@@ -694,6 +691,27 @@ function GameView:draw()
                     end
                 end
                 love.graphics.setLineWidth(1)
+            end
+        end
+
+        -- Fog non-downtown subcells at DOWNTOWN scale
+        if cur_scale == S.DOWNTOWN then
+            local ds  = active_map.downtown_subcells
+            local tps = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
+            if ds and #active_map.grid > 0 and #active_map.grid[1] > 0 then
+                local cw = #active_map.grid[1] * tps
+                local ch = #active_map.grid    * tps
+                love.graphics.stencil(function()
+                    for gy, row in pairs(ds) do
+                        for gx in pairs(row) do
+                            love.graphics.rectangle("fill", (gx-1)*tps, (gy-1)*tps, tps, tps)
+                        end
+                    end
+                end, "replace", 1)
+                love.graphics.setStencilTest("notequal", 1)
+                love.graphics.setColor(0, 0, 0, 0.72)
+                love.graphics.rectangle("fill", 0, 0, cw, ch)
+                love.graphics.setStencilTest()
             end
         end
 

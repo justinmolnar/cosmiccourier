@@ -6,11 +6,8 @@
 local RoadSmoother = {}
 
 local ROAD_TYPES = {
-    arterial     = true,
-    highway      = true,
-    highway_ring = true,
-    highway_ns   = true,
-    highway_ew   = true,
+    arterial = true,
+    highway  = true,
 }
 
 

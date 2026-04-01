@@ -8,19 +8,19 @@ function love.load()
         log_to_file = true,
         show_error_popups = true
     })
-    
+
     -- Initialize configuration system
     local GameConfig = require("config.GameConfig")
     GameConfig.initialize()
-    
+
     -- Load and validate constants
     local C = require("data.constants")
     local ConstantsValidator = require("data.ConstantsValidator")
-    
+
     ErrorService.withErrorHandling(function()
         ConstantsValidator.validate(C)
     end, "Constants Validation")
-    
+
     -- Apply graphics configuration
     local is_fullscreen = GameConfig.get("graphics", "fullscreen")
     love.window.setMode(
@@ -32,14 +32,12 @@ function love.load()
             vsync = GameConfig.get("graphics", "vsync")
         }
     )
-    
+
     local GameController = require("controllers.GameController")
     local InputController = require("controllers.InputController")
     local GameView = require("views.GameView")
     local UIView = require("views.UIView")
     local UIManager = require("views.UIManager")
-
-
 
     Game = {
         C = C,
@@ -71,11 +69,10 @@ function love.load()
         debug_hide_roads = true,
         debug_smooth_roads = true,
         debug_smooth_roads_like = true,
-        -- NEW: Storing paths from R and Y keys separately
         arterial_control_paths = {},
         smooth_highway_overlay_paths = {}
     }
-    
+
     local SaveService = require("services.SaveService")
     local save_data = SaveService.loadGame()
 
@@ -84,14 +81,14 @@ function love.load()
     Game.wfc_lab_hotkeys = Game.wfc_lab_controller:getHandledKeys()
 
     Game.state = require("models.GameState"):new(C, Game)
-    
+
     if save_data then
         ErrorService.withErrorHandling(function()
             SaveService.applySaveData(Game.state, save_data)
             ErrorService.logInfo("Main", "Save game loaded successfully")
         end, "Save Game Loading")
     end
-    
+
     Game.ui_manager = UIManager:new(C, Game)
     Game.zoom_controls = require("views.components.ZoomControls"):new(C)
 
@@ -101,20 +98,13 @@ function love.load()
     Game.input_controller = InputController:new(Game)
     Game.game_view = GameView:new(Game)
     Game.ui_view = UIView:new(Game)
-    Game.sandbox_controller = require("controllers.SandboxController"):new(Game)
-    Game.sandbox_view = require("views.SandboxView"):new(Game)
-    Game.sandbox_sidebar_view = require("views.SandboxSidebarView"):new(Game)
 
     Game.world_sandbox_controller = require("controllers.WorldSandboxController"):new(Game)
     Game.world_sandbox_view        = require("views.WorldSandboxView"):new(Game)
     Game.world_sandbox_sidebar_view = require("views.WorldSandboxSidebarView"):new(Game)
 
-    ErrorService.withErrorHandling(function()
-        Game.maps.region:generateRegion()
-    end, "Region Map Generation")
-    
     Game.entities:init(Game)
-    
+
     ErrorService.withErrorHandling(function()
         local uiFont = love.graphics.newFont(C.UI.FONT_PATH_MAIN, C.UI.FONT_SIZE_UI)
         local uiFontSmall = love.graphics.newFont(C.UI.FONT_PATH_MAIN, C.UI.FONT_SIZE_UI_SMALL)
@@ -123,7 +113,7 @@ function love.load()
         local uiIconFont = love.graphics.newFont(C.UI.FONT_PATH_EMOJI, C.UI.FONT_SIZE_UI)
 
         uiFont:setFallbacks(uiIconFont)
-        uiFontSmall:setFallbacks(uiIconFont)
+        uiFontSmall:setFallbacks(uiFont, uiFontSmall)
         emojiFont:setFallbacks(uiFont, uiFontSmall)
         emojiFontUI:setFallbacks(uiFont, uiFontSmall)
 
@@ -134,7 +124,7 @@ function love.load()
 
         love.graphics.setFont(Game.fonts.ui)
     end, "Font Loading")
-    
+
     -- Auto-generate world and drop into the game on every launch.
     ErrorService.withErrorHandling(function()
         local wsc = Game.world_sandbox_controller
@@ -151,16 +141,13 @@ function love.load()
     if auto_save_interval > 0 then
         Game.auto_save_timer = auto_save_interval
     end
-    
+
     ErrorService.logInfo("Main", "Game initialization completed successfully")
 end
 
 function love.update(dt)
     Game.game_controller:update(dt)
-    if Game.sandbox_controller then
-        Game.sandbox_controller:update(dt)
-    end
-    
+
     if Game.auto_save_timer then
         Game.auto_save_timer = Game.auto_save_timer - dt
         if Game.auto_save_timer <= 0 then
@@ -168,7 +155,7 @@ function love.update(dt)
             Game.error_service.withErrorHandling(function()
                 SaveService.saveGame(Game.state, "autosave.json")
             end, "Auto Save")
-            
+
             Game.auto_save_timer = Game.config.get("ui", "auto_save_interval")
         end
     end
@@ -178,12 +165,6 @@ function love.draw()
     if Game.world_sandbox_controller:isActive() then
         Game.world_sandbox_sidebar_view:draw()
         Game.world_sandbox_view:draw()
-        return
-    end
-
-    if Game.sandbox_controller:isActive() then
-        Game.sandbox_sidebar_view:draw()
-        Game.sandbox_view:draw()
         return
     end
 
@@ -209,16 +190,6 @@ function love.keypressed(key)
         return
     end
 
-    if key == "f9" then
-        Game.sandbox_controller:toggle()
-        return
-    end
-
-    if Game.sandbox_controller:isActive() then
-        Game.sandbox_controller:handle_keypressed(key)
-        return
-    end
-
     if Game.wfc_lab_hotkeys[key] then
         Game.wfc_lab_controller:keypressed(key)
         return
@@ -232,20 +203,12 @@ function love.mousewheelmoved(x, y)
         Game.world_sandbox_controller:handle_mouse_wheel(x, y)
         return
     end
-    if Game.sandbox_controller:isActive() then
-        Game.sandbox_controller:handle_mouse_wheel(x, y)
-        return
-    end
     Game.input_controller:mousewheelmoved(x, y)
 end
 
 function love.mousepressed(x, y, button)
     if Game.world_sandbox_controller:isActive() then
         Game.world_sandbox_controller:handle_mouse_down(x, y, button)
-        return
-    end
-    if Game.sandbox_controller:isActive() then
-        Game.sandbox_controller:handle_mouse_down(x, y, button)
         return
     end
     Game.input_controller:mousepressed(x, y, button)
@@ -256,20 +219,12 @@ function love.mousereleased(x, y, button)
         Game.world_sandbox_controller:handle_mouse_up(x, y, button)
         return
     end
-    if Game.sandbox_controller:isActive() then
-        Game.sandbox_controller:handle_mouse_up(x, y, button)
-        return
-    end
     Game.input_controller:mousereleased(x, y, button)
 end
 
 function love.mousemoved(x, y, dx, dy)
     if Game.world_sandbox_controller:isActive() then
         Game.world_sandbox_controller:handle_mouse_moved(x, y, dx, dy)
-        return
-    end
-    if Game.sandbox_controller:isActive() then
-        Game.sandbox_controller:handle_mouse_moved(x, y, dx, dy)
         return
     end
     Game.input_controller:mousemoved(x, y, dx, dy)
@@ -280,28 +235,24 @@ function love.textinput(text)
         Game.world_sandbox_controller:handle_textinput(text)
         return
     end
-    if Game.sandbox_controller:isActive() then
-        Game.sandbox_controller:handle_textinput(text)
-        return
-    end
     Game.input_controller:textinput(text)
 end
 
 function love.quit()
     Game.error_service.logInfo("Main", "Game shutting down...")
-    
+
     local SaveService = require("services.SaveService")
     Game.error_service.withErrorHandling(function()
         SaveService.saveGame(Game.state, "lastsave.json")
         Game.error_service.logInfo("Main", "Game state saved on exit")
     end, "Exit Save")
-    
+
     Game.error_service.withErrorHandling(function()
         Game.config.saveUserConfig()
     end, "Config Save")
-    
+
     Game.error_service.saveLogsToFile()
-    
+
     Game.error_service.logInfo("Main", "Shutdown complete")
     return false
 end

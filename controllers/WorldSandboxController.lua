@@ -507,6 +507,25 @@ function WorldSandboxController:sendToGame()
         end
         new_map.zone_grid = result
 
+        -- Build per-subcell downtown set (district owner == 1) for fog rendering in GameView
+        do
+            local sw2 = w * 3
+            local dt_cells = {}
+            for lscy = 0, sub_ch - 1 do
+                local gscy2 = gscy_off + lscy
+                local gy    = lscy + 1
+                for lscx = 0, sub_cw - 1 do
+                    local gscx2 = gscx_off + lscx
+                    local sci2  = gscy2 * sw2 + gscx2 + 1
+                    if dmap[sci2] == 1 then
+                        if not dt_cells[gy] then dt_cells[gy] = {} end
+                        dt_cells[gy][lscx + 1] = true
+                    end
+                end
+            end
+            new_map.downtown_subcells = dt_cells
+        end
+
         -- Store zone grid + its sub-cell origin for _buildCityImage rendering
         if not self.city_zone_grids   then self.city_zone_grids   = {} end
         if not self.city_zone_offsets then self.city_zone_offsets = {} end
@@ -686,8 +705,7 @@ function WorldSandboxController:sendToGame()
         local function is_road_tile(x, y)
             if x < 1 or x > sub_cw or y < 1 or y > sub_ch then return false end
             local tt = grid[y] and grid[y][x] and grid[y][x].type
-            return tt == "arterial" or tt == "highway" or tt == "highway_ring" or
-                   tt == "highway_ns" or tt == "highway_ew"
+            return tt == "arterial" or tt == "highway"
         end
         local building_plots = {}
         local seen_b = {}
@@ -953,8 +971,7 @@ function WorldSandboxController:sendToGame()
             for tgy = 1, sub_ch do
                 for tgx = 1, sub_cw do
                     local tt = grid[tgy][tgx].type
-                    if tt == "arterial" or tt == "highway" or
-                       tt == "highway_ring" or tt == "highway_ns" or tt == "highway_ew" then
+                    if tt == "arterial" or tt == "highway" then
                         local tty = tgy - 1
                         local ttx = tgx - 1
                         if not tile_nodes_tbl[tty] then tile_nodes_tbl[tty] = {} end

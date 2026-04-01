@@ -36,11 +36,8 @@ end
 function Map:isRoad(tile_type)
     return tile_type == "road" or
            tile_type == "downtown_road" or
-           tile_type == "arterial" or 
-           tile_type == "highway" or
-           tile_type == "highway_ring" or
-           tile_type == "highway_ns" or
-           tile_type == "highway_ew"
+           tile_type == "arterial" or
+           tile_type == "highway"
 end
 
 local function getTileColor(tile_type, is_in_downtown, C_MAP)
@@ -49,16 +46,14 @@ local function getTileColor(tile_type, is_in_downtown, C_MAP)
     end
     if is_in_downtown then
         if tile_type == "road" or tile_type == "downtown_road" or
-           tile_type == "highway" or tile_type == "highway_ring" or
-           tile_type == "highway_ns" or tile_type == "highway_ew" then
+           tile_type == "highway" then
             return C_MAP.COLORS.DOWNTOWN_ROAD
         else
             return C_MAP.COLORS.DOWNTOWN_PLOT
         end
     else
         if tile_type == "road" or tile_type == "downtown_road" or
-           tile_type == "highway" or tile_type == "highway_ring" or
-           tile_type == "highway_ns" or tile_type == "highway_ew" then
+           tile_type == "highway" then
             return C_MAP.COLORS.ROAD
         elseif tile_type == "grass" then
             return C_MAP.COLORS.GRASS
@@ -198,7 +193,7 @@ function Map:drawRoads()
         for x = 1, #row do
             local t = row[x].type
             local c
-            if t == "road" or t == "highway_ring" or t == "highway_ns" or t == "highway_ew" then
+            if t == "road" then
                 c = road_color
             elseif t == "downtown_road" then
                 c = dt_road_color
@@ -316,11 +311,6 @@ function Map:getRandomDowntownBuildingPlot()
         end
     end
     return nil
-end
-
-function Map:generateRegion()
-    local MapGenerationService = require("services.MapGenerationService")
-    MapGenerationService.generateRegion(self)
 end
 
 function Map:getScaleName() 
