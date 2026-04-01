@@ -331,4 +331,11 @@ This is a cleanup task only — do not change behavior.
 
 ---
 
-**Status:** —
+**Status:** Complete
+**Deviation from plan:** None.
+**Notes:**
+- `love.load()` body is 9 lines (8 calls + logInfo). Each sub-function has one statable responsibility.
+- `_buildGame` re-requires ErrorService and GameConfig (cached by Lua — zero cost) to avoid threading them through the return value of `_initCore`.
+- `_loadSave` creates `Game.state` as well as applying save data — state creation is inseparable from save application since the save is applied immediately after state is constructed.
+- `_initInputDispatcher` includes `Game.entities:init(Game)` to preserve original call ordering (it was between the dispatcher block and font loading).
+- Task 4.2: the 5 structurally identical mouse/text event registrations are now a `routes` table with a loop, replacing 10 explicit `dispatcher:on` calls with 5 entries + 2 loop calls.
