@@ -138,8 +138,8 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
             local TS = Game.C.MAP.TILE_SIZE
             local dt = map.downtown_offset
             local x1 = (dt.x - 1) * TS;  local y1 = (dt.y - 1) * TS
-            local x2 = (dt.x + Game.C.MAP.DOWNTOWN_GRID_WIDTH  - 1) * TS
-            local y2 = (dt.y + Game.C.MAP.DOWNTOWN_GRID_HEIGHT - 1) * TS
+            local x2 = (dt.x + map.downtown_grid_width  - 1) * TS
+            local y2 = (dt.y + map.downtown_grid_height - 1) * TS
             local gw = #map.grid[1] * TS; local gh = #map.grid * TS
             love.graphics.setColor(0, 0, 0, 0.72)
             love.graphics.rectangle("fill", 0,  0,  x1,      gh)
@@ -156,7 +156,10 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
         for _, client in ipairs(Game.entities.clients) do
             DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
         end
-        Game.event_spawner:draw(Game)
+        if Game.event_spawner and Game.event_spawner.clickable then
+            local ec = Game.event_spawner.clickable
+            DrawingUtils.drawWorldIcon(Game, "☎️", ec.x, ec.y)
+        end
     end
     for _, vehicle in ipairs(Game.entities.vehicles) do
         if vehicle.visible then vehicle:draw(Game) end
@@ -402,7 +405,6 @@ function GameView:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sideba
             for _, v in ipairs(Game.entities.vehicles) do
                 if v.visible then v:draw(Game) end
             end
-
             -- Debug overlays (world-gen mode)
             do
                 local tps_dbg = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
@@ -766,7 +768,10 @@ function GameView:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sideba
             for _, v in ipairs(Game.entities.vehicles) do
                 if v.visible then v:draw(Game) end
             end
-            if Game.event_spawner then Game.event_spawner:draw(Game) end
+            if Game.event_spawner and Game.event_spawner.clickable then
+                local ec = Game.event_spawner.clickable
+                DrawingUtils.drawWorldIcon(Game, "☎️", ec.x, ec.y)
+            end
             if Game.debug_mode then
                 for _, vehicle in ipairs(Game.entities.vehicles) do
                     if vehicle.visible then vehicle:drawDebug(Game) end
@@ -820,6 +825,24 @@ function GameView:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sideba
                 love.graphics.setColor(0, 0, 0, 0.72)
                 love.graphics.rectangle("fill", 0, 0, cw, ch)
                 love.graphics.setStencilTest()
+            end
+        end
+
+        -- Draw event spawner icon on top of everything (including fog).
+        -- At DOWNTOWN the city-translate from above is still active, so local coords work directly.
+        -- At CITY it is already drawn in the entity block above.
+        -- At outer scales we need to apply the city-origin translate ourselves.
+        if Game.event_spawner and Game.event_spawner.clickable then
+            local ec = Game.event_spawner.clickable
+            if cur_scale == S.DOWNTOWN then
+                DrawingUtils.drawWorldIcon(Game, "☎️", ec.x, ec.y)
+            elseif cur_scale == S.REGION or cur_scale == S.CONTINENT or cur_scale == S.WORLD then
+                local ox = ((Game.world_gen_city_mn_x or 1) - 1) * ts
+                local oy = ((Game.world_gen_city_mn_y or 1) - 1) * ts
+                love.graphics.push()
+                love.graphics.translate(ox, oy)
+                DrawingUtils.drawWorldIcon(Game, "☎️", ec.x, ec.y)
+                love.graphics.pop()
             end
         end
 

@@ -7,7 +7,7 @@ EventSpawner.__index = EventSpawner
 function EventSpawner:new(C)
     local instance = setmetatable({}, EventSpawner)
     instance.C = C.EVENTS
-    instance.spawn_timer = love.math.random(instance.C.SPAWN_MIN_SEC, instance.C.SPAWN_MAX_SEC)
+    instance.spawn_timer = love.math.random(C.EVENTS.SPAWN_MIN_SEC, C.EVENTS.SPAWN_MAX_SEC)
     instance.clickable = nil
     return instance
 end
@@ -25,43 +25,52 @@ function EventSpawner:update(dt, game)
     -- If no clickable is active, count down to the next one.
     self.spawn_timer = self.spawn_timer - dt
     if self.spawn_timer <= 0 then
-        -- MODIFIED: Get grid and tile size from the active map
+        -- Always reset the timer so we don't busy-retry if conditions aren't met.
+        self.spawn_timer = love.math.random(self.C.SPAWN_MIN_SEC, self.C.SPAWN_MAX_SEC)
+
         local active_map = game.maps[game.active_map_key]
         if not active_map then return end
-        
+
         local current_grid = active_map.grid
         if not current_grid or #current_grid == 0 then return end
 
-        local grid_w = #current_grid[1]
+        local grid_w = current_grid[1] and #current_grid[1] or 0
         local grid_h = #current_grid
-        local tile_size = active_map:getCurrentTileSize()
+        local tile_size = active_map.tile_pixel_size or active_map:getCurrentTileSize()
+        if grid_w == 0 or tile_size == 0 then return end
 
-        local map_w_pixels = grid_w * tile_size
-        local map_h_pixels = grid_h * tile_size
-        
-        -- Time to spawn a new one!
+        -- cam.x/y are in absolute world-pixel space (TILE_SIZE units per grid cell).
+        -- Entity positions are in local sub-cell space, relative to the city origin.
+        -- Subtract the city origin to get the camera centre in local sub-cell space.
+        local ts = game.C.MAP.TILE_SIZE
+        local city_origin_x = ((game.world_gen_city_mn_x or 1) - 1) * ts
+        local city_origin_y = ((game.world_gen_city_mn_y or 1) - 1) * ts
+
+        local cam = game.camera
+        local screen_w, screen_h = love.graphics.getDimensions()
+        local vw = screen_w - (game.C.UI.SIDEBAR_WIDTH or 0)
+        local half_vw = vw / (2 * cam.scale)
+        local half_vh = screen_h / (2 * cam.scale)
+
+        local center_x = cam.x - city_origin_x
+        local center_y = cam.y - city_origin_y
+
+        local gx_min = math.max(1,      math.floor((center_x - half_vw) / tile_size) + 1)
+        local gx_max = math.min(grid_w, math.floor((center_x + half_vw) / tile_size) + 1)
+        local gy_min = math.max(1,      math.floor((center_y - half_vh) / tile_size) + 1)
+        local gy_max = math.min(grid_h, math.floor((center_y + half_vh) / tile_size) + 1)
+
+        if gx_min > gx_max or gy_min > gy_max then return end
+
+        local gx = love.math.random(gx_min, gx_max)
+        local gy = love.math.random(gy_min, gy_max)
+
         self.clickable = {
-            x = love.math.random(50, map_w_pixels - 50),
-            y = love.math.random(50, map_h_pixels - 50),
+            x = (gx - 0.5) * tile_size,
+            y = (gy - 0.5) * tile_size,
             timer = self.C.LIFESPAN_SEC,
             radius = 30,
         }
-        -- Reset the timer for the *next* spawn.
-        self.spawn_timer = love.math.random(self.C.SPAWN_MIN_SEC, self.C.SPAWN_MAX_SEC)
-    end
-end
-
-function EventSpawner:draw(game)
-    if self.clickable then
-        love.graphics.setFont(game.fonts.emoji)
-        love.graphics.setColor(1, 1, 1)
-        -- Pulse effect to draw attention
-        local scale = 1 + math.sin(love.timer.getTime() * 5) * 0.1
-        love.graphics.push()
-        love.graphics.translate(self.clickable.x, self.clickable.y)
-        love.graphics.scale(scale, scale)
-        love.graphics.print("☎️", -14, -14) -- Center the emoji
-        love.graphics.pop()
     end
 end
 
@@ -69,10 +78,14 @@ function EventSpawner:handle_click(x, y, game)
     if not self.clickable then return false end
 
     local c = self.clickable
-    local dist_sq = (x - c.x)^2 + (y - c.y)^2
+    -- x,y are in absolute world space (from screenToWorld); ec coords are local sub-cell space.
+    -- Convert to the same space by adding the city origin offset.
+    local ts = game.C.MAP.TILE_SIZE
+    local cx = c.x + ((game.world_gen_city_mn_x or 1) - 1) * ts
+    local cy = c.y + ((game.world_gen_city_mn_y or 1) - 1) * ts
+    local dist_sq = (x - cx)^2 + (y - cy)^2
 
     if dist_sq < c.radius * c.radius then
-        print("Rush Hour activated!")
         game.state.rush_hour.active = true
         game.state.rush_hour.timer = game.state.upgrades.frenzy_duration
         self.clickable = nil -- Remove the icon once clicked.

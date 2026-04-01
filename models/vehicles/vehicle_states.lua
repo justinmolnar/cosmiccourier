@@ -15,12 +15,14 @@ function moveAlongPath(dt, vehicle, game)
     if not map_for_pathing then return end
 
     local tps = map_for_pathing.tile_pixel_size or game.C.MAP.TILE_SIZE
-    local base_speed = vehicle.properties.speed
+    local base_speed = vehicle:getSpeed()
     local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / tps
     local normalized_speed = base_speed / speed_normalization_factor
     local vcfg = game.C.VEHICLES[vehicle.type:upper()]
     if vcfg and vcfg.needs_downtown_speed_scale then
-        normalized_speed = normalized_speed * (game.C.MAP.DOWNTOWN_GRID_WIDTH / 64)
+        local city_map = game.maps and game.maps.city
+        local dw = city_map and city_map.downtown_grid_width or game.C.MAP.DOWNTOWN_GRID_WIDTH
+        normalized_speed = normalized_speed * (dw / 64)
     end
     local travel_dist = normalized_speed * dt
 
@@ -407,7 +409,8 @@ function States.TravelingOnNetwork:enter(vehicle, game, params)
     local destination_on_network = nil
     local destination_city_data = nil
     for _, city_data in ipairs(game.maps.region.cities_data) do
-        if city_data.center_x ~= game.maps.region.main_city_offset.x + (game.C.MAP.CITY_GRID_WIDTH / 2) then
+        local cw = game.maps.city and game.maps.city.city_grid_width or game.C.MAP.CITY_GRID_WIDTH
+        if city_data.center_x ~= game.maps.region.main_city_offset.x + (cw / 2) then
              destination_city_data = city_data
              -- THE FIX: Find the road tile nearest the depot, not just the center.
              local depot_plot = {
@@ -471,8 +474,8 @@ function States.ExitingNetwork:enter(vehicle, game)
 
     -- THE FIX: We must generate and use a temporary, local grid for the destination city.
     local temp_city_map = require("models.Map"):new(game.C)
-    local city_w = game.C.MAP.CITY_GRID_WIDTH
-    local city_h = game.C.MAP.CITY_GRID_HEIGHT
+    local city_w = game.maps.city and game.maps.city.city_grid_width or game.C.MAP.CITY_GRID_WIDTH
+    local city_h = game.maps.city and game.maps.city.city_grid_height or game.C.MAP.CITY_GRID_HEIGHT
     local city_offset_x = dest_city_data.center_x - (city_w / 2)
     local city_offset_y = dest_city_data.center_y - (city_h / 2)
 

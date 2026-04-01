@@ -50,7 +50,7 @@ function GameController:update(dt)
     self.game.error_service.withErrorHandling(function()
         local active_map = self.game.maps[self.game.active_map_key]
         if active_map then
-            active_map:update(scaled_dt)
+            active_map:update(scaled_dt, self.game)
         end
     end, "Map Update")
     

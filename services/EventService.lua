@@ -118,12 +118,12 @@ function EventService.setupZoomEvents(state, game)
 
     game.EventBus:subscribe("ui_zoom_out_clicked", function()
         local next = MapScales.getNext(game.state.current_map_scale, "out")
-        if next then game.maps.city:setScale(next) end
+        if next then game.maps.city:setScale(next, game) end
     end)
 
     game.EventBus:subscribe("ui_zoom_in_clicked", function()
         local next = MapScales.getNext(game.state.current_map_scale, "in")
-        if next then game.maps.city:setScale(next) end
+        if next then game.maps.city:setScale(next, game) end
     end)
 end
 

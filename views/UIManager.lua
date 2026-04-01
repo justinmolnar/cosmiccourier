@@ -99,29 +99,9 @@ function UIManager:_calculateUpgradesLayoutHeight(categories)
 end
 
 function UIManager:_calculatePerSecondStats(game)
-    local state = game.state
-    local now = love.timer.getTime()
-    local window = 15
-
-    local total_income = 0
-    for i = #state.income_history, 1, -1 do
-        if now - state.income_history[i].time > window then
-            table.remove(state.income_history, i)
-        else
-            total_income = total_income + state.income_history[i].amount
-        end
-    end
-    self.income_per_second = total_income / window
-
-    local trip_count = 0
-    for i = #state.trip_creation_history, 1, -1 do
-        if now - state.trip_creation_history[i] > window then
-            table.remove(state.trip_creation_history, i)
-        else
-            trip_count = trip_count + 1
-        end
-    end
-    self.trips_per_second = trip_count / window
+    local stats = require("services.StatsService").computePerSecondStats(game.state)
+    self.income_per_second = stats.income_per_second
+    self.trips_per_second  = stats.trips_per_second
 end
 
 function UIManager:_calculateAccordionStats(game)

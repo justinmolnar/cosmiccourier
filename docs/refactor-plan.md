@@ -602,9 +602,13 @@ This view function mutates `game.state.income_history` and `game.state.trip_crea
 
 ---
 
-**Status:** Not started
-**Line count change:** ~+80 new handler/service code / −120 misplaced logic (net reduction ~40)
-**Deviation from plan:** —
+**Status:** Complete
+**Line count change:** ~+100 new service/viewmodel code / −140 misplaced logic (net ~−40)
+**Deviation from plan:**
+- 6.4 was listed as "Resolved" (SandboxController deleted) but `WorldSandboxController` still mutated `C.MAP.*` constants at runtime. Fixed: grid dimensions are now stored as instance fields on `Map` (`downtown_grid_width`, `downtown_grid_height`, `city_grid_width`, `city_grid_height`); `Map:new()` initialises them from `C.MAP` defaults; `WorldSandboxController.sendToGame` sets them on `new_map` instead of mutating the shared constant table.
+- 6.3 implemented via `speed_modifier` per-instance field rather than event-bus roundtrip. `UpgradeSystem` updates `vehicle.speed_modifier` directly on live vehicles; new vehicles read the accumulated multiplier from `game.state.upgrades.bike_speed / truck_speed` in `Vehicle:new()`. `game.C.VEHICLES.BIKE.speed` (the constant) is no longer mutated.
+- 6.6 implemented via `GameConfig.onChanged(fn)` listener registry rather than injecting an EventBus. `_onConfigChanged` fires all registered listeners; `registerDefaultWindowHandler()` adds the love.window calls as a listener and is called from `GameConfig.initialize()`.
+- 6.7 extracted to `views/UpgradeModalViewModel.lua`; `Modal:_drawTree` calls `UpgradeModalViewModel.buildDisplayState` and reads the returned display table — no inline game-state access during draw.
 
 ---
 

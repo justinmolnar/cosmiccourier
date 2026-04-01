@@ -159,26 +159,20 @@ function UpgradeSystem:applyStatToGameValues(stat_name, stat_value)
     end
     
     if stat_name == "bike_speed" then
-        local base_speed = game.C.VEHICLES.BIKE.speed
-        local new_speed = base_speed * stat_value
-        -- Update constants so newly purchased bikes get the upgraded speed
-        game.C.VEHICLES.BIKE.speed = new_speed
-        -- Update existing bikes
+        -- stat_value is the accumulated multiplier; push it to all live bikes.
+        -- New bikes pick it up in Vehicle:new() from state.upgrades.bike_speed.
         for _, vehicle in ipairs(game.entities.vehicles) do
             if vehicle.type == "bike" then
-                vehicle.properties.speed = new_speed
-                print(string.format("Updated bike %d speed to %d", vehicle.id, new_speed))
+                vehicle.speed_modifier = stat_value
+                print(string.format("Updated bike %d speed_modifier to %.2f", vehicle.id, stat_value))
             end
         end
 
     elseif stat_name == "truck_speed" then
-        local base_speed = game.C.VEHICLES.TRUCK.speed
-        local new_speed = base_speed * stat_value
-        game.C.VEHICLES.TRUCK.speed = new_speed
         for _, vehicle in ipairs(game.entities.vehicles) do
             if vehicle.type == "truck" then
-                vehicle.properties.speed = new_speed
-                print(string.format("Updated truck %d speed to %d", vehicle.id, new_speed))
+                vehicle.speed_modifier = stat_value
+                print(string.format("Updated truck %d speed_modifier to %.2f", vehicle.id, stat_value))
             end
         end
         

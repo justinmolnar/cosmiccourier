@@ -22,6 +22,16 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
     instance.cargo = {}
     instance.path = {}
 
+    -- Speed modifier accumulates upgrade multipliers; base speed stays constant.
+    local vt = (vehicleType or ""):upper()
+    if vt == "BIKE" then
+        instance.speed_modifier = game.state.upgrades.bike_speed or 1.0
+    elseif vt == "TRUCK" then
+        instance.speed_modifier = game.state.upgrades.truck_speed or 1.0
+    else
+        instance.speed_modifier = 1.0
+    end
+
     if home_map and home_map.road_v_rxs then
         -- Road-node map: grid_anchor is road-node coords (rx = gx-1, ry = gy-1)
         local tps = home_map.tile_pixel_size or home_map.C.MAP.TILE_SIZE
@@ -39,6 +49,10 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
     instance.visible = true
 
     return instance
+end
+
+function Vehicle:getSpeed()
+    return self.properties.speed * self.speed_modifier
 end
 
 function Vehicle:getMovementCostFor(tileType)

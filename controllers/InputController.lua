@@ -6,6 +6,8 @@ InputController.__index = InputController
 function InputController:new(game)
     local instance = setmetatable({}, InputController)
     instance.game = game
+    local UIController = require("controllers.UIController")
+    instance.ui_controller = UIController:new(game)
     return instance
 end
 
@@ -105,9 +107,7 @@ end
 function InputController:mousepressed(x, y, button)
     local Game = self.game
 
-    local UIController = require("controllers.UIController")
-    local ui_controller = UIController:new(Game)
-    if ui_controller:handleMouseDown(x, y, button) then
+    if self.ui_controller:handleMouseDown(x, y, button) then
         return
     end
 

@@ -258,7 +258,7 @@ function PathfindingService.estimatePathTravelTime(path, vehicle, game)
         total_distance = total_distance + math.sqrt((node_px-last_px)^2 + (node_py-last_py)^2)
         last_px, last_py = node_px, node_py
     end
-    local base_speed = vehicle.properties.speed
+    local base_speed = vehicle:getSpeed()
     local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / TPS
     local normalized_speed = base_speed / speed_normalization_factor
     if normalized_speed == 0 then return math.huge end

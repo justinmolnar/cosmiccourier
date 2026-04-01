@@ -161,21 +161,22 @@ end
 function Modal:_drawTree(game)
     if not self.tree_data then return end
 
+    local UpgradeModalViewModel = require("views.UpgradeModalViewModel")
+    local display = UpgradeModalViewModel.buildDisplayState(self.tree_data, self.visible_nodes, game.state)
+
     -- 1. Draw connecting lines
     love.graphics.setLineWidth(3)
     for _, node_data in ipairs(self.tree_data.tree) do
         local node_layout = self.node_layout[node_data.id]
+        local nd = display[node_data.id]
         for _, prereq_id in ipairs(node_data.prerequisites) do
             local prereq_layout = self.node_layout[prereq_id]
-            -- Only draw the line if both the prerequisite and the target node are visible
-            if prereq_layout and self.visible_nodes[prereq_id] and self.visible_nodes[node_data.id] then
-                local is_purchased = (game.state.upgrades_purchased[node_data.id] or 0) > 0
-                if is_purchased then
-                    love.graphics.setColor(0.6, 1.0, 0.6, 0.8) -- Bright green for purchased path
+            if prereq_layout and display[prereq_id].is_visible and nd.is_visible then
+                if nd.is_purchased then
+                    love.graphics.setColor(0.6, 1.0, 0.6, 0.8)
                 else
-                    love.graphics.setColor(0.7, 0.7, 1.0, 0.6) -- Blue for available path
+                    love.graphics.setColor(0.7, 0.7, 1.0, 0.6)
                 end
-                -- Line now goes from top of prerequisite node to bottom of current node
                 love.graphics.line(prereq_layout.x + self.NODE_SIZE / 2, prereq_layout.y,
                                    node_layout.x + self.NODE_SIZE / 2, node_layout.y + self.NODE_SIZE)
             end
@@ -185,54 +186,46 @@ function Modal:_drawTree(game)
 
     -- 2. Draw the upgrade nodes
     for _, node_data in ipairs(self.tree_data.tree) do
-        -- Only draw nodes that are visible (purchased or prerequisites met)
-        if self.visible_nodes[node_data.id] then
-            local layout = self.node_layout[node_data.id]
-            local purchased_level = game.state.upgrades_purchased[node_data.id] or 0
-            local is_available = game.state:isUpgradeAvailable(node_data.id)
-            local cost = node_data.cost * (node_data.cost_multiplier ^ purchased_level)
-            local can_afford = game.state.money >= cost
+        local nd = display[node_data.id]
+        local layout = self.node_layout[node_data.id]
 
+        if nd.is_visible then
             -- Base color
-            if purchased_level >= node_data.max_level then love.graphics.setColor(0.4, 0.8, 0.4) -- Maxed out
-            elseif purchased_level > 0 then love.graphics.setColor(0.8, 0.8, 0.6) -- Purchased
-            else love.graphics.setColor(0.5, 0.5, 0.8) end -- Available
+            if nd.is_maxed then love.graphics.setColor(0.4, 0.8, 0.4)
+            elseif nd.is_purchased then love.graphics.setColor(0.8, 0.8, 0.6)
+            else love.graphics.setColor(0.5, 0.5, 0.8) end
             love.graphics.rectangle("fill", layout.x, layout.y, layout.w, layout.h)
 
             -- Border color
-            if self.hovered_node_id == node_data.id then love.graphics.setColor(1, 1, 0) -- Hover
-            elseif is_available and can_afford and purchased_level < node_data.max_level then love.graphics.setColor(1, 1, 1) -- Purchasable
-            else love.graphics.setColor(0.6, 0.6, 0.6) end -- Default
+            if self.hovered_node_id == node_data.id then love.graphics.setColor(1, 1, 0)
+            elseif nd.is_available and nd.can_afford and not nd.is_maxed then love.graphics.setColor(1, 1, 1)
+            else love.graphics.setColor(0.6, 0.6, 0.6) end
             love.graphics.rectangle("line", layout.x, layout.y, layout.w, layout.h)
 
-            -- Icon
             love.graphics.setFont(game.fonts.emoji)
             love.graphics.printf(node_data.icon, layout.x, layout.y + 4, layout.w, "center")
 
-            -- Price
             love.graphics.setFont(game.fonts.ui_small)
-            love.graphics.setColor(1,1,1)
-            love.graphics.printf("$"..math.floor(cost), layout.x, layout.y + layout.h - 28, layout.w, "center")
+            love.graphics.setColor(1, 1, 1)
+            love.graphics.printf("$"..math.floor(nd.cost), layout.x, layout.y + layout.h - 28, layout.w, "center")
 
-            -- Level indicator (now shows 0/N for available upgrades)
-            if is_available then
-                love.graphics.setFont(game.fonts.ui_small)
-                love.graphics.setColor(0,0,0,0.5)
+            if nd.is_available then
+                love.graphics.setColor(0, 0, 0, 0.5)
                 love.graphics.rectangle("fill", layout.x, layout.y + layout.h - 14, layout.w, 14)
-                love.graphics.setColor(1,1,1)
-                love.graphics.printf(string.format("%d/%d", purchased_level, node_data.max_level), layout.x, layout.y + layout.h - 13, layout.w, "center")
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.printf(string.format("%d/%d", nd.purchased, node_data.max_level), layout.x, layout.y + layout.h - 13, layout.w, "center")
             end
         end
 
         -- Draw undiscovered nodes ("fog of war")
-        local prereqs_met = game.state:isUpgradeAvailable(node_data.id)
-        if not prereqs_met then
+        if not nd.is_available then
             local should_draw_fogged = false
             for _, prereq_id in ipairs(node_data.prerequisites) do
-                if self.visible_nodes[prereq_id] then should_draw_fogged = true; break; end
+                if display[prereq_id] and display[prereq_id].is_visible then
+                    should_draw_fogged = true; break
+                end
             end
             if should_draw_fogged then
-                local layout = self.node_layout[node_data.id]
                 love.graphics.setColor(0.3, 0.3, 0.3)
                 love.graphics.rectangle("fill", layout.x, layout.y, layout.w, layout.h)
                 love.graphics.setColor(0.6, 0.6, 0.6)

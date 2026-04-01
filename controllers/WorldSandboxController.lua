@@ -1056,13 +1056,12 @@ function WorldSandboxController:sendToGame()
         end
     end
 
-    C.MAP.CITY_GRID_WIDTH      = sub_cw
-    C.MAP.CITY_GRID_HEIGHT     = sub_ch
-    C.MAP.DOWNTOWN_GRID_WIDTH  = math.max(1, dt_mx_x - dt_mn_x + 1)
-    C.MAP.DOWNTOWN_GRID_HEIGHT = math.max(1, dt_mx_y - dt_mn_y + 1)
-
     local Map     = require("models.Map")
     local new_map = Map:new(C)
+    new_map.city_grid_width      = sub_cw
+    new_map.city_grid_height     = sub_ch
+    new_map.downtown_grid_width  = math.max(1, dt_mx_x - dt_mn_x + 1)
+    new_map.downtown_grid_height = math.max(1, dt_mx_y - dt_mn_y + 1)
     new_map.grid            = grid
     new_map.downtown_offset = {x = dt_mn_x, y = dt_mn_y}
     new_map.tile_pixel_size = C.MAP.TILE_SIZE / 3   -- 2/3 world px per sub-cell tile
@@ -1126,7 +1125,7 @@ function WorldSandboxController:sendToGame()
 
     -- Zoom to downtown and close sandbox
     local ok, err = pcall(function()
-        game.maps.city:setScale(C.MAP.SCALES.DOWNTOWN)
+        game.maps.city:setScale(C.MAP.SCALES.DOWNTOWN, game)
     end)
     if not ok then print("WorldSandbox sendToGame: setScale failed: " .. tostring(err)) end
 

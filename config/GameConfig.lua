@@ -62,16 +62,26 @@ local DEFAULT_CONFIG = {
 -- Current configuration (starts as copy of default)
 local current_config = {}
 
+-- Registered change listeners: fn(section, key, old_value, new_value)
+local change_listeners = {}
+
+function GameConfig.onChanged(fn)
+    table.insert(change_listeners, fn)
+end
+
 function GameConfig.initialize()
     -- Start with default config
     current_config = GameConfig._deepCopy(DEFAULT_CONFIG)
-    
+
+    -- Register the default love.window handler for graphics changes
+    GameConfig.registerDefaultWindowHandler()
+
     -- Try to load user config
     GameConfig.loadUserConfig()
-    
+
     -- Apply any command line overrides
     GameConfig._applyCommandLineArgs()
-    
+
     print("GameConfig: Configuration initialized")
 end
 
@@ -225,25 +235,33 @@ function GameConfig._mergeConfigs(default, user)
 end
 
 function GameConfig._onConfigChanged(section, key, old_value, new_value)
-    -- Handle configuration changes that need immediate effect
-    if section == "graphics" then
-        if key == "window_width" or key == "window_height" then
-            love.window.setMode(
-                current_config.graphics.window_width,
-                current_config.graphics.window_height,
-                {fullscreen = current_config.graphics.fullscreen}
-            )
-        elseif key == "fullscreen" then
-            love.window.setFullscreen(new_value)
-        elseif key == "vsync" then
-            love.window.setVSync(new_value and 1 or 0)
-        end
-    elseif section == "audio" then
-        -- Update audio volumes if there's an audio system
-        if key:match("volume") then
-            print("GameConfig: Audio volume changed - " .. key .. " = " .. new_value)
-        end
+    for _, fn in ipairs(change_listeners) do
+        fn(section, key, old_value, new_value)
     end
+end
+
+-- Default window handler — registers love.window calls as a listener.
+-- Called once at startup so callers can replace it if desired.
+function GameConfig.registerDefaultWindowHandler()
+    GameConfig.onChanged(function(section, key, old_value, new_value)
+        if section == "graphics" then
+            if key == "window_width" or key == "window_height" then
+                love.window.setMode(
+                    current_config.graphics.window_width,
+                    current_config.graphics.window_height,
+                    {fullscreen = current_config.graphics.fullscreen}
+                )
+            elseif key == "fullscreen" then
+                love.window.setFullscreen(new_value)
+            elseif key == "vsync" then
+                love.window.setVSync(new_value and 1 or 0)
+            end
+        elseif section == "audio" then
+            if key:match("volume") then
+                print("GameConfig: Audio volume changed - " .. key .. " = " .. new_value)
+            end
+        end
+    end)
 end
 
 function GameConfig._applyCommandLineArgs()

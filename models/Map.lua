@@ -9,6 +9,10 @@ function Map:new(C)
     instance.building_plots = {}
     instance.current_scale = C.MAP.SCALES.DOWNTOWN
     instance.downtown_offset = {x = 0, y = 0}
+    instance.downtown_grid_width  = C.MAP.DOWNTOWN_GRID_WIDTH
+    instance.downtown_grid_height = C.MAP.DOWNTOWN_GRID_HEIGHT
+    instance.city_grid_width      = C.MAP.CITY_GRID_WIDTH
+    instance.city_grid_height     = C.MAP.CITY_GRID_HEIGHT
     instance.transition_state = { 
         active = false, 
         timer = 0, 
@@ -89,44 +93,44 @@ end
 -- == MAP STATE MANAGEMENT & RENDERING
 -- =============================================================================
 
-function Map:setScale(new_scale)
+function Map:setScale(new_scale, game)
     if not self.C.MAP.SCALE_NAMES[new_scale] then return false end
 
-    Game.active_map_key = "city"
-    Game.state.current_map_scale = new_scale
+    game.active_map_key = "city"
+    game.state.current_map_scale = new_scale
 
     -- Apply precomputed world-pixel camera params (mirrors F8 _fitToArea)
-    if Game.world_gen_cam_params and Game.world_gen_cam_params[new_scale] then
-        local p = Game.world_gen_cam_params[new_scale]
-        Game.camera.x     = p.x
-        Game.camera.y     = p.y
-        Game.camera.scale = p.scale
+    if game.world_gen_cam_params and game.world_gen_cam_params[new_scale] then
+        local p = game.world_gen_cam_params[new_scale]
+        game.camera.x     = p.x
+        game.camera.y     = p.y
+        game.camera.scale = p.scale
     else
-        Game.camera.x = 0; Game.camera.y = 0; Game.camera.scale = 1
+        game.camera.x = 0; game.camera.y = 0; game.camera.scale = 1
     end
 
-    if Game and Game.EventBus then
-        Game.EventBus:publish("map_scale_changed")
+    if game.EventBus then
+        game.EventBus:publish("map_scale_changed")
     end
 
-    print("Set camera view to", self:getScaleName())
+    print("Set camera view to", self.C.MAP.SCALE_NAMES[new_scale] or "Unknown Scale")
     return true
 end
 
-function Map:update(dt)
+function Map:update(dt, game)
     if self.transition_state.active then
         self.transition_state.timer = self.transition_state.timer + dt
         self.transition_state.progress = self.transition_state.timer / self.transition_state.duration
-        
+
         if self.transition_state.progress >= 1.0 then
             self.transition_state.active = false
             self.transition_state.progress = 1.0
             self.current_scale = self.transition_state.to_scale
-            
-            if Game and Game.EventBus then
-                Game.EventBus:publish("map_scale_changed")
+
+            if game and game.EventBus then
+                game.EventBus:publish("map_scale_changed")
             end
-            
+
             print("Transition complete - now at", self.C.MAP.SCALE_NAMES[self.current_scale])
         end
     end
@@ -177,8 +181,8 @@ function Map:drawGrid(grid, alpha)
     
     local dt_x_min = self.downtown_offset.x
     local dt_y_min = self.downtown_offset.y
-    local dt_x_max = self.downtown_offset.x + self.C.MAP.DOWNTOWN_GRID_WIDTH
-    local dt_y_max = self.downtown_offset.y + self.C.MAP.DOWNTOWN_GRID_HEIGHT
+    local dt_x_max = self.downtown_offset.x + self.downtown_grid_width
+    local dt_y_max = self.downtown_offset.y + self.downtown_grid_height
 
     for y = 1, grid_h do 
         for x = 1, grid_w do
@@ -206,8 +210,8 @@ function Map:getRandomCityBuildingPlot()
     local city_plots = {}
     local x_min = self.downtown_offset.x
     local y_min = self.downtown_offset.y
-    local x_max = self.downtown_offset.x + self.C.MAP.DOWNTOWN_GRID_WIDTH
-    local y_max = self.downtown_offset.y + self.C.MAP.DOWNTOWN_GRID_HEIGHT
+    local x_max = self.downtown_offset.x + self.downtown_grid_width
+    local y_max = self.downtown_offset.y + self.downtown_grid_height
 
     for _, plot in ipairs(self.building_plots) do
         if not (plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max) then
@@ -226,8 +230,8 @@ function Map:getRandomDowntownBuildingPlot()
     local downtown_plots = {}
     local x_min = self.downtown_offset.x
     local y_min = self.downtown_offset.y
-    local x_max = self.downtown_offset.x + self.C.MAP.DOWNTOWN_GRID_WIDTH
-    local y_max = self.downtown_offset.y + self.C.MAP.DOWNTOWN_GRID_HEIGHT
+    local x_max = self.downtown_offset.x + self.downtown_grid_width
+    local y_max = self.downtown_offset.y + self.downtown_grid_height
     local grid = self.grid
     local gh = grid and #grid or 0
     local gw = gh > 0 and #grid[1] or 0
@@ -270,8 +274,9 @@ function Map:getRandomDowntownBuildingPlot()
     return nil
 end
 
-function Map:getScaleName() 
-    return self.C.MAP.SCALE_NAMES[Game.state.current_map_scale] or "Unknown Scale" 
+function Map:getScaleName(game)
+    local scale = game and game.state.current_map_scale or self.current_scale
+    return self.C.MAP.SCALE_NAMES[scale] or "Unknown Scale"
 end
 
 function Map:findNearestRoadTile(plot)
@@ -388,8 +393,8 @@ function Map:isPlotInDowntown(plot)
 
     local x_min = self.downtown_offset.x
     local y_min = self.downtown_offset.y
-    local x_max = self.downtown_offset.x + self.C.MAP.DOWNTOWN_GRID_WIDTH
-    local y_max = self.downtown_offset.y + self.C.MAP.DOWNTOWN_GRID_HEIGHT
+    local x_max = self.downtown_offset.x + self.downtown_grid_width
+    local y_max = self.downtown_offset.y + self.downtown_grid_height
 
     return plot.x >= x_min and plot.x < x_max and plot.y >= y_min and plot.y < y_max
 end
@@ -398,8 +403,8 @@ function Map:getCityDataForPlot(plot)
     if not self.cities_data then return nil end
 
     for _, city_data in ipairs(self.cities_data) do
-        local city_w = self.C.MAP.CITY_GRID_WIDTH
-        local city_h = self.C.MAP.CITY_GRID_HEIGHT
+        local city_w = self.city_grid_width
+        local city_h = self.city_grid_height
         local city_x_min = city_data.center_x - (city_w / 2)
         local city_y_min = city_data.center_y - (city_h / 2)
         
