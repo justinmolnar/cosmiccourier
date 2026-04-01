@@ -93,37 +93,6 @@ function TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, ga
     return new_trip
 end
 
-function TripGenerator._createInterCityTrip(client_plot, base_payout, speed_bonus, game)
-    print("DEBUG: Creating INTER-CITY trip")
-    local C_GAMEPLAY = game.C.GAMEPLAY
-    local MapGenerationService = require("services.MapGenerationService")
-
-    local start_plot = game.maps.city:getRandomDowntownBuildingPlot()
-    
-    -- THE FIX: Get a plot from the destination city's pre-generated data.
-    -- This plot will have coordinates that are LOCAL to that city's grid.
-    local final_destination_plot = MapGenerationService.getPlotInAnotherCity(game, 1)
-
-    if not start_plot or not final_destination_plot or not game.entities.depot_plot then
-        print("DEBUG: Inter-city trip creation failed - missing plots or not enough cities.")
-        return nil
-    end
-
-    -- Significantly increase payout for long-distance trips
-    base_payout = base_payout * C_GAMEPLAY.CITY_TRIP_PAYOUT_MULTIPLIER * 5 
-    speed_bonus = speed_bonus * C_GAMEPLAY.CITY_TRIP_BONUS_MULTIPLIER * 5
-
-    local new_trip = Trip:new(base_payout, speed_bonus)
-    new_trip.is_long_distance = true -- CRITICAL FLAG
-    
-    -- Build the multi-leg itinerary
-    new_trip:addLeg(start_plot, game.entities.depot_plot, "bike")
-    -- The final destination plot is now correctly local to the destination city.
-    new_trip:addLeg(game.entities.depot_plot, final_destination_plot, "truck")
-
-    print("DEBUG: Inter-city trip created to a new city with a LOCAL destination plot.")
-    return new_trip
-end
 
 function TripGenerator.calculateNextTripTime(game)
     local C_GAMEPLAY = game.C.GAMEPLAY

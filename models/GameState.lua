@@ -79,18 +79,4 @@ function State:update(dt, game)
     end
 end
 
-function State:isUpgradeAvailable(upgradeId)
-    local upgrade = self.Upgrades.AllUpgrades[upgradeId]
-    if not upgrade then return false end
-
-    -- Check if all prerequisite upgrades have been purchased to at least level 1
-    for _, prereqId in ipairs(upgrade.prerequisites) do
-        if (self.upgrades_purchased[prereqId] or 0) < 1 then
-            return false -- A prerequisite is not met
-        end
-    end
-    
-    return true -- All prerequisites are met
-end
-
 return State

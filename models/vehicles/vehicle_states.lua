@@ -35,31 +35,18 @@ local function buildSmoothPath(vehicle, game)
         return
     end
     local map = game.maps[vehicle.operational_map_key]
-    if not map or not map.road_v_rxs then
+    if not map then
         vehicle.smooth_path = nil
         return
     end
     local tps = map.tile_pixel_size or game.C.MAP.TILE_SIZE
-    local zsv = map.zone_seg_v
-    local zsh = map.zone_seg_h or {}
-    if not zsv then
-        vehicle.smooth_path = nil
-        return
-    end
-
-    -- Degree of a J-street node (rx,ry) = number of zone_seg edges touching it.
-    -- zone_seg_v[gy][rx] = vertical segment (rx,gy-1)→(rx,gy).
-    -- zone_seg_h[ry][gx] = horizontal segment (gx-1,ry)→(gx,ry).
-    local function node_deg(rx, ry)
-        local d = 0
-        local v_ry  = zsv[ry]
-        local v_ry1 = zsv[ry+1]
-        local h_ry  = zsh[ry]
-        if v_ry  and v_ry[rx]   then d = d + 1 end  -- N
-        if v_ry1 and v_ry1[rx]  then d = d + 1 end  -- S
-        if h_ry  and h_ry[rx]   then d = d + 1 end  -- W  (gx==rx → seg from rx-1,ry)
-        if h_ry  and h_ry[rx+1] then d = d + 1 end  -- E  (gx==rx+1 → seg from rx,ry)
-        return d
+    -- Returns pixel coords for a path node, handling both map types.
+    local function nodePixels(node)
+        if map.road_v_rxs then
+            return node.x * tps, node.y * tps
+        else
+            return map:getPixelCoords(node.x, node.y)
+        end
     end
 
     local smooth = {}
@@ -85,22 +72,18 @@ local function buildSmoothPath(vehicle, game)
     local chain = {vehicle.px, vehicle.py}
 
     for idx, node in ipairs(vehicle.path) do
-        local npx, npy = node.x * tps, node.y * tps
+        local npx, npy = nodePixels(node)
         if node.is_tile then
-            -- Flush pending J-street chain, then add tile node straight.
+            -- Arterial/highway tile nodes: flush the J-street chain and add straight through.
             flush_chain(chain)
             add(npx, npy)
-            -- Resume next J-street chain from this tile position.
             chain = {npx, npy}
         else
+            -- J-street corner nodes: accumulate into one continuous chain.
+            -- No junction splitting — splitting with endpoint-preservation creates dense
+            -- waypoint clusters at every intersection, causing the vehicle to stall there.
             chain[#chain+1] = npx
             chain[#chain+1] = npy
-            -- Split chain at degree ≥ 3 junctions (matches buildStreetPathsLike behaviour).
-            local deg = node_deg(node.x, node.y)
-            if deg >= 3 and idx < #vehicle.path then
-                flush_chain(chain)
-                chain = {npx, npy}
-            end
         end
     end
     flush_chain(chain)

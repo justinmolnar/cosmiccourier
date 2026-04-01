@@ -53,7 +53,8 @@ function SaveService.saveGame(game_state, filename)
     save_data.game_data.costs = game_state.costs
     
     -- Convert to JSON
-    local json_string = SaveService._tableToJson(save_data)
+    local json = require("lib.json")
+    local json_string = json.encode(save_data, true)
     
     -- Write to file
     local success, error_msg = love.filesystem.write(filename, json_string)
@@ -85,9 +86,10 @@ function SaveService.loadGame(filename)
     end
     
     -- Parse JSON
-    local save_data = SaveService._jsonToTable(json_string)
+    local json = require("lib.json")
+    local save_data, err = json.decode(json_string)
     if not save_data then
-        print("SaveService: Failed to parse save file - invalid JSON")
+        print("SaveService: Failed to parse save file - " .. (err or "invalid JSON"))
         return nil, "Invalid JSON"
     end
     
@@ -153,7 +155,8 @@ function SaveService.getSaveFiles()
                 -- Try to parse as save file
                 local json_string = love.filesystem.read(filename)
                 if json_string then
-                    local save_data = SaveService._jsonToTable(json_string)
+                    local json = require("lib.json")
+                    local save_data = json.decode(json_string)
                     if save_data and save_data.version and save_data.game_data then
                         table.insert(save_files, {
                             filename = filename,
@@ -182,101 +185,13 @@ function SaveService.deleteSave(filename)
     return success
 end
 
--- Private helper functions
+-- Private helper functions (JSON encoding/decoding handled by lib/json)
 function SaveService._validateSaveData(save_data)
     if type(save_data) ~= "table" then return false end
     if not save_data.version then return false end
     if not save_data.game_data then return false end
     if type(save_data.game_data) ~= "table" then return false end
     return true
-end
-
-function SaveService._tableToJson(tbl, indent)
-    indent = indent or 0
-    local indent_str = string.rep("  ", indent)
-    
-    if type(tbl) ~= "table" then
-        if type(tbl) == "string" then
-            return '"' .. tbl:gsub('"', '\\"') .. '"'
-        elseif type(tbl) == "number" or type(tbl) == "boolean" then
-            return tostring(tbl)
-        else
-            return "null"
-        end
-    end
-    
-    local result = "{\n"
-    local first = true
-    
-    for key, value in pairs(tbl) do
-        if not first then
-            result = result .. ",\n"
-        end
-        first = false
-        
-        local key_str = type(key) == "string" and ('"' .. key .. '"') or tostring(key)
-        result = result .. indent_str .. "  " .. key_str .. ": " .. SaveService._tableToJson(value, indent + 1)
-    end
-    
-    result = result .. "\n" .. indent_str .. "}"
-    return result
-end
-
-function SaveService._jsonToTable(json_str)
-    -- Simple JSON parser - in a real implementation you'd use a proper JSON library
-    -- This is a basic implementation for demonstration
-    local success, result = pcall(function()
-        -- Remove whitespace and comments
-        local clean_json = json_str:gsub("%s+", " "):gsub("//.-\n", "")
-        
-        -- Very basic JSON parsing - this would need to be much more robust
-        if clean_json:match("^%s*{") then
-            return SaveService._parseJsonObject(clean_json)
-        else
-            return nil
-        end
-    end)
-    
-    if success then
-        return result
-    else
-        print("SaveService: JSON parsing failed - " .. tostring(result))
-        return nil
-    end
-end
-
-function SaveService._parseJsonObject(json_str)
-    -- This is a very simplified JSON parser
-    -- In a production game, you would use a proper JSON library like dkjson or cjson
-    local result = {}
-    
-    -- Remove outer braces
-    local content = json_str:match("^%s*{(.+)}%s*$")
-    if not content then return nil end
-    
-    -- Split by commas (this is overly simplified)
-    for pair in content:gmatch('[^,]+') do
-        local key, value = pair:match('%s*"([^"]+)"%s*:%s*(.+)%s*')
-        if key and value then
-            -- Parse value
-            if value:match('^".*"$') then
-                -- String value
-                result[key] = value:match('^"(.*)"$')
-            elseif value:match('^%d+%.?%d*$') then
-                -- Number value
-                result[key] = tonumber(value)
-            elseif value == "true" then
-                result[key] = true
-            elseif value == "false" then
-                result[key] = false
-            elseif value:match('^%s*{') then
-                -- Nested object (recursive)
-                result[key] = SaveService._parseJsonObject(value)
-            end
-        end
-    end
-    
-    return result
 end
 
 return SaveService

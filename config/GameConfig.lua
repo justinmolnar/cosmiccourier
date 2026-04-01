@@ -269,51 +269,18 @@ function GameConfig._applyCommandLineArgs()
 end
 
 function GameConfig._configToJson(config_table)
-    -- Simple JSON serialization
-    return GameConfig._tableToJsonString(config_table, 0)
-end
-
-function GameConfig._tableToJsonString(tbl, indent)
-    local indent_str = string.rep("  ", indent)
-    local result = "{\n"
-    local first = true
-    
-    for key, value in pairs(tbl) do
-        if not first then result = result .. ",\n" end
-        first = false
-        
-        result = result .. indent_str .. '  "' .. key .. '": '
-        
-        if type(value) == "table" then
-            result = result .. GameConfig._tableToJsonString(value, indent + 1)
-        elseif type(value) == "string" then
-            result = result .. '"' .. value .. '"'
-        elseif type(value) == "boolean" then
-            result = result .. (value and "true" or "false")
-        else
-            result = result .. tostring(value)
-        end
-    end
-    
-    result = result .. "\n" .. indent_str .. "}"
-    return result
+    local json = require("lib.json")
+    return json.encode(config_table, true)
 end
 
 function GameConfig._jsonToConfig(json_string)
-    -- Simple JSON parsing - in production use a proper JSON library
-    local success, result = pcall(function()
-        -- This is a simplified parser - use a real JSON library in production
-        return GameConfig._parseSimpleJson(json_string)
-    end)
-    
-    return success and result or nil
-end
-
-function GameConfig._parseSimpleJson(json_str)
-    -- Placeholder for JSON parsing - use a real JSON library like dkjson
-    -- For now, return nil to indicate parsing failed
-    print("GameConfig: JSON parsing not implemented - using defaults")
-    return nil
+    local json = require("lib.json")
+    local result, err = json.decode(json_string)
+    if err then
+        print("GameConfig: JSON parse error - " .. tostring(err))
+        return nil
+    end
+    return result
 end
 
 return GameConfig

@@ -96,8 +96,10 @@ function WfcBlockService.generateBlocks(params)
             if tile_id and tiles_by_id[tile_id] then
                 local tile_data = tiles_by_id[tile_id]
                 final_render_grid[y][x] = { zone = tile_data.zone }
-                if tile_data.connections.N then table.insert(road_segments, {x1=x-1, y1=y-1, x2=x, y2=y-1}) end
-                if tile_data.connections.W then table.insert(road_segments, {x1=x-1, y1=y-1, x2=x-1, y2=y}) end
+                if tile_data.connections.N then table.insert(road_segments, {x1=x-1, y1=y-1, x2=x,   y2=y-1}) end
+                if tile_data.connections.S then table.insert(road_segments, {x1=x-1, y1=y,   x2=x,   y2=y  }) end
+                if tile_data.connections.W then table.insert(road_segments, {x1=x-1, y1=y-1, x2=x-1, y2=y  }) end
+                if tile_data.connections.E then table.insert(road_segments, {x1=x,   y1=y-1, x2=x,   y2=y  }) end
             else
                 final_render_grid[y][x] = { zone = "empty" }
             end

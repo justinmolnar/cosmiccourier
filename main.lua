@@ -113,7 +113,7 @@ function love.load()
         local uiIconFont = love.graphics.newFont(C.UI.FONT_PATH_EMOJI, C.UI.FONT_SIZE_UI)
 
         uiFont:setFallbacks(uiIconFont)
-        uiFontSmall:setFallbacks(uiFont, uiFontSmall)
+        uiFontSmall:setFallbacks(uiIconFont)
         emojiFont:setFallbacks(uiFont, uiFontSmall)
         emojiFontUI:setFallbacks(uiFont, uiFontSmall)
 
