@@ -1343,10 +1343,17 @@ function WorldSandboxController:sendToGame()
         game.entities:addClient(game)
     end
 
-    -- Persist city markers for game-view world map rendering
-    game.world_city_locations = self.city_locations
-    game.world_w              = self.world_w
-    game.world_h              = self.world_h
+    -- Persist city markers and highway network for game-view world map rendering
+    game.world_city_locations   = self.city_locations
+    game.world_w                = self.world_w
+    game.world_h                = self.world_h
+    game.world_highway_paths   = self.highway_paths or {}
+    game.world_highway_map     = self.highway_map  or {}
+    game._world_highway_smooth = nil   -- reset cached smooth paths on new world
+    -- Reset per-city canvas caches (new map objects have nil canvas already, but be explicit)
+    for _, m in ipairs(game.maps and game.maps.all_cities or {}) do
+        m._overlay_canvas = nil
+    end
 
     -- Zoom to downtown and close sandbox
     local ok, err = pcall(function()
@@ -1384,6 +1391,7 @@ function WorldSandboxController:generate()
         self.regions_list         = result.regions_list
         self.city_locations        = nil
         self.highway_map           = nil
+        self.highway_paths         = nil
         self.city_bounds           = nil
         self.city_border           = nil
         self.city_fringe           = nil
@@ -1442,8 +1450,6 @@ function WorldSandboxController:_buildImage()
             local c = active[y][x]
             if not in_scope then
                 imgdata:setPixel(x-1, y-1, c[1]*0.18+0.01, c[2]*0.18+0.02, c[3]*0.18+0.06, 1.0)
-            elseif hways and hways[i] then
-                imgdata:setPixel(x-1, y-1, 0.95, 0.78, 0.08, 1.0)
             elseif cborder and cborder[i] then
                 imgdata:setPixel(x-1, y-1, 0.72, 0.42, 0.08, 1.0)
             elseif cbounds and cbounds[i] then
@@ -1744,7 +1750,8 @@ function WorldSandboxController:build_highways()
     local slope_cost = math.max(0, p.highway_slope_cost    or 15)
     local budget_scale = math.max(1, p.highway_budget_scale or 800)
 
-    local highway_map = {}
+    local highway_map   = {}
+    local highway_paths = {}   -- list of {x,y} world-cell chains, one per A* route built
 
     -- Terrain crossing cost for entering cell ni from a cell with elevation from_elev.
     -- Slope penalty makes roads naturally contour around terrain rather than going straight over.
@@ -1902,7 +1909,12 @@ function WorldSandboxController:build_highways()
                     local dst = (b.y-1)*w + b.x
                     local path, path_cost = astar(src, dst)
                     if path and path_cost and path_cost <= combined then
-                        for _, ci in ipairs(path) do highway_map[ci] = true end
+                        local chain = {}
+                        for _, ci in ipairs(path) do
+                            highway_map[ci] = true
+                            chain[#chain+1] = {x = (ci-1) % w + 1, y = math.floor((ci-1) / w) + 1}
+                        end
+                        highway_paths[#highway_paths+1] = chain
                         local fa = budget[ai] / combined
                         budget[ai] = math.max(0, budget[ai] - path_cost * fa)
                         budget[bi] = math.max(0, budget[bi] - path_cost * (1 - fa))
@@ -1912,7 +1924,8 @@ function WorldSandboxController:build_highways()
         end
     end
 
-    self.highway_map = highway_map
+    self.highway_map   = highway_map
+    self.highway_paths = highway_paths
     self:_buildImage()
     if self.view_scope == "city" and self.selected_city_idx then
         local idx    = self.selected_city_idx

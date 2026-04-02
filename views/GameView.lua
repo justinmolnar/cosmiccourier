@@ -9,6 +9,129 @@ local FloatingTextSystem = require("services.FloatingTextSystem")
 -- below this scale use a cached canvas (performance when multiple cities are on screen).
 local OVERLAY_VECTOR_THRESHOLD = 5.0
 
+-- Traces the unique world highway road network from the highway cell map,
+-- producing one non-overlapping set of chains.  Multiple A* paths that share
+-- terrain corridor cells collapse into a single path here, eliminating the
+-- "multiple roads" visual where several chains follow the same route.
+local function _buildWorldHighwayPaths(Game, ts)
+    local PathUtils = require("lib.path_utils")
+    local hmap = Game.world_highway_map
+    local w    = Game.world_w
+    if not hmap or not w then return {} end
+
+    local DIRS = {{1,0},{-1,0},{0,1},{0,-1}}
+
+    -- Build x/y lookup set
+    local cs = {}
+    for ci in pairs(hmap) do
+        local x = (ci-1) % w + 1
+        local y = math.floor((ci-1) / w) + 1
+        if not cs[x] then cs[x] = {} end
+        cs[x][y] = true
+    end
+
+    local function nbrs(x, y)
+        local r = {}
+        for _, d in ipairs(DIRS) do
+            local nx, ny = x+d[1], y+d[2]
+            if cs[nx] and cs[nx][ny] then r[#r+1] = {nx, ny} end
+        end
+        return r
+    end
+
+    -- Degree of each cell (cardinal highway neighbors only)
+    local deg = {}
+    for ci in pairs(hmap) do
+        local x = (ci-1) % w + 1
+        local y = math.floor((ci-1) / w) + 1
+        if not deg[x] then deg[x] = {} end
+        deg[x][y] = #nbrs(x, y)
+    end
+
+    -- Walk from a terminal/junction cell toward one neighbor, following degree-2
+    -- pass-throughs until reaching the next terminal/junction.  Marks interior
+    -- degree-2 cells as used so they are not re-walked.
+    local used = {}
+    local function markUsed(x, y)
+        if not used[x] then used[x] = {} end
+        used[x][y] = true
+    end
+    local function isUsed(x, y) return used[x] and used[x][y] end
+
+    local function walkFrom(sx, sy, nx, ny)
+        local chain = {{sx, sy}, {nx, ny}}
+        local px, py = sx, sy
+        local cx, cy = nx, ny
+        while (deg[cx] and deg[cx][cy] == 2) and not isUsed(cx, cy) do
+            markUsed(cx, cy)
+            local found = false
+            for _, nb in ipairs(nbrs(cx, cy)) do
+                if not (nb[1] == px and nb[2] == py) then
+                    px, py = cx, cy
+                    cx, cy = nb[1], nb[2]
+                    chain[#chain+1] = {cx, cy}
+                    found = true
+                    break
+                end
+            end
+            if not found then break end
+        end
+        return chain
+    end
+
+    -- Avoid walking the same junction→junction edge twice
+    local walked = {}
+    local function edgeKey(x1,y1,x2,y2)
+        if x1 < x2 or (x1==x2 and y1 < y2) then
+            return x1..","..y1.."|"..x2..","..y2
+        else
+            return x2..","..y2.."|"..x1..","..y1
+        end
+    end
+
+    local raw = {}
+    for ci in pairs(hmap) do
+        local x = (ci-1) % w + 1
+        local y = math.floor((ci-1) / w) + 1
+        if deg[x] and deg[x][y] ~= 2 then
+            for _, nb in ipairs(nbrs(x, y)) do
+                local ek = edgeKey(x, y, nb[1], nb[2])
+                if not walked[ek] and not isUsed(nb[1], nb[2]) then
+                    walked[ek] = true
+                    local chain = walkFrom(x, y, nb[1], nb[2])
+                    raw[#raw+1] = chain
+                end
+            end
+        end
+    end
+    -- Degree-2 loops (no terminals anywhere)
+    for ci in pairs(hmap) do
+        local x = (ci-1) % w + 1
+        local y = math.floor((ci-1) / w) + 1
+        if not isUsed(x, y) then
+            local nbs = nbrs(x, y)
+            if #nbs >= 1 then
+                raw[#raw+1] = walkFrom(x, y, nbs[1][1], nbs[1][2])
+            end
+        end
+    end
+
+    local paths = {}
+    for _, chain in ipairs(raw) do
+        if #chain >= 2 then
+            local pts = {}
+            for _, c in ipairs(chain) do
+                pts[#pts+1] = (c[1] - 0.5) * ts
+                pts[#pts+1] = (c[2] - 0.5) * ts
+            end
+            pts = PathUtils.simplify(pts, ts * 2.0)
+            pts = PathUtils.chaikin(pts, 3)
+            if #pts >= 4 then paths[#paths+1] = pts end
+        end
+    end
+    return paths
+end
+
 -- Shared drawing routine: renders all overlay layers in city-local coordinates.
 -- The caller is responsible for setting up any transform so that (0,0) maps to the
 -- city's top-left corner in the destination space (canvas or world).
@@ -118,6 +241,8 @@ local function _cityCanvasStale(m, Game)
     return not f
         or (f.roads      ~= (Game.debug_smooth_roads      or false))
         or (f.roads_like ~= (Game.debug_smooth_roads_like or false))
+        -- Rebuild if highway data arrived after the canvas was first built
+        or (f.had_highways ~= (Game.world_highway_paths ~= nil and #Game.world_highway_paths > 0))
 end
 
 local function _buildCityOverlayCanvas(m, Game, RS)
@@ -156,8 +281,9 @@ local function _buildCityOverlayCanvas(m, Game, RS)
     m._overlay_canvas       = canvas
     m._overlay_canvas_scale = S
     m._overlay_canvas_flags = {
-        roads      = Game.debug_smooth_roads      or false,
-        roads_like = Game.debug_smooth_roads_like or false,
+        roads        = Game.debug_smooth_roads      or false,
+        roads_like   = Game.debug_smooth_roads_like or false,
+        had_highways = Game.world_highway_paths ~= nil and #Game.world_highway_paths > 0,
     }
 end
 
@@ -382,7 +508,37 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         love.graphics.setColor(1, 1, 1)
     end
 
+    -- LAYER: Inter-city highways (full city-to-city, drawn before city images)
+    -- Paths are NOT clipped — the opaque city background image covers the in-city portion,
+    -- so only the external segment between cities is ever visible.  This eliminates the
+    -- bounding-box-vs-actual-road gap that clipping approaches suffer from.
+    if Game.world_highway_map and next(Game.world_highway_map) and not Game.overlay_only_mode then
+        if not Game._world_highway_smooth then
+            Game._world_highway_smooth = _buildWorldHighwayPaths(Game, ts)
+        end
+        local hpaths = Game._world_highway_smooth
+        if hpaths and #hpaths > 0 then
+            love.graphics.setColor(0.22, 0.21, 0.20, 1.0)
+            love.graphics.setLineWidth(ts * 0.85)
+            love.graphics.setLineJoin("bevel")
+            love.graphics.setLineStyle("smooth")
+            for i = tile_i0, tile_i1 do
+                love.graphics.push()
+                love.graphics.translate(i * mpw, 0)
+                for _, pts in ipairs(hpaths) do
+                    if #pts >= 4 then love.graphics.line(pts) end
+                end
+                love.graphics.pop()
+            end
+            love.graphics.setLineStyle("rough")
+            love.graphics.setLineWidth(1)
+            love.graphics.setLineJoin("miter")
+            love.graphics.setColor(1, 1, 1)
+        end
+    end
+
     -- LAYER: City background images (tiled, culled)
+    -- Drawn after highways so the opaque image hides the in-city highway portion.
     if cs >= Z.CITY_IMAGE_THRESHOLD and not Game.overlay_only_mode then
         love.graphics.setColor(1, 1, 1)
         for i = tile_i0, tile_i1 do
