@@ -198,9 +198,9 @@ local C = {
     },
 
     EVENTS = {
-        SPAWN_MIN_SEC           = 5,
-        SPAWN_MAX_SEC           = 10,
-        LIFESPAN_SEC            = 30,
+        SPAWN_MIN_SEC           = 60,
+        SPAWN_MAX_SEC           = 120,
+        LIFESPAN_SEC            = 15,
         INITIAL_DURATION_SEC    = 15,
         DURATION_UPGRADE_AMOUNT = 5,
         FRENZY_TRIP_MIN_SEC     = 1,

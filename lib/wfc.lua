@@ -99,12 +99,32 @@ function WFC.solve(wfc)
         -- Collapse the chosen cell
         local x, y = cell_pos.x, cell_pos.y
         local possibilities = wfc.grid[y][x]
-        
+
+        -- Neighbour coherence: boost weight of states that match already-collapsed neighbours.
+        -- wfc.coherence_factor > 1 makes the solver favour continuing an existing zone patch.
+        local coherence = wfc.coherence_factor or 1.0
+        local nbr_boost = {}
+        if coherence > 1.0 then
+            local dirs4 = {{0,-1},{0,1},{-1,0},{1,0}}
+            for _, d in ipairs(dirs4) do
+                local nx, ny = x + d[1], y + d[2]
+                if nx >= 1 and nx <= wfc.width and ny >= 1 and ny <= wfc.height then
+                    if wfc.entropy_grid[ny][nx] == 1 then
+                        for state, is_poss in pairs(wfc.grid[ny][nx]) do
+                            if is_poss then
+                                nbr_boost[state] = (nbr_boost[state] or 1.0) * coherence
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
         local valid_options = {}
         local total_weight = 0
         for state, is_possible in pairs(possibilities) do
             if is_possible then
-                local weight = wfc.weights[y][x][state] or 1
+                local weight = (wfc.weights[y][x][state] or 1) * (nbr_boost[state] or 1.0)
                 table.insert(valid_options, {state=state, weight=weight})
                 total_weight = total_weight + weight
             end

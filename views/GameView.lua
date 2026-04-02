@@ -297,6 +297,53 @@ function GameView:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sideba
                 end
             end
 
+            -- Bridge rendering (over river sub-cells where roads cross)
+            if active_map.bridge_cells then
+                local tps_b = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
+                love.graphics.setLineStyle("rough")
+                love.graphics.setColor(0.72, 0.60, 0.38, 0.95)
+                love.graphics.setLineWidth(tps_b * 0.45)
+                for gy, row in pairs(active_map.bridge_cells) do
+                    for gx, entry in pairs(row) do
+                        local px = (gx - 1) * tps_b
+                        local py = (gy - 1) * tps_b
+                        if entry.ew then
+                            love.graphics.line(px, py + tps_b * 0.5, px + tps_b, py + tps_b * 0.5)
+                        end
+                        if entry.ns then
+                            love.graphics.line(px + tps_b * 0.5, py, px + tps_b * 0.5, py + tps_b)
+                        end
+                    end
+                end
+                love.graphics.setLineWidth(1)
+                love.graphics.setColor(1, 1, 1)
+            end
+
+            -- Smooth river overlay (DOWNTOWN scale)
+            do
+                local tps_r = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
+                if not active_map._river_smooth_paths_v1 then
+                    local RS = require("utils.RoadSmoother")
+                    active_map._river_smooth_paths_v1 = RS.buildRiverPaths(active_map.grid, tps_r)
+                end
+                if active_map._river_smooth_paths_v1 and #active_map._river_smooth_paths_v1 > 0 then
+                    local cap_r = tps_r * 0.4
+                    love.graphics.setColor(0.20, 0.45, 0.75, 0.92)
+                    love.graphics.setLineWidth(tps_r * 0.75)
+                    love.graphics.setLineJoin("bevel")
+                    for _, pts in ipairs(active_map._river_smooth_paths_v1) do
+                        if #pts >= 4 then
+                            love.graphics.line(pts)
+                            love.graphics.circle("fill", pts[1],      pts[2],      cap_r)
+                            love.graphics.circle("fill", pts[#pts-1], pts[#pts],   cap_r)
+                        end
+                    end
+                    love.graphics.setLineWidth(1)
+                    love.graphics.setLineJoin("miter")
+                    love.graphics.setColor(1, 1, 1)
+                end
+            end
+
             -- Street overlay (zone-boundary city streets)
             if Game.debug_smooth_streets then do
                 local tps_r = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
@@ -642,6 +689,56 @@ function GameView:_drawWorldGenMode(active_map, S, cur_scale, ui_manager, sideba
                             love.graphics.rectangle("fill", ox + (gx-1)*tps, oy + (gy-1)*tps, tps, tps)
                         end
                     end
+                end
+            end
+
+            -- Bridge rendering at CITY scale
+            if active_map.bridge_cells then
+                love.graphics.setLineStyle("rough")
+                love.graphics.setColor(0.72, 0.60, 0.38, 0.95)
+                love.graphics.setLineWidth(tps * 0.45)
+                for gy, row in pairs(active_map.bridge_cells) do
+                    for gx, entry in pairs(row) do
+                        local px = ox + (gx - 1) * tps
+                        local py = oy + (gy - 1) * tps
+                        if entry.ew then
+                            love.graphics.line(px, py + tps * 0.5, px + tps, py + tps * 0.5)
+                        end
+                        if entry.ns then
+                            love.graphics.line(px + tps * 0.5, py, px + tps * 0.5, py + tps)
+                        end
+                    end
+                end
+                love.graphics.setLineWidth(1)
+                love.graphics.setColor(1, 1, 1)
+            end
+
+            -- Smooth river overlay (CITY scale, offset by ox,oy)
+            do
+                if not active_map._river_smooth_paths_v1 then
+                    local RS = require("utils.RoadSmoother")
+                    active_map._river_smooth_paths_v1 = RS.buildRiverPaths(active_map.grid, tps)
+                end
+                if active_map._river_smooth_paths_v1 and #active_map._river_smooth_paths_v1 > 0 then
+                    local cap_r = tps * 0.4
+                    love.graphics.setColor(0.20, 0.45, 0.75, 0.92)
+                    love.graphics.setLineWidth(tps * 0.75)
+                    love.graphics.setLineJoin("bevel")
+                    for _, pts in ipairs(active_map._river_smooth_paths_v1) do
+                        if #pts >= 4 then
+                            local shifted = {}
+                            for i = 1, #pts, 2 do
+                                shifted[i]   = ox + pts[i]
+                                shifted[i+1] = oy + pts[i+1]
+                            end
+                            love.graphics.line(shifted)
+                            love.graphics.circle("fill", shifted[1],         shifted[2],         cap_r)
+                            love.graphics.circle("fill", shifted[#shifted-1], shifted[#shifted], cap_r)
+                        end
+                    end
+                    love.graphics.setLineWidth(1)
+                    love.graphics.setLineJoin("miter")
+                    love.graphics.setColor(1, 1, 1)
                 end
             end
 

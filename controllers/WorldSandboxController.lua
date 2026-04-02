@@ -203,30 +203,8 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
         end
 
 
-        -- Build allowed_pairs: symmetric, derived from DISTRICT_RULES
-        local all_types = {"downtown"}
-        for _, c in ipairs(choices) do all_types[#all_types+1] = c end
-        local allowed_pairs = {}
-        for _, ta in ipairs(all_types) do
-            allowed_pairs[ta] = {}
-            for _, tb in ipairs(all_types) do
-                local blocked = false
-                local ra = rules[ta]
-                if ra then for _, c in ipairs(ra.cannot or {}) do if c == tb then blocked = true; break end end end
-                if not blocked then
-                    local rb = rules[tb]
-                    if rb then for _, c in ipairs(rb.cannot or {}) do if c == ta then blocked = true; break end end end
-                end
-                allowed_pairs[ta][tb] = not blocked
-            end
-        end
-
-        -- Convert POI neighbor graph to WFC x-coords (poi_idx = x, y always 1)
-        local wfc_neighbors = {}
-        for poi_idx, nbrs in pairs(neighbors) do
-            wfc_neighbors[poi_idx] = {}
-            for nbr in pairs(nbrs) do wfc_neighbors[poi_idx][nbr] = true end
-        end
+        -- wfc_neighbors: used for soft adjacency penalty during assignment
+        local wfc_neighbors = neighbors
 
         -- Tally world tile composition per POI from dmap + biome_data
         local bdata = self.biome_data or {}
@@ -258,75 +236,69 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
             end
         end
 
-        -- Hard-ban a district from a WFC cell (removes from possibility space)
-        local function ban(wfc, x, dtype)
-            if wfc.grid[1][x] and wfc.grid[1][x][dtype] then
-                wfc.grid[1][x][dtype] = false
-                local e = 0
-                for _, ok in pairs(wfc.grid[1][x]) do if ok then e = e + 1 end end
-                wfc.entropy_grid[1][x] = e
-            end
+        -- Sequential weighted assignment with uniqueness decay.
+        -- Each district type has a global pool weight that decays sharply each time
+        -- it's chosen, naturally pushing toward unused types — same spirit as WFC
+        -- entropy but enforced across the whole city.
+        local type_pool = {}
+        for _, c in ipairs(choices) do type_pool[c] = 1.0 end
+
+        local dtypes = {[1] = "downtown"}
+
+        -- Randomise assignment order so no POI index gets systematic bias
+        local order = {}
+        for i = 2, #pois do order[#order+1] = i end
+        for i = #order, 2, -1 do
+            local j = love.math.random(1, i)
+            order[i], order[j] = order[j], order[i]
         end
 
-        -- Attempt WFC solve with retries on contradiction
-        local MAX_ATTEMPTS = 10
-        local dtypes
-        for attempt = 1, MAX_ATTEMPTS do
-            local wfc = WFC.new(#pois, 1, all_types, {})
+        for _, poi_i in ipairs(order) do
+            local pb      = poi_biome[poi_i] or { total=1, river=0, lake=0, forest=0, beach=0, desert=0 }
+            local total_b = math.max(1, pb.total)
+            local rf = pb.river  / total_b
+            local bf = pb.beach  / total_b
+            local ff = pb.forest / total_b
+            local df = pb.desert / total_b
+            local wf = rf + (pb.lake / total_b) + bf
 
-            -- Pre-collapse poi 1 to downtown; zero downtown weight on all others
-            for _, s in ipairs(all_types) do
-                wfc.grid[1][1][s] = (s == "downtown")
-            end
-            wfc.entropy_grid[1][1] = 1
-            for x = 2, #pois do
-                WFC.setWeight(wfc, x, 1, "downtown", 0)
-
-                -- Apply biome-based bans and weight boosts per POI
-                local t     = poi_biome[x] or { total=1, river=0, lake=0, forest=0, beach=0, desert=0 }
-                local total = math.max(1, t.total)
-                local rf    = t.river  / total
-                local lf    = t.lake   / total
-                local ff    = t.forest / total
-                local bf    = t.beach  / total
-                local df    = t.desert / total
-                local wf    = rf + lf + bf  -- total water fraction
-
-                -- Hard bans: district literally requires these tile types
-                if rf < 0.05 then ban(wfc, x, "riverfront") end
-                if wf < 0.05 then ban(wfc, x, "waterfront") end
-
-                -- Soft boosts proportional to tile composition
-                if rf >= 0.05 then
-                    WFC.setWeight(wfc, x, 1, "riverfront", 1 + rf * 8)
-                end
-                if wf >= 0.05 then
-                    WFC.setWeight(wfc, x, 1, "waterfront", 1 + wf * 8)
-                end
-                if ff >= 0.2 then
-                    WFC.setWeight(wfc, x, 1, "rural_outskirts", 1 + ff * 6)
-                end
-                if df >= 0.3 then
-                    WFC.setWeight(wfc, x, 1, "industrial", 1 + df * 3)
+            local candidates, tw = {}, 0
+            for _, c in ipairs(choices) do
+                -- Hard bans: these districts literally require these world tiles
+                if (c ~= "riverfront" or rf >= 0.05) and
+                   (c ~= "waterfront" or wf >= 0.05) then
+                    local w = type_pool[c]
+                    -- Soft biome boosts
+                    if c == "riverfront"      and rf >= 0.05 then w = w * math.min(1 + rf * 1.5, 2.0) end
+                    if c == "waterfront"      and wf >= 0.05 then w = w * math.min(1 + wf * 1.5, 2.0) end
+                    if c == "rural_outskirts" and ff >= 0.2  then w = w * math.min(1 + ff * 1.5, 2.0) end
+                    if c == "industrial"      and df >= 0.3  then w = w * math.min(1 + df * 1.5, 2.0) end
+                    -- Soft adjacency penalty: discourage cannot-pairs that are already assigned
+                    for nbr in pairs(wfc_neighbors[poi_i] or {}) do
+                        if dtypes[nbr] then
+                            for _, cant in ipairs((rules[c] and rules[c].cannot) or {}) do
+                                if cant == dtypes[nbr] then w = w * 0.3; break end
+                            end
+                        end
+                    end
+                    if w > 0 then candidates[#candidates+1] = {t=c, w=w}; tw = tw + w end
                 end
             end
 
-            WFC._propagateGraph(wfc, 1, wfc_neighbors, allowed_pairs)
-
-            if WFC.solveGraph(wfc, wfc_neighbors, allowed_pairs) then
-                local result = WFC.getResult(wfc)
-                dtypes = {}
-                for x = 1, #pois do
-                    dtypes[x] = result[1][x] or choices[love.math.random(1, #choices)]
+            local chosen
+            if tw > 0 then
+                local rand, cumw = love.math.random() * tw, 0
+                chosen = candidates[#candidates].t
+                for _, cand in ipairs(candidates) do
+                    cumw = cumw + cand.w
+                    if rand <= cumw then chosen = cand.t; break end
                 end
-                break
+            else
+                chosen = choices[love.math.random(1, #choices)]
             end
-        end
 
-        -- Hard fallback if all attempts failed
-        if not dtypes then
-            dtypes = { [1] = "downtown" }
-            for i = 2, #pois do dtypes[i] = choices[love.math.random(1, #choices)] end
+            dtypes[poi_i] = chosen
+            type_pool[chosen] = type_pool[chosen] * 0.15  -- ~7× less likely next time
         end
 
         self.city_district_types[start_idx] = dtypes
@@ -341,9 +313,11 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
         for lscx = 0, sub_cw - 1 do
             local gx = lscx + 1
             local t = grid[gy][gx].type
-            if t == "plot" or t == "downtown_plot" then
+            if t == "plot" or t == "downtown_plot" or t == "river" then
                 plot_set[gy * 100000 + gx] = true
-                table.insert(all_city_plots, {x=gx, y=gy})
+                if t ~= "river" then
+                    table.insert(all_city_plots, {x=gx, y=gy})
+                end
             end
         end
     end
@@ -356,6 +330,10 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
             local gx = lscx + 1
             if not plot_set[gy * 100000 + gx] then
                 for _, s in ipairs(ZT.STATES) do wfc.grid[gy][gx][s] = (s == "none") end
+                wfc.entropy_grid[gy][gx] = 1
+            elseif grid[gy][gx].type == "river" then
+                -- Pre-collapse: river sub-cells are pinned to "river" zone
+                for _, s in ipairs(ZT.STATES) do wfc.grid[gy][gx][s] = (s == "river") end
                 wfc.entropy_grid[gy][gx] = 1
             else
                 local gscx2   = gscx_off + lscx
@@ -382,9 +360,20 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
                     local w = s == "none" and 0 or ((base_w[s] or 0) * (bmul[s] or 1.0))
                     WFC.setWeight(wfc, gx, gy, s, w > 0 and math.max(0.01, w) or 0)
                 end
+                -- Biome-specific sub-cell zone injection via strong weight boosts
+                local bn2 = bd and bd.name or ""
+                if bn2:find("Forest") or bn2 == "Woodland" or bn2:find("Jungle")
+                   or bn2:find("Rainforest") or bn2:find("Taiga") then
+                    WFC.setWeight(wfc, gx, gy, "forest_clearing", 3.0)
+                end
+                if bn2 == "Swamp" or bn2:find("Wetland") or bn2:find("Marsh")
+                   or bn2:find("Mangrove") then
+                    WFC.setWeight(wfc, gx, gy, "wetlands", 3.0)
+                end
             end
         end
     end
+    wfc.coherence_factor = 6.0  -- each collapsed neighbour multiplies matching state weight by this
     WFC.solve(wfc)
     local result = WFC.getResult(wfc)
 
@@ -394,17 +383,21 @@ function WorldSandboxController:_buildZoneGrid(new_map, ctx)
         for lscx = 0, sub_cw - 1 do
             local gx = lscx + 1
             if plot_set[gy * 100000 + gx] and not result[gy][gx] then
-                local gscx2   = gscx_off + lscx
-                local gscy2   = gscy_off + lscy
-                local sci     = gscy2 * sw + gscx2 + 1
-                local poi_idx = dmap[sci]
-                local dtype   = (poi_idx and district_types[poi_idx]) or "residential"
-                local base_w  = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS.residential
-                local best, best_w = ZT.STATES[1], 0
-                for _, s in ipairs(ZT.STATES) do
-                    if s ~= "none" and (base_w[s] or 0) > best_w then best = s; best_w = base_w[s] end
+                if grid[gy][gx].type == "river" then
+                    result[gy][gx] = "river"
+                else
+                    local gscx2   = gscx_off + lscx
+                    local gscy2   = gscy_off + lscy
+                    local sci     = gscy2 * sw + gscx2 + 1
+                    local poi_idx = dmap[sci]
+                    local dtype   = (poi_idx and district_types[poi_idx]) or "residential"
+                    local base_w  = ZT.DISTRICT_WEIGHTS[dtype] or ZT.DISTRICT_WEIGHTS.residential
+                    local best, best_w = ZT.STATES[1], 0
+                    for _, s in ipairs(ZT.STATES) do
+                        if s ~= "none" and (base_w[s] or 0) > best_w then best = s; best_w = base_w[s] end
+                    end
+                    result[gy][gx] = best
                 end
-                result[gy][gx] = best
             end
         end
     end
@@ -798,6 +791,29 @@ function WorldSandboxController:_buildRoadNetwork(new_map, ctx)
             -- ── Island connectivity ─────────────────────────────────────────────
             self:_fixIslandConnectivity(new_map, grid, sub_cw, sub_ch, zone_seg_v, zone_seg_h, new_nodes)
 
+            -- Bridge detection: river sub-cells flanked by non-river zones on opposite sides.
+            -- 10% chance per crossing so the river doesn't get a bridge at every street boundary.
+            local bridge_cells = {}
+            local function nrz(gy2, gx2)
+                if gy2 < 1 or gy2 > sub_ch or gx2 < 1 or gx2 > sub_cw then return false end
+                local z = zg[gy2] and zg[gy2][gx2]
+                return z and z ~= "none" and z ~= "river"
+            end
+            for gy = 1, sub_ch do
+                for gx = 1, sub_cw do
+                    if zg[gy] and zg[gy][gx] == "river" then
+                        local entry = {}
+                        if nrz(gy, gx - 1) and nrz(gy, gx + 1) then entry.ew = true end
+                        if nrz(gy - 1, gx) and nrz(gy + 1, gx) then entry.ns = true end
+                        if (entry.ew or entry.ns) and love.math.random() < 0.10 then
+                            if not bridge_cells[gy] then bridge_cells[gy] = {} end
+                            bridge_cells[gy][gx] = entry
+                        end
+                    end
+                end
+            end
+            new_map.bridge_cells = bridge_cells
+
             -- road_v_rxs must remain truthy so PathfindingService treats this as a road-node map.
             new_map.road_v_rxs  = {}
             new_map.road_h_rys  = {}
@@ -1176,6 +1192,91 @@ function WorldSandboxController:sendToGame()
                 else                                          tile = "grass" end
             end
             grid[lscy + 1][lscx + 1] = {type = tile}
+        end
+    end
+
+    -- River sub-cell injection: organic corridors following world-tile river paths.
+    --
+    -- Each tile has a "hub" at (hub_r, hub_c) derived deterministically from world coords.
+    -- All connections (N/S/E/W) route straight to the hub, so every tile is internally
+    -- connected and adjacent tiles always share the same edge sub-cell → guaranteed continuity.
+    --
+    -- Hub column (hub_c) is consistent per world-x column  → N-S connections always match.
+    -- Hub row    (hub_r) is consistent per world-y row     → E-W connections always match.
+    -- Period-7 lookup tables produce 0/1/2 with no short cycles, so the path varies.
+    --
+    -- Arterials/highways are skipped — the gap implies a bridge crossing.
+    do
+        local bdata = self.biome_data or {}
+
+        local _COL_HASH = {0, 2, 1, 2, 0, 1, 2}  -- period 7 → hub column per wx
+        local _ROW_HASH = {1, 0, 2, 0, 2, 1, 0}  -- period 7 → hub row per wy
+        local function hub_col(wx2) return _COL_HASH[wx2 % 7 + 1] end
+        local function hub_row(wy2) return _ROW_HASH[wy2 % 7 + 1] end
+
+        local function mr(gx, gy)
+            if gx < 1 or gx > sub_cw or gy < 1 or gy > sub_ch then return end
+            local t = grid[gy][gx].type
+            if t ~= "arterial" and t ~= "highway" then
+                grid[gy][gx] = {type = "river"}
+            end
+        end
+
+        -- Straight path from (r1,c1) to (r2,c2) via row-first L (then column).
+        local function route(lb_x, lb_y, r1, c1, r2, c2)
+            local r, c = r1, c1
+            mr(lb_x+c+1, lb_y+r+1)
+            while r ~= r2 do r = r + (r2 > r and 1 or -1); mr(lb_x+c+1, lb_y+r+1) end
+            while c ~= c2 do c = c + (c2 > c and 1 or -1); mr(lb_x+c+1, lb_y+r+1) end
+        end
+
+        local function is_riv(wx2, wy2)
+            if wx2 < 1 or wx2 > w or wy2 < 1 or wy2 > h then return false end
+            local bd2 = bdata[(wy2-1)*w+wx2]
+            return bd2 and bd2.is_river
+        end
+
+        for wy = city_mn_y, city_mx_y do
+            for wx = city_mn_x, city_mx_x do
+                local ci = (wy - 1) * w + wx
+                local bd = bdata[ci]
+                if bd and bd.is_river then
+                    local lb_x = (wx - city_mn_x) * 3
+                    local lb_y = (wy - city_mn_y) * 3
+                    local hc   = hub_col(wx)   -- 0-indexed hub column (N/S axis)
+                    local hr   = hub_row(wy)   -- 0-indexed hub row    (E/W axis)
+
+                    local has_n = is_riv(wx, wy-1)
+                    local has_e = is_riv(wx+1, wy)
+                    local has_s = is_riv(wx, wy+1)
+                    local has_w = is_riv(wx-1, wy)
+
+                    -- Always mark the hub (keeps isolated/terminus tiles visible)
+                    mr(lb_x+hc+1, lb_y+hr+1)
+
+                    -- Route each connection straight to the hub
+                    if has_n then route(lb_x, lb_y, 0,  hc, hr, hc) end  -- top-edge → hub
+                    if has_s then route(lb_x, lb_y, 2,  hc, hr, hc) end  -- bottom-edge → hub
+                    if has_w then route(lb_x, lb_y, hr,  0, hr, hc) end  -- left-edge → hub
+                    if has_e then route(lb_x, lb_y, hr,  2, hr, hc) end  -- right-edge → hub
+
+                    -- Diagonal connections: rivers use D8 flow.
+                    -- Route hub to the corner sub-cell facing the diagonal neighbor.
+                    -- Both tiles touch at their corners → 8-directional connectivity.
+                    local DIAG = {{1,1},{1,-1},{-1,1},{-1,-1}}
+                    for _, dv in ipairs(DIAG) do
+                        local dx, dy = dv[1], dv[2]
+                        if is_riv(wx+dx, wy+dy)
+                           and not is_riv(wx+dx, wy)
+                           and not is_riv(wx, wy+dy)
+                        then
+                            local cr = dy == 1 and 2 or 0
+                            local cc = dx == 1 and 2 or 0
+                            route(lb_x, lb_y, hr, hc, cr, cc)
+                        end
+                    end
+                end
+            end
         end
     end
 

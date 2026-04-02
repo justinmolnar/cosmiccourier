@@ -537,13 +537,13 @@ function RoadSmoother.buildPathsFromCenterlines(centerlines, tps)
     return paths
 end
 
-function RoadSmoother.buildPaths(grid, tps)
+local function _buildPathsForTypes(grid, tps, types)
     if not grid or #grid == 0 then return {} end
     local gh = #grid
     local gw = #(grid[1] or {})
     if gw == 0 then return {} end
 
-    local deg8 = buildDeg8(grid, gw, gh)
+    local deg8 = buildDeg8(grid, gw, gh, types)
 
     -- interior_used: degree-2 pass-through tiles that have been walked.
     -- Junction/terminal tiles are never marked so multiple chains can share them as endpoints.
@@ -556,7 +556,7 @@ function RoadSmoother.buildPaths(grid, tps)
         local cx, cy = sx + pdx, sy + pdy
         while cx >= 1 and cx <= gw and cy >= 1 and cy <= gh do
             local t = grid[cy] and grid[cy][cx] and grid[cy][cx].type
-            if not ROAD_TYPES[t] then break end
+            if not types[t] then break end
             local key = cy*(gw+1)+cx
             local d   = (deg8[cy] and deg8[cy][cx]) or 0
             chain[#chain+1] = {x=cx, y=cy}
@@ -569,7 +569,7 @@ function RoadSmoother.buildPaths(grid, tps)
                 local nx, ny = cx+dir[1], cy+dir[2]
                 if nx>=1 and nx<=gw and ny>=1 and ny<=gh then
                     local nt = grid[ny] and grid[ny][nx] and grid[ny][nx].type
-                    if ROAD_TYPES[nt] and not interior_used[ny*(gw+1)+nx] then
+                    if types[nt] and not interior_used[ny*(gw+1)+nx] then
                         local dot = dir[1]*pdx + dir[2]*pdy
                         if dot > bdot then bdot=dot; bx,by,bdx,bdy=nx,ny,dir[1],dir[2] end
                     end
@@ -594,7 +594,7 @@ function RoadSmoother.buildPaths(grid, tps)
                     local nx, ny = gx+dir[1], gy+dir[2]
                     if nx>=1 and nx<=gw and ny>=1 and ny<=gh then
                         local nt = grid[ny] and grid[ny][nx] and grid[ny][nx].type
-                        if ROAD_TYPES[nt] then
+                        if types[nt] then
                             local nk = ny*(gw+1)+nx
                             local nd = (deg8[ny] and deg8[ny][nx]) or 0
                             local ok
@@ -623,7 +623,7 @@ function RoadSmoother.buildPaths(grid, tps)
                     local nx, ny = gx+dir[1], gy+dir[2]
                     if nx>=1 and nx<=gw and ny>=1 and ny<=gh then
                         local nt = grid[ny] and grid[ny][nx] and grid[ny][nx].type
-                        if ROAD_TYPES[nt] and not interior_used[ny*(gw+1)+nx] then
+                        if types[nt] and not interior_used[ny*(gw+1)+nx] then
                             local c = walkSegment(gx, gy, dir[1], dir[2])
                             if #c >= 2 then raw[#raw+1] = c end
                             break
@@ -652,6 +652,14 @@ function RoadSmoother.buildPaths(grid, tps)
         end
     end
     return paths
+end
+
+function RoadSmoother.buildPaths(grid, tps)
+    return _buildPathsForTypes(grid, tps, ROAD_TYPES)
+end
+
+function RoadSmoother.buildRiverPaths(grid, tps)
+    return _buildPathsForTypes(grid, tps, { river = true })
 end
 
 return RoadSmoother

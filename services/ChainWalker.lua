@@ -10,20 +10,22 @@ local DIRS8 = {{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}}
 local ROAD_TYPES = { arterial = true, highway = true }
 
 -- 8-connected degree table for road tiles.
--- deg[gy][gx] = number of road-type neighbours (nil for non-road tiles).
-function ChainWalker.buildDeg8(grid, gw, gh)
+-- deg[gy][gx] = number of same-type neighbours (nil for non-matching tiles).
+-- types: optional set of tile types to count (defaults to ROAD_TYPES).
+function ChainWalker.buildDeg8(grid, gw, gh, types)
+    types = types or ROAD_TYPES
     local deg = {}
     for gy = 1, gh do
         deg[gy] = {}
         for gx = 1, gw do
             local t = grid[gy] and grid[gy][gx] and grid[gy][gx].type
-            if ROAD_TYPES[t] then
+            if types[t] then
                 local d = 0
                 for _, dir in ipairs(DIRS8) do
                     local nx, ny = gx + dir[1], gy + dir[2]
                     if nx >= 1 and nx <= gw and ny >= 1 and ny <= gh then
                         local nt = grid[ny] and grid[ny][nx] and grid[ny][nx].type
-                        if ROAD_TYPES[nt] then d = d + 1 end
+                        if types[nt] then d = d + 1 end
                     end
                 end
                 deg[gy][gx] = d

@@ -128,5 +128,10 @@
   { "id": "fraternity_row",    "color": [0.52, 0.67, 0.52] },
 
   { "id": "vacant",            "color": [0.50, 0.48, 0.44] },
+
+  { "id": "river",            "color": [0.20, 0.45, 0.75] },
+  { "id": "forest_clearing",  "color": [0.18, 0.36, 0.18] },
+  { "id": "wetlands",         "color": [0.26, 0.44, 0.40] },
+
   { "id": "none" }
 ]
