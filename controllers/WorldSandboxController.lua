@@ -61,7 +61,7 @@ function WorldSandboxController:new(game)
 
     inst.params = {
         -- World grid dimensions.
-        world_w = 400, world_h = 300,
+        world_w = 600, world_h = 300,
         -- Noise seed
         seed_x = 0, seed_y = 0,
         -- Continental layer: controls landmass size/count.
@@ -3337,7 +3337,8 @@ function WorldSandboxController:_centerCamera()
     local vw  = sw - C.UI.SIDEBAR_WIDTH
     local mpw = self.world_w * ts
     local mph = self.world_h * ts
-    self.camera.scale = math.min(vw / mpw, sh / mph) * 0.92
+    local min_scale = sh / mph
+    self.camera.scale = math.max(min_scale, math.min(vw / mpw, sh / mph) * 0.92)
     self.camera.x = mpw / 2
     self.camera.y = mph / 2
 end
@@ -3387,8 +3388,10 @@ function WorldSandboxController:handle_mouse_wheel(x, y)
         end
     else
         -- Viewport zoom
-        local factor = 1.15 ^ y
-        self.camera.scale = math.max(0.05, math.min(80, self.camera.scale * factor))
+        local factor    = 1.15 ^ y
+        local _, sh     = love.graphics.getDimensions()
+        local min_scale = sh / (self.world_h * self.game.C.MAP.TILE_SIZE)
+        self.camera.scale = math.max(min_scale, math.min(80, self.camera.scale * factor))
     end
 end
 

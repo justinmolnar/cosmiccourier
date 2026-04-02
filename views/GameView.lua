@@ -171,12 +171,23 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     love.graphics.translate(-Game.camera.x, -Game.camera.y)
     love.graphics.setColor(1, 1, 1)
 
-    -- LAYER: World image (always)
-    if Game.world_gen_world_image then
-        love.graphics.draw(Game.world_gen_world_image, 0, 0, 0, ts, ts)
+    -- Compute horizontal tile range once; all layers reuse tile_i0/tile_i1
+    local mpw = (Game.world_w or 0) * ts
+    local tile_i0, tile_i1 = 0, 0
+    if mpw > 0 then
+        local half = vw * 0.5 / cs
+        tile_i0 = math.floor((Game.camera.x - half) / mpw)
+        tile_i1 = math.ceil( (Game.camera.x + half) / mpw)
     end
 
-    -- LAYER: City circles on world map (inside camera transform — use world coords directly)
+    -- LAYER: World image (tiled horizontally for seamless east-west looping)
+    if Game.world_gen_world_image then
+        for i = tile_i0, tile_i1 do
+            love.graphics.draw(Game.world_gen_world_image, i * mpw, 0, 0, ts, ts)
+        end
+    end
+
+    -- LAYER: City circles on world map (tiled)
     if cs < Z.ZONE_THRESHOLD and Game.world_city_locations then
         local cities  = Game.world_city_locations
         local min_s, max_s = math.huge, -math.huge
@@ -185,44 +196,49 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
             if city.s > max_s then max_s = city.s end
         end
         local s_range = math.max(max_s - min_s, 0.001)
-        -- Scale radius inversely with camera scale so circles stay constant on screen
         local r_scale = 1 / cs
-        for _, city in ipairs(cities) do
-            local t   = (city.s - min_s) / s_range
-            local rad = (3.5 + t * 8.5) * r_scale
-            local wpx = (city.x - 0.5) * ts
-            local wpy = (city.y - 0.5) * ts
-            love.graphics.setColor(0, 0, 0, 0.6)
-            love.graphics.circle("fill", wpx + r_scale, wpy + r_scale, rad + 1.5 * r_scale)
-            love.graphics.setColor(0.10, 0.08, 0.04)
-            love.graphics.circle("fill", wpx, wpy, rad + 1.5 * r_scale)
-            love.graphics.setColor(1.0, 0.85, 0.15)
-            love.graphics.circle("fill", wpx, wpy, rad)
-            love.graphics.setColor(0.15, 0.10, 0.02)
-            love.graphics.circle("fill", wpx, wpy, math.max(1.5 * r_scale, rad * 0.35))
+        for i = tile_i0, tile_i1 do
+            for _, city in ipairs(cities) do
+                local t   = (city.s - min_s) / s_range
+                local rad = (3.5 + t * 8.5) * r_scale
+                local wpx = i * mpw + (city.x - 0.5) * ts
+                local wpy = (city.y - 0.5) * ts
+                love.graphics.setColor(0, 0, 0, 0.6)
+                love.graphics.circle("fill", wpx + r_scale, wpy + r_scale, rad + 1.5 * r_scale)
+                love.graphics.setColor(0.10, 0.08, 0.04)
+                love.graphics.circle("fill", wpx, wpy, rad + 1.5 * r_scale)
+                love.graphics.setColor(1.0, 0.85, 0.15)
+                love.graphics.circle("fill", wpx, wpy, rad)
+                love.graphics.setColor(0.15, 0.10, 0.02)
+                love.graphics.circle("fill", wpx, wpy, math.max(1.5 * r_scale, rad * 0.35))
+            end
         end
         love.graphics.setColor(1, 1, 1)
     end
 
-    -- LAYER: City background images (ALL cities, identical rendering)
+    -- LAYER: City background images (tiled)
     if cs >= Z.CITY_IMAGE_THRESHOLD and not Game.overlay_only_mode then
         love.graphics.setColor(1, 1, 1)
-        for _, m in ipairs(Game.maps.all_cities or {}) do
-            if m.city_image then
-                local K = m.city_img_K or 9
-                love.graphics.draw(m.city_image,
-                    (m.city_img_min_x - 1) * ts,
-                    (m.city_img_min_y - 1) * ts,
-                    0, ts / K, ts / K)
+        for i = tile_i0, tile_i1 do
+            for _, m in ipairs(Game.maps.all_cities or {}) do
+                if m.city_image then
+                    local K = m.city_img_K or 9
+                    love.graphics.draw(m.city_image,
+                        i * mpw + (m.city_img_min_x - 1) * ts,
+                        (m.city_img_min_y - 1) * ts,
+                        0, ts / K, ts / K)
+                end
             end
         end
     end
 
-    -- LAYER: City road/river overlays (per-frame vector). Zone grid is baked into
-    -- city_image so per-frame work is only smooth road paths (~hundreds of lines total).
+    -- LAYER: City road/river overlays (per-frame vector, tiled).
     if cs >= Z.CITY_IMAGE_THRESHOLD then
         local RS = require("utils.RoadSmoother")
 
+        for i = tile_i0, tile_i1 do
+        love.graphics.push()
+        love.graphics.translate(i * mpw, 0)
         for _, m in ipairs(Game.maps.all_cities or {}) do
             local m_ox  = (m.world_mn_x - 1) * ts
             local m_oy  = (m.world_mn_y - 1) * ts
@@ -320,11 +336,14 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                 end
             end
         end  -- end all_cities for loop
+        love.graphics.pop()
+        end  -- end tile loop
     end  -- CITY_IMAGE_THRESHOLD
 
-    -- LAYER: Entities (inside city-local translated scope)
+    -- LAYER: Entities (tiled so every copy is fully populated)
+    for i = tile_i0, tile_i1 do
     love.graphics.push()
-    love.graphics.translate(ox, oy)
+    love.graphics.translate(i * mpw + ox, oy)
 
     -- Depot + clients: only once city circles are gone
     if cs >= Z.ZONE_THRESHOLD then
@@ -466,6 +485,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     end
 
     love.graphics.pop()  -- city translate pop
+    end  -- end tile loop
     love.graphics.setColor(1, 1, 1)
 
 

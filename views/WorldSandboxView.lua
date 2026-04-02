@@ -40,7 +40,14 @@ function WorldSandboxView:draw()
             local oy    = (wsc.city_img_min_y - 1) * ts
             love.graphics.draw(wsc.city_image, ox, oy, 0, ts / K, ts / K)
         else
-            love.graphics.draw(wsc.world_image, 0, 0, 0, ts, ts)
+            -- Tile horizontally: draw all copies that overlap the current viewport
+            local mpw  = wsc.world_w * ts
+            local half = vw * 0.5 / wsc.camera.scale
+            local i0   = math.floor((wsc.camera.x - half) / mpw)
+            local i1   = math.ceil( (wsc.camera.x + half) / mpw)
+            for i = i0, i1 do
+                love.graphics.draw(wsc.world_image, i * mpw, 0, 0, ts, ts)
+            end
         end
         love.graphics.pop()
     else

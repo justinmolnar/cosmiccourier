@@ -101,12 +101,20 @@ function InputController:mousewheelmoved(x, y)
         -- World position under cursor before zoom
         local wx = (mx - (sw + vw / 2)) / cam.scale + cam.x
         local wy = (my - vh / 2)        / cam.scale + cam.y
-        -- Apply zoom, clamped
-        local new_scale = math.max(Z.MIN_SCALE, math.min(Z.MAX_SCALE, cam.scale * factor))
+        -- Apply zoom, clamped; min scale keeps map height filling the viewport
+        local map_h_px  = (self.game.world_h or 0) * self.game.C.MAP.TILE_SIZE
+        local min_scale = (map_h_px > 0) and (vh / map_h_px) or Z.MIN_SCALE
+        local new_scale = math.max(min_scale, math.min(Z.MAX_SCALE, cam.scale * factor))
         cam.scale = new_scale
         -- Adjust so cursor stays on same world point
         cam.x = wx - (mx - (sw + vw / 2)) / new_scale
         cam.y = wy - (my - vh / 2)        / new_scale
+        -- Clamp y to map bounds after zoom
+        local mph = (self.game.world_h or 0) * self.game.C.MAP.TILE_SIZE
+        if mph > 0 then
+            local half_h = vh * 0.5 / new_scale
+            cam.y = math.max(half_h, math.min(mph - half_h, cam.y))
+        end
     end
 end
 
@@ -153,11 +161,22 @@ function InputController:mousemoved(x, y, dx, dy)
         local cam = self.game.camera
         cam.x = cam.x - dx / cam.scale
         cam.y = cam.y - dy / cam.scale
+        -- Clamp vertical pan to map bounds
+        local mph = (self.game.world_h or 0) * self.game.C.MAP.TILE_SIZE
+        if mph > 0 then
+            local half_h = love.graphics.getHeight() * 0.5 / cam.scale
+            cam.y = math.max(half_h, math.min(mph - half_h, cam.y))
+        end
     end
 end
 
 function InputController:handleGameWorldClick(x, y)
     local world_x, world_y = self.game.camera:screenToWorld(x, y, self.game)
+    -- Wrap world_x into canonical [0, mpw) range for looping world
+    local mpw = (self.game.world_w or 0) * self.game.C.MAP.TILE_SIZE
+    if mpw > 0 then
+        world_x = ((world_x % mpw) + mpw) % mpw
+    end
 
     if self.game.event_spawner and self.game.event_spawner.handle_click then
         if self.game.event_spawner:handle_click(world_x, world_y, self.game) then
