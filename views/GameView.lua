@@ -515,6 +515,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     if Game.world_highway_map and next(Game.world_highway_map) and not Game.overlay_only_mode then
         if not Game._world_highway_smooth then
             Game._world_highway_smooth = _buildWorldHighwayPaths(Game, ts)
+            Game._trip_preview_cache   = nil  -- invalidate so preview rebuilds with snap
         end
         local hpaths = Game._world_highway_smooth
         if hpaths and #hpaths > 0 then
@@ -714,10 +715,31 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                 local PathfindingService = require("services.PathfindingService")
                 local path = PathfindingService.findVehiclePath(mock, leg.start_plot, leg.end_plot, Game)
                 if path and #path >= 2 then
+                    -- hw_smooth is built lazily by the highway draw block above us;
+                    -- if nil (e.g. first frame before draw), snapping is skipped gracefully.
+                    local hw_smooth = Game._world_highway_smooth
                     local pixel_path = {}
                     for _, node in ipairs(path) do
-                        table.insert(pixel_path, (node.x - 0.5) * uts)
-                        table.insert(pixel_path, (node.y - 0.5) * uts)
+                        local orig_px = (node.x - 0.5) * uts
+                        local orig_py = (node.y - 0.5) * uts
+                        local px, py  = orig_px, orig_py
+                        -- Snap highway nodes to the smooth visual highway curve.
+                        if hw_smooth and umap.grid[node.y] then
+                            local tile = umap.grid[node.y][node.x]
+                            if tile and tile.type == "highway" then
+                                local best_d2 = math.huge
+                                for _, chain in ipairs(hw_smooth) do
+                                    for j = 1, #chain - 1, 2 do
+                                        local d2 = (chain[j]-orig_px)^2 + (chain[j+1]-orig_py)^2
+                                        if d2 < best_d2 then
+                                            best_d2 = d2; px = chain[j]; py = chain[j+1]
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        table.insert(pixel_path, px)
+                        table.insert(pixel_path, py)
                     end
                     local PathUtils = require("lib.path_utils")
                     local smoothed  = PathUtils.chaikin(pixel_path, 3)
