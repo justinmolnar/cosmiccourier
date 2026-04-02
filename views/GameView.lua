@@ -204,214 +204,123 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         love.graphics.setColor(1, 1, 1)
     end
 
-    -- LAYER: City / downtown background image
-    if cs >= Z.CITY_IMAGE_THRESHOLD then
-        local city_bg = Game.world_gen_city_image
-        if city_bg and not Game.overlay_only_mode and not Game.debug_hide_roads then
-            local bg = cs >= Z.DOWNTOWN_IMG_THRESHOLD
-                       and (Game.world_gen_downtown_fogged_image or city_bg)
-                       or city_bg
-            local K  = Game.world_gen_city_img_K or 9
-            love.graphics.draw(bg, (Game.world_gen_city_img_min_x - 1) * ts,
-                                   (Game.world_gen_city_img_min_y - 1) * ts, 0, ts / K, ts / K)
+    -- LAYER: City background images (ALL cities, identical rendering)
+    if cs >= Z.CITY_IMAGE_THRESHOLD and not Game.overlay_only_mode then
+        love.graphics.setColor(1, 1, 1)
+        for _, m in ipairs(Game.maps.all_cities or {}) do
+            if m.city_image then
+                local K = m.city_img_K or 9
+                love.graphics.draw(m.city_image,
+                    (m.city_img_min_x - 1) * ts,
+                    (m.city_img_min_y - 1) * ts,
+                    0, ts / K, ts / K)
+            end
         end
     end
 
-    -- LAYER: Zone grid + bridges + rivers + streets (city-detail threshold)
-    if cs >= Z.ZONE_THRESHOLD then
+    -- LAYER: City road/river overlays (per-frame vector). Zone grid is baked into
+    -- city_image so per-frame work is only smooth road paths (~hundreds of lines total).
+    if cs >= Z.CITY_IMAGE_THRESHOLD then
+        local RS = require("utils.RoadSmoother")
 
-        -- Zone grid overlay
-        if not Game.overlay_only_mode and active_map.zone_grid and active_map.all_city_plots then
-            local ZT   = require("data.zones")
-            local zg   = active_map.zone_grid
-            local dirs = {{0,-1},{0,1},{-1,0},{1,0}}
-            for gy = 1, #active_map.grid do
-                local row  = active_map.grid[gy]
-                local zrow = zg[gy]
-                for gx = 1, #row do
-                    local col = zrow and ZT.COLORS[zrow[gx]]
-                    if not col then
-                        local t = row[gx].type
-                        if t == "arterial" or t == "highway" then
-                            for _, d in ipairs(dirs) do
-                                local nz = zg[gy+d[2]] and zg[gy+d[2]][gx+d[1]]
-                                if nz then col = ZT.COLORS[nz]; if col then break end end
-                            end
-                        end
-                    end
-                    if col then
-                        love.graphics.setColor(col[1], col[2], col[3], ZT.COLOR_ALPHA)
-                        love.graphics.rectangle("fill", ox + (gx-1)*tps, oy + (gy-1)*tps, tps, tps)
+        for _, m in ipairs(Game.maps.all_cities or {}) do
+            local m_ox  = (m.world_mn_x - 1) * ts
+            local m_oy  = (m.world_mn_y - 1) * ts
+            local m_tps = m.tile_pixel_size or ts
+
+            -- Bridges
+            if m.bridge_cells then
+                love.graphics.setLineStyle("rough")
+                love.graphics.setColor(0.72, 0.60, 0.38, 0.95)
+                love.graphics.setLineWidth(m_tps * 0.45)
+                for gy, row in pairs(m.bridge_cells) do
+                    for gx, entry in pairs(row) do
+                        local px = m_ox + (gx - 1) * m_tps
+                        local py = m_oy + (gy - 1) * m_tps
+                        if entry.ew then love.graphics.line(px, py + m_tps*0.5, px+m_tps, py + m_tps*0.5) end
+                        if entry.ns then love.graphics.line(px + m_tps*0.5, py, px + m_tps*0.5, py+m_tps) end
                     end
                 end
+                love.graphics.setLineWidth(1)
+                love.graphics.setColor(1, 1, 1)
             end
-        end
 
-        -- Bridge rendering
-        if active_map.bridge_cells then
-            love.graphics.setLineStyle("rough")
-            love.graphics.setColor(0.72, 0.60, 0.38, 0.95)
-            love.graphics.setLineWidth(tps * 0.45)
-            for gy, row in pairs(active_map.bridge_cells) do
-                for gx, entry in pairs(row) do
-                    local px = ox + (gx - 1) * tps
-                    local py = oy + (gy - 1) * tps
-                    if entry.ew then love.graphics.line(px, py + tps*0.5, px+tps, py + tps*0.5) end
-                    if entry.ns then love.graphics.line(px + tps*0.5, py, px + tps*0.5, py+tps) end
-                end
+            -- Rivers
+            if not m._river_smooth_paths_v1 then
+                m._river_smooth_paths_v1 = RS.buildRiverPaths(m.grid, m_tps)
             end
-            love.graphics.setLineWidth(1)
-            love.graphics.setColor(1, 1, 1)
-        end
-
-        -- Smooth river overlay
-        if not active_map._river_smooth_paths_v1 then
-            local RS = require("utils.RoadSmoother")
-            active_map._river_smooth_paths_v1 = RS.buildRiverPaths(active_map.grid, tps)
-        end
-        if active_map._river_smooth_paths_v1 and #active_map._river_smooth_paths_v1 > 0 then
-            local cap_r = tps * 0.4
-            love.graphics.setColor(0.20, 0.45, 0.75, 0.92)
-            love.graphics.setLineWidth(tps * 0.75)
-            love.graphics.setLineJoin("bevel")
-            for _, pts in ipairs(active_map._river_smooth_paths_v1) do
-                if #pts >= 4 then
-                    local s2 = {}
-                    for i = 1, #pts, 2 do s2[i] = ox + pts[i]; s2[i+1] = oy + pts[i+1] end
-                    love.graphics.line(s2)
-                    love.graphics.circle("fill", s2[1], s2[2], cap_r)
-                    love.graphics.circle("fill", s2[#s2-1], s2[#s2], cap_r)
-                end
-            end
-            love.graphics.setLineWidth(1)
-            love.graphics.setLineJoin("miter")
-            love.graphics.setColor(1, 1, 1)
-        end
-
-        -- Street overlays (debug only)
-        if Game.debug_smooth_streets then do
-            if not active_map._street_smooth_paths_v7 then
-                local RS = require("utils.RoadSmoother")
-                active_map._street_smooth_paths_v7 = RS.buildStreetPaths(
-                    active_map.zone_seg_v, active_map.zone_seg_h, active_map.zone_grid, tps, active_map.grid)
-            end
-            if #active_map._street_smooth_paths_v7 > 0 then
-                love.graphics.setColor(0.85, 0.78, 0.55, 0.88)
-                love.graphics.setLineWidth(tps * 0.35)
-                love.graphics.setLineStyle("smooth")
-                love.graphics.setLineJoin("miter")
-                for _, pts in ipairs(active_map._street_smooth_paths_v7) do
+            if m._river_smooth_paths_v1 and #m._river_smooth_paths_v1 > 0 then
+                local cap_r = m_tps * 0.4
+                love.graphics.setColor(0.20, 0.45, 0.75, 0.92)
+                love.graphics.setLineWidth(m_tps * 0.75)
+                love.graphics.setLineJoin("bevel")
+                for _, pts in ipairs(m._river_smooth_paths_v1) do
                     if #pts >= 4 then
                         local s2 = {}
-                        for i = 1, #pts, 2 do s2[i] = ox + pts[i]; s2[i+1] = oy + pts[i+1] end
+                        for i = 1, #pts, 2 do s2[i] = m_ox + pts[i]; s2[i+1] = m_oy + pts[i+1] end
                         love.graphics.line(s2)
+                        love.graphics.circle("fill", s2[1], s2[2], cap_r)
+                        love.graphics.circle("fill", s2[#s2-1], s2[#s2], cap_r)
                     end
                 end
-                love.graphics.setLineStyle("rough")
                 love.graphics.setLineWidth(1)
                 love.graphics.setLineJoin("miter")
                 love.graphics.setColor(1, 1, 1)
             end
-        end end
 
-        if Game.debug_smooth_roads_merged then do
-            if not active_map._street_smooth_paths_merged_v1 then
-                local RS = require("utils.RoadSmoother")
-                active_map._street_smooth_paths_merged_v1 = RS.buildStreetPathsMerged(
-                    active_map.zone_seg_v, active_map.zone_seg_h, active_map.zone_grid, tps, active_map.grid)
-            end
-            if #active_map._street_smooth_paths_merged_v1 > 0 then
-                love.graphics.setColor(0.85, 0.78, 0.55, 0.88)
-                love.graphics.setLineWidth(tps * 0.35)
-                love.graphics.setLineStyle("smooth")
-                love.graphics.setLineJoin("miter")
-                for _, pts in ipairs(active_map._street_smooth_paths_merged_v1) do
-                    local s2 = {}
-                    for i = 1, #pts, 2 do s2[i] = ox + pts[i]; s2[i+1] = oy + pts[i+1] end
-                    love.graphics.line(s2)
+            -- Street lines (debug_smooth_roads_like)
+            if Game.debug_smooth_roads_like then
+                if not m._street_smooth_paths_like_v5 then
+                    m._street_smooth_paths_like_v5 = RS.buildStreetPathsLike(
+                        m.zone_seg_v, m.zone_seg_h, m.zone_grid, m_tps, m.grid)
                 end
-                love.graphics.setLineStyle("rough")
-                love.graphics.setLineWidth(1)
-                love.graphics.setLineJoin("miter")
-                love.graphics.setColor(1, 1, 1)
+                if m._street_smooth_paths_like_v5 and #m._street_smooth_paths_like_v5 > 0 then
+                    love.graphics.setColor(0.30, 0.29, 0.28, 1.0)
+                    love.graphics.setLineWidth(m_tps * 0.35)
+                    love.graphics.setLineStyle("smooth")
+                    love.graphics.setLineJoin("miter")
+                    for _, pts in ipairs(m._street_smooth_paths_like_v5) do
+                        local s2 = {}
+                        for i = 1, #pts, 2 do s2[i] = m_ox + pts[i]; s2[i+1] = m_oy + pts[i+1] end
+                        love.graphics.line(s2)
+                    end
+                    love.graphics.setLineStyle("rough")
+                    love.graphics.setLineWidth(1)
+                    love.graphics.setLineJoin("miter")
+                    love.graphics.setColor(1, 1, 1)
+                end
             end
-        end end
 
-        if Game.debug_smooth_roads_like then do
-            if not active_map._street_smooth_paths_like_v5 then
-                local RS = require("utils.RoadSmoother")
-                active_map._street_smooth_paths_like_v5 = RS.buildStreetPathsLike(
-                    active_map.zone_seg_v, active_map.zone_seg_h, active_map.zone_grid, tps, active_map.grid)
-            end
-            if active_map._street_smooth_paths_like_v5 and #active_map._street_smooth_paths_like_v5 > 0 then
-                love.graphics.setColor(0.30, 0.29, 0.28, 1.0)
-                love.graphics.setLineWidth(tps * 0.35)
-                love.graphics.setLineStyle("smooth")
-                love.graphics.setLineJoin("miter")
-                for _, pts in ipairs(active_map._street_smooth_paths_like_v5) do
-                    local s2 = {}
-                    for i = 1, #pts, 2 do s2[i] = ox + pts[i]; s2[i+1] = oy + pts[i+1] end
-                    love.graphics.line(s2)
+            -- Arterials (debug_smooth_roads)
+            if Game.debug_smooth_roads then
+                if not m._road_smooth_paths_v8 then
+                    if m.road_centerlines and #m.road_centerlines > 0 then
+                        m._road_smooth_paths_v8 = RS.buildPathsFromCenterlines(m.road_centerlines, m_tps)
+                    else
+                        m._road_smooth_paths_v8 = RS.buildPaths(m.grid, m_tps)
+                    end
                 end
-                love.graphics.setLineStyle("rough")
-                love.graphics.setLineWidth(1)
-                love.graphics.setLineJoin("miter")
-                love.graphics.setColor(1, 1, 1)
-            end
-        end end
-
-        -- [G] Road segment overlay
-        if Game.debug_road_segments and active_map.zone_seg_v then
-            local zsv   = active_map.zone_seg_v
-            local zsh   = active_map.zone_seg_h
-            local scale = Game.camera and Game.camera.scale or 1
-            love.graphics.setLineWidth(4 / scale)
-            love.graphics.setColor(0, 1, 0.2, 0.9)
-            for gy, row in pairs(zsv) do
-                for rx in pairs(row) do
-                    love.graphics.line(ox + rx*tps, oy + (gy-1)*tps, ox + rx*tps, oy + gy*tps)
+                if m._road_smooth_paths_v8 and #m._road_smooth_paths_v8 > 0 then
+                    local cap_r = m_tps * 0.35
+                    love.graphics.setColor(0.22, 0.21, 0.20, 1.0)
+                    love.graphics.setLineWidth(m_tps * 0.7)
+                    love.graphics.setLineJoin("bevel")
+                    for _, pts in ipairs(m._road_smooth_paths_v8) do
+                        if #pts >= 4 then
+                            local s2 = {}
+                            for i = 1, #pts, 2 do s2[i] = m_ox + pts[i]; s2[i+1] = m_oy + pts[i+1] end
+                            love.graphics.line(s2)
+                            love.graphics.circle("fill", s2[1], s2[2], cap_r)
+                            love.graphics.circle("fill", s2[#s2-1], s2[#s2], cap_r)
+                        end
+                    end
+                    love.graphics.setLineWidth(1)
+                    love.graphics.setLineJoin("miter")
+                    love.graphics.setColor(1, 1, 1)
                 end
             end
-            love.graphics.setColor(0.2, 0.5, 1, 0.9)
-            for ry, row in pairs(zsh) do
-                for gx in pairs(row) do
-                    love.graphics.line(ox + (gx-1)*tps, oy + ry*tps, ox + gx*tps, oy + ry*tps)
-                end
-            end
-            love.graphics.setLineWidth(1)
-            love.graphics.setColor(1, 1, 1)
-        end
-    end  -- ZONE_THRESHOLD
-
-    -- LAYER: Arterial / highway smooth paths
-    if cs >= Z.ARTERIAL_THRESHOLD and Game.debug_smooth_roads then do
-        if not active_map._road_smooth_paths_v8 then
-            local RS = require("utils.RoadSmoother")
-            if active_map.road_centerlines and #active_map.road_centerlines > 0 then
-                active_map._road_smooth_paths_v8 = RS.buildPathsFromCenterlines(active_map.road_centerlines, tps)
-            else
-                active_map._road_smooth_paths_v8 = RS.buildPaths(active_map.grid, tps)
-            end
-        end
-        if #active_map._road_smooth_paths_v8 > 0 then
-            local cap_r = tps * 0.35
-            love.graphics.setColor(0.22, 0.21, 0.20, 1.0)
-            love.graphics.setLineWidth(tps * 0.7)
-            love.graphics.setLineJoin("bevel")
-            for _, pts in ipairs(active_map._road_smooth_paths_v8) do
-                if #pts >= 4 then
-                    local s2 = {}
-                    for i = 1, #pts, 2 do s2[i] = ox + pts[i]; s2[i+1] = oy + pts[i+1] end
-                    love.graphics.line(s2)
-                    love.graphics.circle("fill", s2[1], s2[2], cap_r)
-                    love.graphics.circle("fill", s2[#s2-1], s2[#s2], cap_r)
-                end
-            end
-            love.graphics.setLineWidth(1)
-            love.graphics.setLineJoin("miter")
-            love.graphics.setColor(1, 1, 1)
-        end
-    end end  -- ARTERIAL_THRESHOLD / debug_smooth_roads
+        end  -- end all_cities for loop
+    end  -- CITY_IMAGE_THRESHOLD
 
     -- LAYER: Entities (inside city-local translated scope)
     love.graphics.push()
