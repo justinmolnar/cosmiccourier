@@ -180,6 +180,21 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         tile_i1 = math.ceil( (Game.camera.x + half) / mpw)
     end
 
+    -- Viewport AABB in world coords (used to cull off-screen cities)
+    local vp_half_w = vw * 0.5 / cs
+    local vp_half_h = screen_h * 0.5 / cs
+    local vp_left   = Game.camera.x - vp_half_w
+    local vp_right  = Game.camera.x + vp_half_w
+    local vp_top    = Game.camera.y - vp_half_h
+    local vp_bot    = Game.camera.y + vp_half_h
+    local function cityInView(m, x_offset)
+        local cl = x_offset + (m.world_mn_x - 1) * ts
+        local cr = x_offset + (m.world_city_mx_x or m.world_mn_x) * ts
+        local ct = (m.world_mn_y - 1) * ts
+        local cb = (m.world_city_mx_y or m.world_mn_y) * ts
+        return cr > vp_left and cl < vp_right and cb > vp_top and ct < vp_bot
+    end
+
     -- LAYER: World image (tiled horizontally for seamless east-west looping)
     if Game.world_gen_world_image then
         for i = tile_i0, tile_i1 do
@@ -216,12 +231,12 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         love.graphics.setColor(1, 1, 1)
     end
 
-    -- LAYER: City background images (tiled)
+    -- LAYER: City background images (tiled, culled)
     if cs >= Z.CITY_IMAGE_THRESHOLD and not Game.overlay_only_mode then
         love.graphics.setColor(1, 1, 1)
         for i = tile_i0, tile_i1 do
             for _, m in ipairs(Game.maps.all_cities or {}) do
-                if m.city_image then
+                if m.city_image and cityInView(m, i * mpw) then
                     local K = m.city_img_K or 9
                     love.graphics.draw(m.city_image,
                         i * mpw + (m.city_img_min_x - 1) * ts,
@@ -240,6 +255,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         love.graphics.push()
         love.graphics.translate(i * mpw, 0)
         for _, m in ipairs(Game.maps.all_cities or {}) do
+            if not cityInView(m, i * mpw) then goto continue_overlay end
             local m_ox  = (m.world_mn_x - 1) * ts
             local m_oy  = (m.world_mn_y - 1) * ts
             local m_tps = m.tile_pixel_size or ts
@@ -335,6 +351,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                     love.graphics.setColor(1, 1, 1)
                 end
             end
+            ::continue_overlay::
         end  -- end all_cities for loop
         love.graphics.pop()
         end  -- end tile loop
@@ -342,6 +359,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
 
     -- LAYER: Entities (tiled so every copy is fully populated)
     for i = tile_i0, tile_i1 do
+    if active_map.world_mn_x and not cityInView(active_map, i * mpw) then goto continue_entities end
     love.graphics.push()
     love.graphics.translate(i * mpw + ox, oy)
 
@@ -485,6 +503,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     end
 
     love.graphics.pop()  -- city translate pop
+    ::continue_entities::
     end  -- end tile loop
     love.graphics.setColor(1, 1, 1)
 
