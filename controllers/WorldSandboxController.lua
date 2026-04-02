@@ -997,6 +997,197 @@ function WorldSandboxController:_buildGameImages(game, start_idx, city_mn_x, cit
     end
 end
 
+-- ── City build helpers ────────────────────────────────────────────────────────
+-- These two functions are the single source of truth for how ANY city is built.
+-- Both the starter city and every extra city go through the same pipeline:
+--   _buildCityGrid  → sub-cell tile grid + ctx
+--   _buildCityMap   → calls _buildCityGrid, _buildZoneGrid, _buildRoadNetwork
+-- Image building is done by the caller after (starter via _buildGameImages,
+-- extras via _buildCityImage directly).
+
+function WorldSandboxController:_buildCityGrid(city_idx, mn_x, mx_x, mn_y, mx_y, art_sci, all_claimed)
+    local w  = self.world_w
+    local h  = self.world_h
+    local sw = w * 3
+    local p  = self.params
+
+    local sub_cw   = (mx_x - mn_x + 1) * 3
+    local sub_ch   = (mx_y - mn_y + 1) * 3
+    local gscx_off = (mn_x - 1) * 3
+    local gscy_off = (mn_y - 1) * 3
+
+    -- dt_sci: district-1 (downtown) sub-cells for this specific city
+    local dt_sci  = {}
+    local dmap_dt = self.city_district_maps and self.city_district_maps[city_idx]
+    if dmap_dt then
+        for sci, poi_idx_v in pairs(dmap_dt) do
+            if poi_idx_v == 1 then dt_sci[sci] = true end
+        end
+    end
+    if not next(dt_sci) then
+        local poi1   = self.city_pois_list and self.city_pois_list[city_idx] and self.city_pois_list[city_idx][1]
+        local bounds = self.city_bounds_list and self.city_bounds_list[city_idx]
+        if poi1 and bounds then
+            local DT_RADIUS = 6
+            for ci in pairs(bounds) do
+                local cx = (ci-1)%w+1; local cy = math.floor((ci-1)/w)+1
+                local dx = cx - poi1.x; local dy = cy - poi1.y
+                if dx*dx + dy*dy <= DT_RADIUS*DT_RADIUS then
+                    local gscx0 = (cx-1)*3; local gscy0 = (cy-1)*3
+                    for dy2 = 0, 2 do for dx2 = 0, 2 do
+                        dt_sci[(gscy0+dy2)*sw + (gscx0+dx2) + 1] = true
+                    end end
+                end
+            end
+        end
+    end
+
+    -- Build sub-cell tile grid
+    local grid = {}
+    local p2 = self.params
+    for lscy = 0, sub_ch - 1 do
+        grid[lscy + 1] = {}
+        local wcy  = mn_y + math.floor(lscy / 3)
+        local gscy = gscy_off + lscy
+        for lscx = 0, sub_cw - 1 do
+            local wcx  = mn_x + math.floor(lscx / 3)
+            local gscx = gscx_off + lscx
+            local ci   = (wcy - 1) * w + wcx
+            local sci  = gscy * sw + gscx + 1
+            local tile
+            if art_sci[sci] then
+                tile = (self.highway_map and self.highway_map[ci]) and "highway" or "arterial"
+            elseif all_claimed[ci] then
+                tile = dt_sci[sci] and "downtown_plot" or "plot"
+            else
+                local elev = (self.heightmap and self.heightmap[wcy] and self.heightmap[wcy][wcx]) or 0.5
+                if     elev <= (p2.ocean_max    or 0.42) then tile = "water"
+                elseif elev >= (p2.highland_max or 0.80) then tile = "mountain"
+                else                                          tile = "grass" end
+            end
+            grid[lscy + 1][lscx + 1] = {type = tile}
+        end
+    end
+
+    -- River sub-cell injection
+    do
+        local bdata     = self.biome_data or {}
+        local _COL_HASH = {0, 2, 1, 2, 0, 1, 2}
+        local _ROW_HASH = {1, 0, 2, 0, 2, 1, 0}
+        local function hub_col(wx2) return _COL_HASH[wx2 % 7 + 1] end
+        local function hub_row(wy2) return _ROW_HASH[wy2 % 7 + 1] end
+        local function mr(gx, gy)
+            if gx < 1 or gx > sub_cw or gy < 1 or gy > sub_ch then return end
+            local t = grid[gy][gx].type
+            if t ~= "arterial" and t ~= "highway" then grid[gy][gx] = {type = "river"} end
+        end
+        local function route(lb_x, lb_y, r1, c1, r2, c2)
+            local r, c = r1, c1
+            mr(lb_x+c+1, lb_y+r+1)
+            while r ~= r2 do r = r+(r2>r and 1 or -1); mr(lb_x+c+1, lb_y+r+1) end
+            while c ~= c2 do c = c+(c2>c and 1 or -1); mr(lb_x+c+1, lb_y+r+1) end
+        end
+        local function is_riv(wx2, wy2)
+            if wx2 < 1 or wx2 > w or wy2 < 1 or wy2 > h then return false end
+            local bd2 = bdata[(wy2-1)*w+wx2]; return bd2 and bd2.is_river
+        end
+        for wy = mn_y, mx_y do
+            for wx = mn_x, mx_x do
+                local bd = bdata[(wy-1)*w+wx]
+                if bd and bd.is_river then
+                    local lb_x = (wx-mn_x)*3; local lb_y = (wy-mn_y)*3
+                    local hc   = hub_col(wx);  local hr   = hub_row(wy)
+                    mr(lb_x+hc+1, lb_y+hr+1)
+                    if is_riv(wx,wy-1) then route(lb_x,lb_y,0,  hc,hr,hc) end
+                    if is_riv(wx,wy+1) then route(lb_x,lb_y,2,  hc,hr,hc) end
+                    if is_riv(wx-1,wy) then route(lb_x,lb_y,hr,  0,hr,hc) end
+                    if is_riv(wx+1,wy) then route(lb_x,lb_y,hr,  2,hr,hc) end
+                    for _, dv in ipairs({{1,1},{1,-1},{-1,1},{-1,-1}}) do
+                        local dx, dy = dv[1], dv[2]
+                        if is_riv(wx+dx,wy+dy) and not is_riv(wx+dx,wy) and not is_riv(wx,wy+dy) then
+                            route(lb_x, lb_y, hr, hc, dy==1 and 2 or 0, dx==1 and 2 or 0)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local ctx = {
+        sub_cw   = sub_cw,   sub_ch   = sub_ch,
+        gscx_off = gscx_off, gscy_off = gscy_off,
+        sw = sw, w = w, start_idx = city_idx,
+        grid = grid, city_mn_x = mn_x, city_mn_y = mn_y,
+    }
+    return grid, ctx
+end
+
+function WorldSandboxController:_buildCityMap(city_idx, mn_x, mx_x, mn_y, mx_y, art_sci, all_claimed)
+    local C   = self.game.C
+    local Map = require("models.Map")
+
+    local grid, ctx = self:_buildCityGrid(city_idx, mn_x, mx_x, mn_y, mx_y, art_sci, all_claimed)
+    local sub_cw = ctx.sub_cw
+    local sub_ch = ctx.sub_ch
+
+    -- Downtown bounding box
+    local dt_mn_x, dt_mx_x, dt_mn_y, dt_mx_y = sub_cw + 1, 0, sub_ch + 1, 0
+    for gy = 1, sub_ch do
+        for gx = 1, sub_cw do
+            local t = grid[gy][gx].type
+            if t == "downtown_road" or t == "downtown_plot" then
+                if gx < dt_mn_x then dt_mn_x = gx end
+                if gx > dt_mx_x then dt_mx_x = gx end
+                if gy < dt_mn_y then dt_mn_y = gy end
+                if gy > dt_mx_y then dt_mx_y = gy end
+            end
+        end
+    end
+    if dt_mn_x > dt_mx_x then
+        local poi = self.city_pois_list and self.city_pois_list[city_idx] and self.city_pois_list[city_idx][1]
+        if poi then
+            local lscx = (poi.x - mn_x) * 3 + 1
+            local lscy = (poi.y - mn_y) * 3 + 1
+            local r = 18
+            dt_mn_x = math.max(1, lscx-r); dt_mx_x = math.min(sub_cw, lscx+r)
+            dt_mn_y = math.max(1, lscy-r); dt_mx_y = math.min(sub_ch, lscy+r)
+        else
+            dt_mn_x = 1; dt_mx_x = 30; dt_mn_y = 1; dt_mx_y = 30
+        end
+    end
+
+    local map = Map:new(C)
+    map.city_grid_width      = sub_cw
+    map.city_grid_height     = sub_ch
+    map.downtown_grid_width  = math.max(1, dt_mx_x - dt_mn_x + 1)
+    map.downtown_grid_height = math.max(1, dt_mx_y - dt_mn_y + 1)
+    map.grid            = grid
+    map.downtown_offset = {x = dt_mn_x, y = dt_mn_y}
+    map.tile_pixel_size = C.MAP.TILE_SIZE / 3
+    map.building_plots  = {}
+
+    self:_buildZoneGrid(map, ctx)
+    self:_buildRoadNetwork(map, ctx)
+
+    map.district_map    = self.city_district_maps  and self.city_district_maps[city_idx]
+    map.district_types  = self.city_district_types and self.city_district_types[city_idx]
+    map.district_colors = self.city_district_colors and self.city_district_colors[city_idx]
+    map.district_pois   = self.city_pois_list and self.city_pois_list[city_idx]
+    map.zone_gscx_off   = ctx.gscx_off
+    map.zone_gscy_off   = ctx.gscy_off
+    map.zone_sw         = ctx.sw
+    map.world_biome_data = self.biome_data
+    map.world_city_mn_x  = mn_x
+    map.world_city_mn_y  = mn_y
+    map.world_city_mx_x  = mx_x
+    map.world_city_mx_y  = mx_y
+    map.world_w          = ctx.w
+    map.world_mn_x       = mn_x
+    map.world_mn_y       = mn_y
+
+    return map
+end
+
 -- ── Send to Game ──────────────────────────────────────────────────────────────
 -- Converts the world sandbox data into a game Map (1 world-cell = 1 game tile)
 -- and replaces game.maps.city, then resets vehicles/clients exactly like F9's
@@ -1046,32 +1237,7 @@ function WorldSandboxController:sendToGame()
         end
     end
 
-    -- dt_sci[sci] = true for district-1 (downtown) sub-cells
-    local poi1 = self.city_pois_list and self.city_pois_list[start_idx]
-                 and self.city_pois_list[start_idx][1]
-    local dt_sci = {}
-    local dmap_dt = self.city_district_maps and self.city_district_maps[start_idx]
-    if dmap_dt then
-        for sci, poi_idx_v in pairs(dmap_dt) do
-            if poi_idx_v == 1 then dt_sci[sci] = true end
-        end
-    end
-    if not next(dt_sci) and poi1 then
-        -- Fallback: DT_RADIUS circle of world cells → mark all 9 sub-cells each
-        local DT_RADIUS = 6
-        for ci in pairs(start_bounds) do
-            local cx = (ci-1)%w+1; local cy = math.floor((ci-1)/w)+1
-            local dx = cx - poi1.x; local dy = cy - poi1.y
-            if dx*dx + dy*dy <= DT_RADIUS*DT_RADIUS then
-                local gscx0 = (cx-1)*3; local gscy0 = (cy-1)*3
-                for dy2 = 0, 2 do for dx2 = 0, 2 do
-                    dt_sci[(gscy0+dy2)*sw + (gscx0+dx2) + 1] = true
-                end end
-            end
-        end
-    end
-
-    -- all_claimed[ci] = city_idx (world-cell, for city vs terrain distinction)
+    -- all_claimed[ci] = city_idx for every world-cell owned by any city
     local all_claimed = {}
     for idx = 1, #self.city_locations do
         local bnds = self.city_bounds_list and self.city_bounds_list[idx]
@@ -1080,482 +1246,50 @@ function WorldSandboxController:sendToGame()
         end
     end
 
-    -- Sub-cell grid dimensions
-    local cw = city_mx_x - city_mn_x + 1
-    local ch = city_mx_y - city_mn_y + 1
-    local sub_cw = cw * 3
-    local sub_ch = ch * 3
-    local gscx_off = (city_mn_x - 1) * 3  -- global sub-cell x offset for local (0,0)
-    local gscy_off = (city_mn_y - 1) * 3  -- global sub-cell y offset for local (0,0)
-
-    -- Augmented street maps: original streets PLUS a street boundary on every side
-    -- of each arterial / highway world cell, giving the |arterial| pattern.
-    local aug_street_maps = {}
-    do
-        local art_sw = w * 3
-        for idx = 1, #self.city_locations do
-            local orig = self.city_street_maps and self.city_street_maps[idx]
-            local aug_v, aug_h = {}, {}
-            if orig then
-                for k in pairs(orig.v or {}) do aug_v[k] = true end
-                for k in pairs(orig.h or {}) do aug_h[k] = true end
-            end
-            -- Streets alongside arterial sub-cells (per-city map)
-            local amap = self.city_arterial_maps and self.city_arterial_maps[idx]
-            if amap then
-                local done = {}
-                for sci in pairs(amap) do
-                    local gscx_a = (sci - 1) % art_sw
-                    local gscy_a = math.floor((sci - 1) / art_sw)
-                    local wcx = math.floor(gscx_a / 3) + 1
-                    local wcy = math.floor(gscy_a / 3) + 1
-                    local ci  = (wcy - 1) * w + wcx
-                    if not done[ci] then
-                        done[ci] = true
-                        aug_v[(wcx - 1) * 1000 + wcy] = true
-                        aug_v[wcx       * 1000 + wcy] = true
-                        aug_h[(wcy - 1) * 1000 + wcx] = true
-                        aug_h[wcy       * 1000 + wcx] = true
-                    end
-                end
-            end
-            -- Streets alongside highway world cells (global map, filtered to city bounds)
-            local hmap = self.highway_map
-            local bnds = self.city_bounds_list and self.city_bounds_list[idx]
-            if hmap and bnds then
-                for ci in pairs(bnds) do
-                    if hmap[ci] then
-                        local wcx = (ci - 1) % w + 1
-                        local wcy = math.floor((ci - 1) / w) + 1
-                        aug_v[(wcx - 1) * 1000 + wcy] = true
-                        aug_v[wcx       * 1000 + wcy] = true
-                        aug_h[(wcy - 1) * 1000 + wcx] = true
-                        aug_h[wcy       * 1000 + wcx] = true
-                    end
-                end
-            end
-            aug_street_maps[idx] = { v = aug_v, h = aug_h }
-        end
-        self.aug_street_maps = aug_street_maps
-    end
-
-    -- is_street_sc[lscy*sub_cw+lscx] = true for street boundary sub-cells
-    local is_street_sc = {}
-    local function mark_street_sc(lscx, lscy)
-        if lscx >= 0 and lscx < sub_cw and lscy >= 0 and lscy < sub_ch then
-            is_street_sc[lscy * sub_cw + lscx] = true
-        end
-    end
-
-    -- Original city streets (world-cell boundaries from city_street_maps)
-    for idx = 1, #self.city_locations do
-        local smap = self.city_street_maps and self.city_street_maps[idx]
-        if smap then
-            for key in pairs(smap.v or {}) do
-                local cx  = math.floor(key / 1000); local wy = key % 1000
-                local lscx  = cx * 3 - gscx_off
-                local lscy0 = (wy - 1) * 3 - gscy_off
-                for dlscy = 0, 2 do mark_street_sc(lscx, lscy0 + dlscy) end
-            end
-            for key in pairs(smap.h or {}) do
-                local cy  = math.floor(key / 1000); local wx = key % 1000
-                local lscy  = cy * 3 - gscy_off
-                local lscx0 = (wx - 1) * 3 - gscx_off
-                for dlscx = 0, 2 do mark_street_sc(lscx0 + dlscx, lscy) end
-            end
-        end
-    end
-
-
-    -- Build tile grid at SUB-CELL resolution: 1 tile = 1 sub-cell = 1/3 world cell
-    local grid = {}
-    local p = self.params
-    for lscy = 0, sub_ch - 1 do
-        grid[lscy + 1] = {}
-        local wcy  = city_mn_y + math.floor(lscy / 3)
-        local gscy = gscy_off + lscy
-        for lscx = 0, sub_cw - 1 do
-            local wcx  = city_mn_x + math.floor(lscx / 3)
-            local gscx = gscx_off + lscx
-            local ci   = (wcy - 1) * w + wcx
-            local sci  = gscy * sw + gscx + 1
-            local tile
-            if art_sci[sci] then
-                -- Sub-cell-level check: only the actual road-path sub-cells are typed
-                -- as highway/arterial. Sub-cells in the same world cell that the path
-                -- did NOT touch remain as plot, so buildings can be placed beside roads.
-                if self.highway_map and self.highway_map[ci] then
-                    tile = "highway"
-                else
-                    tile = "arterial"
-                end
-            elseif all_claimed[ci] then
-                -- Roads are lines between sub-cells, not tiles.  All claimed
-                -- city sub-cells (including former road positions) are plots.
-                tile = dt_sci[sci] and "downtown_plot" or "plot"
-            else
-                local elev = (self.heightmap and self.heightmap[wcy] and self.heightmap[wcy][wcx]) or 0.5
-                if     elev <= (p.ocean_max    or 0.42) then tile = "water"
-                elseif elev >= (p.highland_max or 0.80) then tile = "mountain"
-                else                                          tile = "grass" end
-            end
-            grid[lscy + 1][lscx + 1] = {type = tile}
-        end
-    end
-
-    -- River sub-cell injection: organic corridors following world-tile river paths.
-    --
-    -- Each tile has a "hub" at (hub_r, hub_c) derived deterministically from world coords.
-    -- All connections (N/S/E/W) route straight to the hub, so every tile is internally
-    -- connected and adjacent tiles always share the same edge sub-cell → guaranteed continuity.
-    --
-    -- Hub column (hub_c) is consistent per world-x column  → N-S connections always match.
-    -- Hub row    (hub_r) is consistent per world-y row     → E-W connections always match.
-    -- Period-7 lookup tables produce 0/1/2 with no short cycles, so the path varies.
-    --
-    -- Arterials/highways are skipped — the gap implies a bridge crossing.
-    do
-        local bdata = self.biome_data or {}
-
-        local _COL_HASH = {0, 2, 1, 2, 0, 1, 2}  -- period 7 → hub column per wx
-        local _ROW_HASH = {1, 0, 2, 0, 2, 1, 0}  -- period 7 → hub row per wy
-        local function hub_col(wx2) return _COL_HASH[wx2 % 7 + 1] end
-        local function hub_row(wy2) return _ROW_HASH[wy2 % 7 + 1] end
-
-        local function mr(gx, gy)
-            if gx < 1 or gx > sub_cw or gy < 1 or gy > sub_ch then return end
-            local t = grid[gy][gx].type
-            if t ~= "arterial" and t ~= "highway" then
-                grid[gy][gx] = {type = "river"}
-            end
-        end
-
-        -- Straight path from (r1,c1) to (r2,c2) via row-first L (then column).
-        local function route(lb_x, lb_y, r1, c1, r2, c2)
-            local r, c = r1, c1
-            mr(lb_x+c+1, lb_y+r+1)
-            while r ~= r2 do r = r + (r2 > r and 1 or -1); mr(lb_x+c+1, lb_y+r+1) end
-            while c ~= c2 do c = c + (c2 > c and 1 or -1); mr(lb_x+c+1, lb_y+r+1) end
-        end
-
-        local function is_riv(wx2, wy2)
-            if wx2 < 1 or wx2 > w or wy2 < 1 or wy2 > h then return false end
-            local bd2 = bdata[(wy2-1)*w+wx2]
-            return bd2 and bd2.is_river
-        end
-
-        for wy = city_mn_y, city_mx_y do
-            for wx = city_mn_x, city_mx_x do
-                local ci = (wy - 1) * w + wx
-                local bd = bdata[ci]
-                if bd and bd.is_river then
-                    local lb_x = (wx - city_mn_x) * 3
-                    local lb_y = (wy - city_mn_y) * 3
-                    local hc   = hub_col(wx)   -- 0-indexed hub column (N/S axis)
-                    local hr   = hub_row(wy)   -- 0-indexed hub row    (E/W axis)
-
-                    local has_n = is_riv(wx, wy-1)
-                    local has_e = is_riv(wx+1, wy)
-                    local has_s = is_riv(wx, wy+1)
-                    local has_w = is_riv(wx-1, wy)
-
-                    -- Always mark the hub (keeps isolated/terminus tiles visible)
-                    mr(lb_x+hc+1, lb_y+hr+1)
-
-                    -- Route each connection straight to the hub
-                    if has_n then route(lb_x, lb_y, 0,  hc, hr, hc) end  -- top-edge → hub
-                    if has_s then route(lb_x, lb_y, 2,  hc, hr, hc) end  -- bottom-edge → hub
-                    if has_w then route(lb_x, lb_y, hr,  0, hr, hc) end  -- left-edge → hub
-                    if has_e then route(lb_x, lb_y, hr,  2, hr, hc) end  -- right-edge → hub
-
-                    -- Diagonal connections: rivers use D8 flow.
-                    -- Route hub to the corner sub-cell facing the diagonal neighbor.
-                    -- Both tiles touch at their corners → 8-directional connectivity.
-                    local DIAG = {{1,1},{1,-1},{-1,1},{-1,-1}}
-                    for _, dv in ipairs(DIAG) do
-                        local dx, dy = dv[1], dv[2]
-                        if is_riv(wx+dx, wy+dy)
-                           and not is_riv(wx+dx, wy)
-                           and not is_riv(wx, wy+dy)
-                        then
-                            local cr = dy == 1 and 2 or 0
-                            local cc = dx == 1 and 2 or 0
-                            route(lb_x, lb_y, hr, hc, cr, cc)
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Downtown bounding box: scan sub-cell tile grid for downtown_road / downtown_plot
-    local dt_mn_x, dt_mx_x, dt_mn_y, dt_mx_y = sub_cw + 1, 0, sub_ch + 1, 0
-    for gy = 1, sub_ch do
-        for gx = 1, sub_cw do
-            local t = grid[gy][gx].type
-            if t == "downtown_road" or t == "downtown_plot" then
-                if gx < dt_mn_x then dt_mn_x = gx end
-                if gx > dt_mx_x then dt_mx_x = gx end
-                if gy < dt_mn_y then dt_mn_y = gy end
-                if gy > dt_mx_y then dt_mx_y = gy end
-            end
-        end
-    end
-    if dt_mn_x > dt_mx_x then
-        -- Fallback: use POI position converted to sub-cell local coords
-        local poi = self.city_pois_list and self.city_pois_list[start_idx] and self.city_pois_list[start_idx][1]
-        if poi then
-            local lscx = (poi.x - city_mn_x) * 3 + 1
-            local lscy = (poi.y - city_mn_y) * 3 + 1
-            local r = 18  -- ~6 world cells * 3
-            dt_mn_x = math.max(1, lscx - r); dt_mx_x = math.min(sub_cw, lscx + r)
-            dt_mn_y = math.max(1, lscy - r); dt_mx_y = math.min(sub_ch, lscy + r)
-        else
-            dt_mn_x = 1; dt_mx_x = 30; dt_mn_y = 1; dt_mx_y = 30
-        end
-    end
-
-    local Map     = require("models.Map")
-    local new_map = Map:new(C)
-    new_map.city_grid_width      = sub_cw
-    new_map.city_grid_height     = sub_ch
-    new_map.downtown_grid_width  = math.max(1, dt_mx_x - dt_mn_x + 1)
-    new_map.downtown_grid_height = math.max(1, dt_mx_y - dt_mn_y + 1)
-    new_map.grid            = grid
-    new_map.downtown_offset = {x = dt_mn_x, y = dt_mn_y}
-    new_map.tile_pixel_size = C.MAP.TILE_SIZE / 3   -- 2/3 world px per sub-cell tile
-    new_map.building_plots  = {}  -- populated below in road-node block
-
-    -- ── Zone grid, road network, and image building ───────────────────────────
-    local ctx = {
-        sub_cw = sub_cw, sub_ch = sub_ch,
-        gscx_off = gscx_off, gscy_off = gscy_off,
-        sw = sw, w = w, start_idx = start_idx,
-        grid = grid, city_mn_x = city_mn_x, city_mn_y = city_mn_y,
-    }
-    self:_buildZoneGrid(new_map, ctx)
-    self:_buildRoadNetwork(new_map, ctx)
+    -- Build starter city: grid + zone + road network (identical pipeline to extra cities)
+    local new_map = self:_buildCityMap(start_idx, city_mn_x, city_mx_x, city_mn_y, city_mx_y, art_sci, all_claimed)
+    -- Build HUD images (world/region/continent + starter city image)
     self:_buildGameImages(game, start_idx, city_mn_x, city_mx_x, city_mn_y, city_mx_y, w, h)
-
-    -- Store district data on map for the district overlay in GameView
-    new_map.district_map    = self.city_district_maps and self.city_district_maps[start_idx]
-    new_map.district_types  = self.city_district_types and self.city_district_types[start_idx]
-    new_map.district_colors = self.city_district_colors and self.city_district_colors[start_idx]
-    new_map.district_pois   = self.city_pois_list and self.city_pois_list[start_idx]
-    new_map.zone_gscx_off   = gscx_off
-    new_map.zone_gscy_off   = gscy_off
-    new_map.zone_sw         = sw
-
-    -- Store world biome data for the biome overlay in GameView
-    new_map.world_biome_data = self.biome_data
-    new_map.world_city_mn_x  = city_mn_x
-    new_map.world_city_mn_y  = city_mn_y
-    new_map.world_city_mx_x  = city_mx_x
-    new_map.world_city_mx_y  = city_mx_y
-    new_map.world_w          = w
-
-    -- Unified city image fields (same structure as extra cities)
+    -- Attach city image produced by _buildGameImages
     new_map.city_image     = game.world_gen_city_image
     new_map.city_img_min_x = game.world_gen_city_img_min_x
     new_map.city_img_min_y = game.world_gen_city_img_min_y
     new_map.city_img_K     = game.world_gen_city_img_K
-    new_map.world_mn_x     = city_mn_x
-    new_map.world_mn_y     = city_mn_y
 
     -- Stamp onto game
     game.maps.city      = new_map
     game.active_map_key = "city"
 
+    -- Build extra city maps using the same pipeline
     game.maps.extra_cities = {}
     for ec_idx = 1, #self.city_locations do
         if ec_idx ~= start_idx then
             local ec_bounds = self.city_bounds_list[ec_idx]
             if ec_bounds then
-                local ec_mn_x, ec_mx_x = w + 1, 0
-                local ec_mn_y, ec_mx_y = h + 1, 0
+                local mn_x, mx_x = w + 1, 0
+                local mn_y, mx_y = h + 1, 0
                 for ci in pairs(ec_bounds) do
-                    local cx = (ci - 1) % w + 1
-                    local cy = math.floor((ci - 1) / w) + 1
-                    if cx < ec_mn_x then ec_mn_x = cx end
-                    if cx > ec_mx_x then ec_mx_x = cx end
-                    if cy < ec_mn_y then ec_mn_y = cy end
-                    if cy > ec_mx_y then ec_mx_y = cy end
+                    local cx = (ci-1)%w+1; local cy = math.floor((ci-1)/w)+1
+                    if cx < mn_x then mn_x = cx end; if cx > mx_x then mx_x = cx end
+                    if cy < mn_y then mn_y = cy end; if cy > mx_y then mx_y = cy end
                 end
-                if ec_mn_x <= ec_mx_x then
-                    local ec_sub_cw  = (ec_mx_x - ec_mn_x + 1) * 3
-                    local ec_sub_ch  = (ec_mx_y - ec_mn_y + 1) * 3
-                    local ec_gscx_off = (ec_mn_x - 1) * 3
-                    local ec_gscy_off = (ec_mn_y - 1) * 3
-
-                    -- Downtown sub-cells for this city
-                    local ec_dt_sci = {}
-                    local ec_dmap = self.city_district_maps and self.city_district_maps[ec_idx]
-                    if ec_dmap then
-                        for sci, poi_idx_v in pairs(ec_dmap) do
-                            if poi_idx_v == 1 then ec_dt_sci[sci] = true end
-                        end
-                    end
-                    if not next(ec_dt_sci) then
-                        local ec_poi1 = self.city_pois_list and self.city_pois_list[ec_idx]
-                                       and self.city_pois_list[ec_idx][1]
-                        if ec_poi1 then
-                            local DT_RADIUS = 6
-                            for ci in pairs(ec_bounds) do
-                                local cx = (ci - 1) % w + 1
-                                local cy = math.floor((ci - 1) / w) + 1
-                                local dx = cx - ec_poi1.x; local dy = cy - ec_poi1.y
-                                if dx*dx + dy*dy <= DT_RADIUS*DT_RADIUS then
-                                    local gscx0 = (cx - 1) * 3; local gscy0 = (cy - 1) * 3
-                                    for dy2 = 0, 2 do for dx2 = 0, 2 do
-                                        ec_dt_sci[(gscy0+dy2)*sw + (gscx0+dx2) + 1] = true
-                                    end end
-                                end
-                            end
-                        end
-                    end
-
-                    -- Build tile grid at sub-cell resolution
-                    local ec_grid = {}
-                    for lscy = 0, ec_sub_ch - 1 do
-                        ec_grid[lscy + 1] = {}
-                        local wcy  = ec_mn_y + math.floor(lscy / 3)
-                        local gscy = ec_gscy_off + lscy
-                        for lscx = 0, ec_sub_cw - 1 do
-                            local wcx  = ec_mn_x + math.floor(lscx / 3)
-                            local gscx = ec_gscx_off + lscx
-                            local ci   = (wcy - 1) * w + wcx
-                            local sci  = gscy * sw + gscx + 1
-                            local tile
-                            if art_sci[sci] then
-                                tile = (self.highway_map and self.highway_map[ci]) and "highway" or "arterial"
-                            elseif all_claimed[ci] then
-                                tile = ec_dt_sci[sci] and "downtown_plot" or "plot"
-                            else
-                                local elev = (self.heightmap and self.heightmap[wcy] and self.heightmap[wcy][wcx]) or 0.5
-                                if     elev <= (p.ocean_max    or 0.42) then tile = "water"
-                                elseif elev >= (p.highland_max or 0.80) then tile = "mountain"
-                                else                                          tile = "grass" end
-                            end
-                            ec_grid[lscy + 1][lscx + 1] = {type = tile}
-                        end
-                    end
-
-                    -- River injection
-                    do
-                        local bdata2 = self.biome_data or {}
-                        local _CH = {0, 2, 1, 2, 0, 1, 2}
-                        local _RH = {1, 0, 2, 0, 2, 1, 0}
-                        local function hc2(wx2) return _CH[wx2 % 7 + 1] end
-                        local function hr2(wy2) return _RH[wy2 % 7 + 1] end
-                        local function mr2(gx, gy)
-                            if gx < 1 or gx > ec_sub_cw or gy < 1 or gy > ec_sub_ch then return end
-                            local t = ec_grid[gy][gx].type
-                            if t ~= "arterial" and t ~= "highway" then ec_grid[gy][gx] = {type = "river"} end
-                        end
-                        local function route2(lbx, lby, r1, c1, r2, c2)
-                            local r, c = r1, c1; mr2(lbx+c+1, lby+r+1)
-                            while r ~= r2 do r = r+(r2>r and 1 or -1); mr2(lbx+c+1, lby+r+1) end
-                            while c ~= c2 do c = c+(c2>c and 1 or -1); mr2(lbx+c+1, lby+r+1) end
-                        end
-                        local function is_riv2(wx2, wy2)
-                            if wx2 < 1 or wx2 > w or wy2 < 1 or wy2 > h then return false end
-                            local bd2 = bdata2[(wy2-1)*w+wx2]; return bd2 and bd2.is_river
-                        end
-                        for wy = ec_mn_y, ec_mx_y do
-                            for wx = ec_mn_x, ec_mx_x do
-                                local bd = bdata2[(wy-1)*w+wx]
-                                if bd and bd.is_river then
-                                    local lbx = (wx-ec_mn_x)*3; local lby = (wy-ec_mn_y)*3
-                                    local hc = hc2(wx); local hr = hr2(wy)
-                                    mr2(lbx+hc+1, lby+hr+1)
-                                    if is_riv2(wx,wy-1) then route2(lbx,lby,0,hc,hr,hc) end
-                                    if is_riv2(wx,wy+1) then route2(lbx,lby,2,hc,hr,hc) end
-                                    if is_riv2(wx-1,wy) then route2(lbx,lby,hr,0,hr,hc) end
-                                    if is_riv2(wx+1,wy) then route2(lbx,lby,hr,2,hr,hc) end
-                                    for _, dv in ipairs({{1,1},{1,-1},{-1,1},{-1,-1}}) do
-                                        local ddx, ddy = dv[1], dv[2]
-                                        if is_riv2(wx+ddx,wy+ddy) and not is_riv2(wx+ddx,wy) and not is_riv2(wx,wy+ddy) then
-                                            route2(lbx,lby,hr,hc, ddy==1 and 2 or 0, ddx==1 and 2 or 0)
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-
-                    -- Scan ec_grid for downtown_plot bounds (same as main city scan)
-                    local ec_dt_mn_x, ec_dt_mx_x = ec_sub_cw + 1, 0
-                    local ec_dt_mn_y, ec_dt_mx_y = ec_sub_ch + 1, 0
-                    for gy2 = 1, ec_sub_ch do
-                        for gx2 = 1, ec_sub_cw do
-                            local t2 = ec_grid[gy2][gx2].type
-                            if t2 == "downtown_road" or t2 == "downtown_plot" then
-                                if gx2 < ec_dt_mn_x then ec_dt_mn_x = gx2 end
-                                if gx2 > ec_dt_mx_x then ec_dt_mx_x = gx2 end
-                                if gy2 < ec_dt_mn_y then ec_dt_mn_y = gy2 end
-                                if gy2 > ec_dt_mx_y then ec_dt_mx_y = gy2 end
-                            end
-                        end
-                    end
-                    if ec_dt_mn_x > ec_dt_mx_x then
-                        ec_dt_mn_x = 1; ec_dt_mx_x = 1; ec_dt_mn_y = 1; ec_dt_mx_y = 1
-                    end
-
-                    -- Create Map object
-                    local ec_map = Map:new(C)
-                    ec_map.city_grid_width      = ec_sub_cw
-                    ec_map.city_grid_height     = ec_sub_ch
-                    ec_map.downtown_grid_width  = math.max(1, ec_dt_mx_x - ec_dt_mn_x + 1)
-                    ec_map.downtown_grid_height = math.max(1, ec_dt_mx_y - ec_dt_mn_y + 1)
-                    ec_map.grid            = ec_grid
-                    ec_map.downtown_offset = {x = ec_dt_mn_x, y = ec_dt_mn_y}
-                    ec_map.tile_pixel_size = C.MAP.TILE_SIZE / 3
-                    ec_map.building_plots  = {}
-
-                    local ec_ctx = {
-                        sub_cw = ec_sub_cw, sub_ch = ec_sub_ch,
-                        gscx_off = ec_gscx_off, gscy_off = ec_gscy_off,
-                        sw = sw, w = w, start_idx = ec_idx,
-                        grid = ec_grid, city_mn_x = ec_mn_x, city_mn_y = ec_mn_y,
-                    }
-                    self:_buildZoneGrid(ec_map, ec_ctx)
-
-                    -- Build city images directly (same calls _buildGameImages makes internally,
-                    -- but stored straight onto ec_map — no game.* routing that could get clobbered)
-                    local ec_city_mode = (self.city_district_maps and self.city_district_maps[ec_idx])
-                                         and "districts"
-                                         or  (self.biome_colormap and "biome" or "height")
-                    local ec_cox1 = math.max(1, ec_mn_x - 2); local ec_cox2 = math.min(w, ec_mx_x + 2)
-                    local ec_coy1 = math.max(1, ec_mn_y - 2); local ec_coy2 = math.min(h, ec_mx_y + 2)
+                if mn_x <= mx_x then
+                    local ec_map = self:_buildCityMap(ec_idx, mn_x, mx_x, mn_y, mx_y, art_sci, all_claimed)
+                    -- Build city image
                     local sv_mode  = self.view_mode
                     local sv_scope = self.view_scope
-                    self.view_mode  = ec_city_mode
-                    self.view_scope = sv_scope
-                    self:_buildCityImage(ec_idx, ec_cox1, ec_cox2, ec_coy1, ec_coy2)
+                    self.view_mode = (self.city_district_maps and self.city_district_maps[ec_idx])
+                                      and "districts"
+                                      or  (self.biome_colormap and "biome" or "height")
+                    local cox1 = math.max(1, mn_x-2); local cox2 = math.min(w, mx_x+2)
+                    local coy1 = math.max(1, mn_y-2); local coy2 = math.min(h, mx_y+2)
+                    self:_buildCityImage(ec_idx, cox1, cox2, coy1, coy2)
                     ec_map.city_image     = self.city_image
                     ec_map.city_img_min_x = self.city_img_min_x
                     ec_map.city_img_min_y = self.city_img_min_y
                     ec_map.city_img_K     = self.city_img_K
                     self.view_mode  = sv_mode
-
-                    self:_buildRoadNetwork(ec_map, ec_ctx)
-
-                    ec_map.district_map    = self.city_district_maps  and self.city_district_maps[ec_idx]
-                    ec_map.district_types  = self.city_district_types and self.city_district_types[ec_idx]
-                    ec_map.district_colors = self.city_district_colors and self.city_district_colors[ec_idx]
-                    ec_map.district_pois   = self.city_pois_list and self.city_pois_list[ec_idx]
-                    ec_map.zone_gscx_off   = ec_gscx_off
-                    ec_map.zone_gscy_off   = ec_gscy_off
-                    ec_map.zone_sw         = sw
-                    ec_map.world_biome_data = self.biome_data
-                    ec_map.world_city_mn_x  = ec_mn_x
-                    ec_map.world_city_mn_y  = ec_mn_y
-                    ec_map.world_city_mx_x  = ec_mx_x
-                    ec_map.world_city_mx_y  = ec_mx_y
-                    ec_map.world_w          = w
-                    ec_map.world_mn_x       = ec_mn_x
-                    ec_map.world_mn_y       = ec_mn_y
-
+                    self.view_scope = sv_scope
                     game.maps.extra_cities[#game.maps.extra_cities + 1] = ec_map
                 end
             end
