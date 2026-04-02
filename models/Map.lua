@@ -112,24 +112,6 @@ function Map:setScale(new_scale, game)
     return true
 end
 
-function Map:update(dt, game)
-    if self.transition_state.active then
-        self.transition_state.timer = self.transition_state.timer + dt
-        self.transition_state.progress = self.transition_state.timer / self.transition_state.duration
-
-        if self.transition_state.progress >= 1.0 then
-            self.transition_state.active = false
-            self.transition_state.progress = 1.0
-            self.current_scale = self.transition_state.to_scale
-
-            if game and game.EventBus then
-                game.EventBus:publish("map_scale_changed")
-            end
-
-            print("Transition complete - now at", self.C.MAP.SCALE_NAMES[self.current_scale])
-        end
-    end
-end
 
 function Map:draw()
     self:drawGrid(self.grid, 1)

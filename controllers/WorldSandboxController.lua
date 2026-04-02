@@ -857,19 +857,28 @@ function WorldSandboxController:_buildGameImages(game, start_idx, city_mn_x, cit
     end
 
     local function buildWorldImg(scope, cid, rid)
-        local sv_scope = self.view_scope
-        local sv_cid   = self.selected_continent_id
-        local sv_rid   = self.selected_region_id
-        local sv_mode  = self.view_mode
+        local sv_scope  = self.view_scope
+        local sv_cid    = self.selected_continent_id
+        local sv_rid    = self.selected_region_id
+        local sv_mode   = self.view_mode
+        local sv_bounds = self.city_bounds
+        local sv_border = self.city_border
+        local sv_fringe = self.city_fringe
         self.view_scope = scope
         self.selected_continent_id = cid
         self.selected_region_id    = rid
         self.view_mode = self.biome_colormap and "biome" or "height"
+        self.city_bounds = nil
+        self.city_border = nil
+        self.city_fringe = nil
         self:_buildImage()
         self.view_scope = sv_scope
         self.selected_continent_id = sv_cid
         self.selected_region_id    = sv_rid
-        self.view_mode = sv_mode
+        self.view_mode  = sv_mode
+        self.city_bounds = sv_bounds
+        self.city_border = sv_border
+        self.city_fringe = sv_fringe
         return self.world_image
     end
 
@@ -1390,6 +1399,11 @@ function WorldSandboxController:sendToGame()
     for _ = 1, num_clients do
         game.entities:addClient(game)
     end
+
+    -- Persist city markers for game-view world map rendering
+    game.world_city_locations = self.city_locations
+    game.world_w              = self.world_w
+    game.world_h              = self.world_h
 
     -- Zoom to downtown and close sandbox
     local ok, err = pcall(function()

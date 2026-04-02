@@ -8,6 +8,11 @@ function InputController:new(game)
     instance.game = game
     local UIController = require("controllers.UIController")
     instance.ui_controller = UIController:new(game)
+    -- Drag-pan state
+    instance._drag_active   = false
+    instance._drag_panning  = false
+    instance._drag_sx       = 0
+    instance._drag_sy       = 0
     return instance
 end
 
@@ -77,8 +82,31 @@ function InputController:textinput(text)
 end
 
 function InputController:mousewheelmoved(x, y)
-    if self.game.ui_manager and self.game.ui_manager.handle_scroll then
-        self.game.ui_manager:handle_scroll(y)
+    local mx, my = love.mouse.getPosition()
+    -- Sidebar: pass vertical scroll to UI manager
+    if mx < self.game.C.UI.SIDEBAR_WIDTH then
+        if self.game.ui_manager and self.game.ui_manager.handle_scroll then
+            self.game.ui_manager:handle_scroll(y)
+        end
+        return
+    end
+    -- World area: zoom toward cursor
+    if y ~= 0 then
+        local cam    = self.game.camera
+        local Z      = self.game.C.ZOOM
+        local factor = y > 0 and Z.SCROLL_FACTOR or (1 / Z.SCROLL_FACTOR)
+        local sw     = self.game.C.UI.SIDEBAR_WIDTH
+        local vw     = love.graphics.getWidth() - sw
+        local vh     = love.graphics.getHeight()
+        -- World position under cursor before zoom
+        local wx = (mx - (sw + vw / 2)) / cam.scale + cam.x
+        local wy = (my - vh / 2)        / cam.scale + cam.y
+        -- Apply zoom, clamped
+        local new_scale = math.max(Z.MIN_SCALE, math.min(Z.MAX_SCALE, cam.scale * factor))
+        cam.scale = new_scale
+        -- Adjust so cursor stays on same world point
+        cam.x = wx - (mx - (sw + vw / 2)) / new_scale
+        cam.y = wy - (my - vh / 2)        / new_scale
     end
 end
 
@@ -89,16 +117,14 @@ function InputController:mousepressed(x, y, button)
         return
     end
 
-    if Game.zoom_controls and Game.zoom_controls.handle_click then
-        if Game.zoom_controls:handle_click(x, y, Game) then
-            return
-        end
-    end
-
     if button == 1 then
         local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
         if x >= sidebar_w then
-            self:handleGameWorldClick(x, y)
+            -- Record drag start; don't fire click yet
+            self._drag_active  = true
+            self._drag_panning = false
+            self._drag_sx      = x
+            self._drag_sy      = y
         end
     end
 end
@@ -107,9 +133,27 @@ function InputController:mousereleased(x, y, button)
     if self.game.ui_manager and self.game.ui_manager.handle_mouse_up then
         self.game.ui_manager:handle_mouse_up(x, y, button)
     end
+    if button == 1 and self._drag_active then
+        if not self._drag_panning then
+            -- Short click: fire world click at original press position
+            self:handleGameWorldClick(self._drag_sx, self._drag_sy)
+        end
+        self._drag_active  = false
+        self._drag_panning = false
+    end
 end
 
 function InputController:mousemoved(x, y, dx, dy)
+    if not self._drag_active then return end
+    local total_dist = math.abs(x - self._drag_sx) + math.abs(y - self._drag_sy)
+    if not self._drag_panning and total_dist > 5 then
+        self._drag_panning = true
+    end
+    if self._drag_panning then
+        local cam = self.game.camera
+        cam.x = cam.x - dx / cam.scale
+        cam.y = cam.y - dy / cam.scale
+    end
 end
 
 function InputController:handleGameWorldClick(x, y)

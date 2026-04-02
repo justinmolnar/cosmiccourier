@@ -1,5 +1,4 @@
 -- services/EventService.lua
-local MapScales = require("data.map_scales")
 local TripEligibilityService = require("services.TripEligibilityService")
 local FloatingTextSystem = require("services.FloatingTextSystem")
 local EventService = {}
@@ -10,7 +9,7 @@ function EventService.setupGameEvents(state, game)
     EventService.setupUIEvents(state, game)
     EventService.setupUpgradeEvents(state, game)
     EventService.setupVehicleEvents(state, game)
-    EventService.setupZoomEvents(state, game)
+    EventService.setupCameraEvents(state, game)
 end
 
 function EventService.setupDeliveryEvents(state, game)
@@ -101,29 +100,8 @@ function EventService.setupVehicleEvents(state, game)
     end)
 end
 
-function EventService.setupZoomEvents(state, game)
-    game.EventBus:subscribe("ui_purchase_metro_license_clicked", function()
-        local cost = game.C.ZOOM.METRO_LICENSE_COST
-        if state.money >= cost and not state.metro_license_unlocked then
-            state.money = state.money - cost
-            state.metro_license_unlocked = true
-            print("Metropolitan Expansion License purchased! City-scale operations unlocked.")
-        end
-    end)
-
-    game.EventBus:subscribe("ui_zoom_out_clicked", function()
-        local next = MapScales.getNext(game.state.current_map_scale, "out")
-        if next then game.maps.city:setScale(next, game) end
-    end)
-
-    game.EventBus:subscribe("ui_zoom_in_clicked", function()
-        local next = MapScales.getNext(game.state.current_map_scale, "in")
-        if next then game.maps.city:setScale(next, game) end
-    end)
-
-    -- Apply camera position and active map key when a scale change is committed.
-    -- Payload is only present when setScale() fires the event; transition-complete
-    -- fires without payload (camera is already in place) so we nil-guard.
+function EventService.setupCameraEvents(state, game)
+    -- Apply camera position and active map key when setScale() fires (e.g. sendToGame).
     game.EventBus:subscribe("map_scale_changed", function(data)
         if data then
             game.active_map_key = data.active_map_key

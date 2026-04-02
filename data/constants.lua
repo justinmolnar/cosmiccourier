@@ -87,13 +87,25 @@ local C = {
     },
 
     ZOOM = {
-        BUTTONS_APPEAR_THRESHOLD = 25000,
-        PRICE_REVEAL_THRESHOLD   = 45000,
+        -- Kept for save-data compatibility (not used at runtime):
         METRO_LICENSE_COST       = 50000,
         ZOOM_BUTTON_SIZE         = 30,
         ZOOM_BUTTON_MARGIN       = 10,
         TRANSITION_DURATION      = 0.8,
-        ZOOM_SCALE_FACTOR        = 3.0,
+
+        -- Continuous zoom range:
+        MIN_SCALE                = 1.0,
+        MAX_SCALE                = 400.0,
+        SCROLL_FACTOR            = 1.15,
+
+        -- Detail-level thresholds (camera.scale values):
+        ARTERIAL_THRESHOLD       = 3.0,
+        ZONE_THRESHOLD           = 6.0,
+        ENTITY_THRESHOLD         = 4.0,
+        BIKE_THRESHOLD           = 8.0,
+        FOG_THRESHOLD            = 8.0,
+        CITY_IMAGE_THRESHOLD     = 1.5,
+        DOWNTOWN_IMG_THRESHOLD   = 20.0,
     },
 
     VEHICLES = {

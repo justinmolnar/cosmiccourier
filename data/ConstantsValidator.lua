@@ -113,10 +113,11 @@ function ConstantsValidator._validateZoom(constants, errors)
         return
     end
     
-    ConstantsValidator._validateNumber(zoom, "BUTTONS_APPEAR_THRESHOLD", errors, 1000, 1000000)
     ConstantsValidator._validateNumber(zoom, "METRO_LICENSE_COST", errors, 1000, 1000000)
     ConstantsValidator._validateNumber(zoom, "ZOOM_BUTTON_SIZE", errors, 15, 100)
     ConstantsValidator._validateNumber(zoom, "TRANSITION_DURATION", errors, 0.1, 5.0)
+    ConstantsValidator._validateNumber(zoom, "MIN_SCALE", errors, 0.1, 10)
+    ConstantsValidator._validateNumber(zoom, "MAX_SCALE", errors, 10, 10000)
 end
 
 function ConstantsValidator._validateCosts(constants, errors)

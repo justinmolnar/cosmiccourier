@@ -222,7 +222,7 @@ function love.draw()
 end
 
 function love.keypressed(key)          Game.input_dispatcher:dispatch("keypressed", key) end
-function love.mousewheelmoved(x, y)    Game.input_dispatcher:dispatch("mousewheelmoved", x, y) end
+function love.wheelmoved(x, y)         Game.input_dispatcher:dispatch("mousewheelmoved", x, y) end
 function love.mousepressed(x, y, b)    Game.input_dispatcher:dispatch("mousepressed", x, y, b) end
 function love.mousereleased(x, y, b)   Game.input_dispatcher:dispatch("mousereleased", x, y, b) end
 function love.mousemoved(x, y, dx, dy) Game.input_dispatcher:dispatch("mousemoved", x, y, dx, dy) end

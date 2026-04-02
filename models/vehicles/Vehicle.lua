@@ -90,15 +90,15 @@ function Vehicle:_getRegionDrawPosition(game)
 end
 
 
-function Vehicle:shouldDrawAtCurrentScale(game)
-    local current_scale = game.state.current_map_scale
-    local S = game.C.MAP.SCALES
-    local scale_keys = { [S.DOWNTOWN]="downtown", [S.CITY]="city", [S.REGION]="region", [S.CONTINENT]="continent", [S.WORLD]="world" }
+function Vehicle:shouldDrawAtCameraScale(game)
+    local s    = game.camera.scale
+    local Z    = game.C.ZOOM
     local vcfg = game.C.VEHICLES[self.type:upper()]
-    if vcfg then
-        return vcfg.visible_at_scales[scale_keys[current_scale]] == true
+    if not vcfg then return true end
+    if vcfg.downtown_only_sim then   -- bikes
+        return s >= Z.BIKE_THRESHOLD
     end
-    return true
+    return s >= Z.ENTITY_THRESHOLD   -- trucks
 end
 
 function Vehicle:changeState(newState, game)
@@ -266,11 +266,8 @@ function Vehicle:shouldUseAbstractedSimulation(game)
     if self.path and #self.path > 0 then return false end
     if self.smooth_path and #self.smooth_path > 0 then return false end
 
-    local current_scale = game.state.current_map_scale
-    local C_MAP = game.C.MAP
-
     local vcfg = game.C.VEHICLES[self.type:upper()]
-    if vcfg and vcfg.downtown_only_sim and current_scale ~= C_MAP.SCALES.DOWNTOWN then
+    if vcfg and vcfg.downtown_only_sim and game.camera.scale < game.C.ZOOM.BIKE_THRESHOLD then
         return true
     end
 
@@ -350,7 +347,7 @@ function Vehicle:drawDebug(game)
 end
 
 function Vehicle:draw(game)
-    if not self:shouldDrawAtCurrentScale(game) then return end
+    if not self:shouldDrawAtCameraScale(game) then return end
     if not self.visible then return end
 
     local draw_px, draw_py

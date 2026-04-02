@@ -106,9 +106,7 @@ end
 
 function UIManager:_calculateAccordionStats(game)
     local state = game.state
-    -- MODIFIED: Read scale from the global game state
-    local current_scale = game.state.current_map_scale
-    local is_downtown = (current_scale == game.C.MAP.SCALES.DOWNTOWN)
+    local is_downtown = (game.camera.scale >= game.C.ZOOM.FOG_THRESHOLD)
 
     local core_trips, city_trips = 0, 0
     for _, trip in ipairs(game.entities.trips.pending) do

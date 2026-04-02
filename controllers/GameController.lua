@@ -52,13 +52,6 @@ function GameController:update(dt)
         self.game.time:update(scaled_dt, self.game)
     end, "Time System Update")
     
-    -- MODIFIED: Update the active map
-    self.game.error_service.withErrorHandling(function()
-        local active_map = self.game.maps[self.game.active_map_key]
-        if active_map then
-            active_map:update(scaled_dt, self.game)
-        end
-    end, "Map Update")
     
     self.game.error_service.withErrorHandling(function()
         self.game.entities:update(scaled_dt, self.game)
