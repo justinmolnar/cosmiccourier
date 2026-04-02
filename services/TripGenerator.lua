@@ -65,49 +65,42 @@ function TripGenerator.generateTrip(client_plot, game)
     return creator(client_plot, base_payout, speed_bonus, game)
 end
 
+local function toUnified(plot, cmap)
+    return { x = (cmap.world_mn_x - 1) * 3 + plot.x, y = (cmap.world_mn_y - 1) * 3 + plot.y }
+end
+
 function TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus, game)
-    print("DEBUG: Creating downtown trip")
-    
-    local end_plot = game.maps.city:getRandomDowntownBuildingPlot()
-    if not end_plot or end_plot == client_plot then
-        print("DEBUG: Downtown trip failed - no valid destination, trying again next time.")
-        return nil
-    end
-    
-    print(string.format("DEBUG: Downtown trip: bike (%d,%d) -> (%d,%d)", 
-          client_plot.x, client_plot.y, end_plot.x, end_plot.y))
-    
+    local cmap = game.maps.city
+    local end_plot_local = cmap:getRandomDowntownBuildingPlot()
+    if not end_plot_local then return nil end
+    local end_plot = toUnified(end_plot_local, cmap)
+    if end_plot.x == client_plot.x and end_plot.y == client_plot.y then return nil end
+
     local new_trip = Trip:new(base_payout, speed_bonus)
     new_trip:addLeg(client_plot, end_plot, "bike")
-    
     return new_trip
 end
 
 function TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, game)
-    print("DEBUG: Creating city trip")
     local C_GAMEPLAY = game.C.GAMEPLAY
+    local cmap = game.maps.city
 
-    local start_plot = game.maps.city:getRandomDowntownBuildingPlot()
-    local destination_plot = game.maps.city:getRandomCityBuildingPlot()
-    
-    if not start_plot or not destination_plot or not game.entities.depot_plot then
-        print("DEBUG: City trip creation failed - missing plots.")
+    local start_plot_local = cmap:getRandomDowntownBuildingPlot()
+    local dest_plot_local  = cmap:getRandomCityBuildingPlot()
+
+    if not start_plot_local or not dest_plot_local or not game.entities.depot_plot then
         return nil
     end
 
-    -- Increase payout for a longer trip
     base_payout = base_payout * C_GAMEPLAY.CITY_TRIP_PAYOUT_MULTIPLIER
     speed_bonus = speed_bonus * C_GAMEPLAY.CITY_TRIP_BONUS_MULTIPLIER
 
+    local start_plot = toUnified(start_plot_local, cmap)
+    local dest_plot  = toUnified(dest_plot_local,  cmap)
+
     local new_trip = Trip:new(base_payout, speed_bonus)
-    new_trip.is_long_distance = false -- Explicitly not long distance
-    
-    -- Leg 1: Bike from client to depot
     new_trip:addLeg(start_plot, game.entities.depot_plot, "bike")
-    -- Leg 2: Truck from depot to city destination
-    new_trip:addLeg(game.entities.depot_plot, destination_plot, "truck")
-    
-    print("DEBUG: City trip created (Bike -> Depot -> Truck)")
+    new_trip:addLeg(game.entities.depot_plot, dest_plot, "truck")
     return new_trip
 end
 

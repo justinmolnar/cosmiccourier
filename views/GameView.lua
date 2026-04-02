@@ -583,35 +583,11 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         end
     end  -- CITY_IMAGE_THRESHOLD
 
-    -- LAYER: Entities (tiled so every copy is fully populated)
+    -- LAYER: City-local debug overlays (building plots, road nodes — use city translate)
     for i = tile_i0, tile_i1 do
     if active_map.world_mn_x and not cityInView(active_map, i * mpw) then goto continue_entities end
     love.graphics.push()
     love.graphics.translate(i * mpw + ox, oy)
-
-    -- Depot + clients: only once city circles are gone
-    if cs >= Z.ZONE_THRESHOLD then
-        if Game.entities.depot_plot then
-            local dp = Game.entities.depot_plot
-            local dpx, dpy = active_map:getPixelCoords(dp.x, dp.y)
-            DrawingUtils.drawWorldIcon(Game, "🏢", dpx, dpy)
-        end
-        for _, client in ipairs(Game.entities.clients) do
-            DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
-        end
-    end
-    for _, v in ipairs(Game.entities.vehicles) do
-        if v.visible and v:shouldDrawAtCameraScale(Game) then v:draw(Game) end
-    end
-    -- Event spawner: always
-    if Game.event_spawner and Game.event_spawner.clickable then
-        DrawingUtils.drawWorldIcon(Game, "☎️", Game.event_spawner.clickable.x, Game.event_spawner.clickable.y)
-    end
-    if Game.debug_mode then
-        for _, vehicle in ipairs(Game.entities.vehicles) do
-            if vehicle.visible then vehicle:drawDebug(Game) end
-        end
-    end
 
     -- [B] Building plots debug overlay
     if Game.debug_building_plots and active_map.building_plots then
@@ -654,85 +630,123 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         end
     end
 
-    -- [P] Client/pickup overlay
-    if Game.debug_pickup_locations then
-        local r = tps * 0.3
-        for _, client in ipairs(Game.entities.clients) do
-            love.graphics.setColor(1, 0.5, 0, 0.8)
-            love.graphics.circle("fill", client.px, client.py, r)
-            if active_map.road_nodes then
-                local gx, gy = client.plot.x, client.plot.y
-                for _, c in ipairs({{gx-1,gy-1},{gx,gy-1},{gx-1,gy},{gx,gy}}) do
-                    local rx, ry = c[1], c[2]
-                    if active_map.road_nodes[ry] and active_map.road_nodes[ry][rx] then
-                        love.graphics.setColor(0, 1, 0, 0.9)
-                        love.graphics.circle("fill", rx*tps, ry*tps, tps*0.2)
-                    end
+    love.graphics.pop()  -- city translate pop
+    ::continue_entities::
+    end  -- end debug overlay tile loop
+    love.graphics.setColor(1, 1, 1)
+
+    -- LAYER: Entities — depot, clients, vehicles (unified world pixels, tiled)
+    local umap = Game.maps.unified
+    local uts  = umap and umap.tile_pixel_size or (ts / 3)
+    for i = tile_i0, tile_i1 do
+        love.graphics.push()
+        love.graphics.translate(i * mpw, 0)
+
+        -- Depot
+        if cs >= Z.ZONE_THRESHOLD and Game.entities.depot_plot then
+            local dp = Game.entities.depot_plot
+            DrawingUtils.drawWorldIcon(Game, "🏢", (dp.x - 0.5) * uts, (dp.y - 0.5) * uts)
+        end
+
+        -- Clients
+        if cs >= Z.ZONE_THRESHOLD then
+            for _, client in ipairs(Game.entities.clients) do
+                DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
+            end
+        end
+
+        -- [P] Client/pickup overlay
+        if Game.debug_pickup_locations and umap then
+            local r = uts * 0.3
+            for _, client in ipairs(Game.entities.clients) do
+                love.graphics.setColor(1, 0.5, 0, 0.8)
+                love.graphics.circle("fill", client.px, client.py, r)
+            end
+            love.graphics.setColor(0, 1, 1, 0.8)
+            local r2 = uts * 0.2
+            for _, trip in ipairs(Game.entities.trips.pending) do
+                local leg = trip.legs and trip.legs[trip.current_leg]
+                if leg and leg.start_plot then
+                    love.graphics.circle("fill", (leg.start_plot.x - 0.5) * uts, (leg.start_plot.y - 0.5) * uts, r2)
                 end
             end
         end
-        love.graphics.setColor(0, 1, 1, 0.8)
-        local r2 = tps * 0.2
-        for _, trip in ipairs(Game.entities.trips.pending) do
-            local leg = trip.legs and trip.legs[trip.current_leg]
-            if leg and leg.start_plot then
-                local spx, spy = active_map:getPixelCoords(leg.start_plot.x, leg.start_plot.y)
-                love.graphics.circle("fill", spx, spy, r2)
+
+        -- Event spawner
+        if Game.event_spawner and Game.event_spawner.clickable then
+            DrawingUtils.drawWorldIcon(Game, "☎️", Game.event_spawner.clickable.x, Game.event_spawner.clickable.y)
+        end
+
+        -- Vehicles
+        for _, v in ipairs(Game.entities.vehicles) do
+            if v.visible and v:shouldDrawAtCameraScale(Game) then v:draw(Game) end
+        end
+
+        -- Debug vehicle overlay
+        if Game.debug_mode then
+            for _, vehicle in ipairs(Game.entities.vehicles) do
+                if vehicle.visible then vehicle:drawDebug(Game) end
             end
         end
+
+        love.graphics.pop()
     end
 
-    -- Trip route preview on hover
-    if ui_manager.hovered_trip_index then
-        local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
-        if trip and trip.legs[trip.current_leg] then
-            local leg = trip.legs[trip.current_leg]
-            local is_rn = active_map.road_v_rxs ~= nil
-            local start_node = is_rn and active_map:findNearestRoadNode(leg.start_plot)
-                                       or active_map:findNearestRoadTile(leg.start_plot)
-            local end_node   = is_rn and active_map:findNearestRoadNode(leg.end_plot)
-                                       or active_map:findNearestRoadTile(leg.end_plot)
-            if start_node and end_node and active_map.grid then
-                local vp = (leg.vehicleType == "bike") and Game.C.VEHICLES.BIKE or Game.C.VEHICLES.TRUCK
-                local cost_fn
-                if is_rn then
-                    cost_fn = function(rx, ry)
-                        local tile = active_map.grid[ry+1] and active_map.grid[ry+1][rx+1]
-                        return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
-                    end
-                else
-                    cost_fn = function(x, y)
-                        local tile = active_map.grid[y] and active_map.grid[y][x]
-                        return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
-                    end
-                end
-                local path = Game.pathfinder.findPath(active_map.grid, start_node, end_node, cost_fn, active_map)
+    -- LAYER: Trip preview (unified pathfinding, cached per trip)
+    if ui_manager.hovered_trip_index and umap then
+        local htrip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
+        local leg   = htrip and htrip.legs and htrip.legs[htrip.current_leg]
+        if leg then
+            local cache = Game._trip_preview_cache
+            if not cache or cache.trip ~= htrip then
+                Game._trip_preview_cache = nil
+                local vtype = ((leg.vehicleType or "truck"):upper())
+                local vp = Game.C.VEHICLES[vtype] or Game.C.VEHICLES.TRUCK
+                local mock = {
+                    operational_map_key = "unified",
+                    grid_anchor         = leg.start_plot,
+                    pathfinding_bounds  = nil,
+                    type                = leg.vehicleType or "truck",
+                    id                  = 0,
+                    getMovementCostFor  = function(self, t) return vp.pathfinding_costs[t] or 9999 end,
+                    getSpeed            = function(self) return vp.speed end,
+                }
+                local PathfindingService = require("services.PathfindingService")
+                local path = PathfindingService.findVehiclePath(mock, leg.start_plot, leg.end_plot, Game)
                 if path and #path >= 2 then
                     local pixel_path = {}
                     for _, node in ipairs(path) do
-                        local px, py
-                        if is_rn then
-                            if node.is_tile then px, py = (node.x+0.5)*tps, (node.y+0.5)*tps
-                            else               px, py = node.x*tps, node.y*tps end
-                        else
-                            px, py = active_map:getPixelCoords(node.x, node.y)
-                        end
-                        table.insert(pixel_path, px); table.insert(pixel_path, py)
+                        table.insert(pixel_path, (node.x - 0.5) * uts)
+                        table.insert(pixel_path, (node.y - 0.5) * uts)
                     end
+                    local PathUtils = require("lib.path_utils")
+                    local smoothed  = PathUtils.chaikin(pixel_path, 3)
+                    if #smoothed >= 4 then
+                        Game._trip_preview_cache = {trip = htrip, pts = smoothed}
+                    end
+                end
+            end
+            local cache2 = Game._trip_preview_cache
+            if cache2 and cache2.pts then
+                local pts = cache2.pts
+                for i = tile_i0, tile_i1 do
+                    love.graphics.push()
+                    love.graphics.translate(i * mpw, 0)
                     love.graphics.setColor(0.2, 0.8, 1, 0.85)
                     love.graphics.setLineWidth(3 / cs)
-                    love.graphics.line(pixel_path)
+                    love.graphics.setLineJoin("bevel")
+                    love.graphics.line(pts)
+                    local cr = 5 / cs
+                    love.graphics.setColor(0.2, 0.8, 1, 1)
+                    love.graphics.circle("fill", pts[1], pts[2], cr)
+                    love.graphics.circle("fill", pts[#pts-1], pts[#pts], cr)
                     love.graphics.setLineWidth(1)
+                    love.graphics.setLineJoin("miter")
+                    love.graphics.pop()
                 end
             end
         end
     end
-
-    love.graphics.pop()  -- city translate pop
-    ::continue_entities::
-    end  -- end tile loop
-    love.graphics.setColor(1, 1, 1)
-
 
     love.graphics.pop()  -- camera transform pop
 end

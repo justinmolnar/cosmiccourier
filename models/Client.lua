@@ -6,9 +6,14 @@ Client.__index = Client
 
 function Client:new(plot, game)
     local instance = setmetatable({}, Client)
-    instance.plot = plot
-    instance.px, instance.py = game.maps.city:getPixelCoords(plot.x, plot.y)
-    instance.trip_timer = love.math.random(5, 10) -- Time until next trip
+    instance.plot = plot  -- unified sub-cell coords
+    local umap = game.maps and game.maps.unified
+    if umap then
+        instance.px, instance.py = umap:getPixelCoords(plot.x, plot.y)
+    else
+        instance.px, instance.py = game.maps.city:getPixelCoords(plot.x, plot.y)
+    end
+    instance.trip_timer = love.math.random(5, 10)
     return instance
 end
 
@@ -30,9 +35,9 @@ end
 -- REMOVED THE DRAW FUNCTION FROM HERE
 
 function Client:recalculatePixelPosition(game)
-    local active_map = game.maps[game.active_map_key]
-    if active_map then
-        self.px, self.py = active_map:getPixelCoords(self.plot.x, self.plot.y)
+    local umap = game.maps and game.maps.unified
+    if umap then
+        self.px, self.py = umap:getPixelCoords(self.plot.x, self.plot.y)
     end
 end
 

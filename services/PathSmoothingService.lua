@@ -18,11 +18,7 @@ function PathSmoothingService.buildSmoothPath(vehicle, game)
     local tps = map.tile_pixel_size or game.C.MAP.TILE_SIZE
 
     local function nodePixels(node)
-        if map.road_v_rxs then
-            return node.x * tps, node.y * tps
-        else
-            return map:getPixelCoords(node.x, node.y)
-        end
+        return map:getPixelCoords(node.x, node.y)
     end
 
     local smooth = {}

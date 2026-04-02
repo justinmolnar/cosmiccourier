@@ -1,6 +1,5 @@
 -- models/EntityManager.lua
 local Client = require("models.Client")
-local CoordinateService = require("services.CoordinateService")
 
 local Entities = {}
 Entities.__index = Entities
@@ -47,12 +46,16 @@ function Entities:init(game)
 end
 
 function Entities:addClient(game)
-    -- MODIFIED: Use game.maps.city to find a plot for the client
-    local client_plot = game.maps.city:getRandomDowntownBuildingPlot()
-    if client_plot then
-        local new_client = Client:new(client_plot, game)
+    local cmap = game.maps.city
+    local plot_local = cmap:getRandomDowntownBuildingPlot()
+    if plot_local then
+        -- Convert city-local sub-cell coords to unified sub-cell coords
+        local plot = (cmap.world_mn_x and game.maps.unified) and {
+            x = (cmap.world_mn_x - 1) * 3 + plot_local.x,
+            y = (cmap.world_mn_y - 1) * 3 + plot_local.y,
+        } or plot_local
+        local new_client = Client:new(plot, game)
         table.insert(self.clients, new_client)
-        print("New client added.")
     end
 end
 
@@ -96,16 +99,11 @@ end
 -- REMOVED THE DRAW FUNCTION FROM HERE
 
 function Entities:handle_click(x, y, game)
-    -- vehicle.px/py are city-map-local tile pixels; world coords include the city world-pixel offset
-    local ts = game.C.MAP.TILE_SIZE
-    local city_origin = {x = game.world_gen_city_mn_x or 1, y = game.world_gen_city_mn_y or 1}
-    local city_off_x, city_off_y = CoordinateService.applyRegionOffset(0, 0, city_origin, ts)
-    local local_x = x - city_off_x
-    local local_y = y - city_off_y
+    -- vehicle.px/py are world pixels (unified map); x/y from camera:screenToWorld are world pixels
     local radius_sq = game.C.UI.VEHICLE_CLICK_RADIUS * game.C.UI.VEHICLE_CLICK_RADIUS
     local candidates = {}
     for _, vehicle in ipairs(self.vehicles) do
-        local dist_sq = (local_x - vehicle.px)^2 + (local_y - vehicle.py)^2
+        local dist_sq = (x - vehicle.px)^2 + (y - vehicle.py)^2
         if dist_sq < radius_sq then
             candidates[#candidates + 1] = vehicle
         end

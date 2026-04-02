@@ -55,8 +55,8 @@ function moveAlongPath(dt, vehicle, game)
         -- We pop all but the last node so vehicle.path never empties prematurely.
         if vehicle.path and #vehicle.path > 1 then
             local head = vehicle.path[1]
-            local hdx = head.x * tps - vehicle.px
-            local hdy = head.y * tps - vehicle.py
+            local hdx = (head.x - 0.5) * tps - vehicle.px
+            local hdy = (head.y - 0.5) * tps - vehicle.py
             if hdx * hdx + hdy * hdy < (tps * 0.5) * (tps * 0.5) then
                 vehicle.grid_anchor = {x = head.x, y = head.y}
                 table.remove(vehicle.path, 1)
@@ -69,12 +69,7 @@ function moveAlongPath(dt, vehicle, game)
     if not vehicle.path or #vehicle.path == 0 then return end
 
     local target_node = vehicle.path[1]
-    local target_px, target_py
-    if map_for_pathing.road_v_rxs then
-        target_px, target_py = target_node.x * tps, target_node.y * tps
-    else
-        target_px, target_py = map_for_pathing:getPixelCoords(target_node.x, target_node.y)
-    end
+    local target_px, target_py = map_for_pathing:getPixelCoords(target_node.x, target_node.y)
 
     local dist_x = target_px - vehicle.px
     local dist_y = target_py - vehicle.py
@@ -136,7 +131,7 @@ function States.ReturningToDepot:enter(vehicle, game)
         return
     end
 
-    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
+    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
     buildSmoothPath(vehicle, game)
 end
 
@@ -178,7 +173,7 @@ function States.GoToPickup:enter(vehicle, game)
         return
     end
 
-    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game, game.maps.city)
+    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
     buildSmoothPath(vehicle, game)
 end
 
@@ -236,40 +231,15 @@ States.GoToDropoff.name = "To Dropoff"
 function States.GoToDropoff:enter(vehicle, game)
     local PathfindingService = require("services.PathfindingService")
 
-    print(string.format("DEBUG: %s %d deciding dropoff", vehicle.type, vehicle.id))
-
-    -- Check if the primary trip in cargo requires long-distance travel
-    local trip = vehicle.cargo[1]
-    
-    -- Long-distance (inter-city) trips require the metro license.
-    -- If one somehow reaches the truck without the license, drop it and move on.
-    local vcfg = game.C.VEHICLES[vehicle.type:upper()]
-    if trip and trip.is_long_distance and vcfg and vcfg.can_long_distance then
-        if not game.state.metro_license_unlocked then
-            print(string.format("DEBUG: %s %d dropping inter-city trip (no metro license)", vehicle.type, vehicle.id))
-            table.remove(vehicle.cargo, 1)
-            vehicle:changeState(States.DecideNextAction, game)
-            return
-        end
-
-        -- Inter-city disabled until region map is implemented: drop and move on
-        print(string.format("DEBUG: %s %d dropping inter-city trip (region map not yet implemented)", vehicle.type, vehicle.id))
-        table.remove(vehicle.cargo, 1)
-        vehicle:changeState(States.DecideNextAction, game)
-        return
-    end
-    
-    -- If not long distance, proceed with normal local dropoff logic
     vehicle.path = PathfindingService.findPathToDropoff(vehicle, game)
-    
+
     if not vehicle.path then
-        print(string.format("DEBUG: %s %d failed to find dropoff path, entering Stuck state", vehicle.type, vehicle.id))
+        print(string.format("ERROR: %s %d failed to find dropoff path", vehicle.type, vehicle.id))
         vehicle:changeState(States.Stuck, game)
         return
     end
 
     vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
-    print(string.format("DEBUG: %s %d path to dropoff: %d nodes, ETA: %.2fs", vehicle.type, vehicle.id, #vehicle.path, vehicle.current_path_eta))
     buildSmoothPath(vehicle, game)
 end
 
@@ -336,206 +306,11 @@ States.DecideNextAction = State:new()
 States.DecideNextAction.name = "Deciding"
 function States.DecideNextAction:enter(vehicle, game)
     if #vehicle.cargo > 0 then
-        -- If we still have packages to deliver, go find the next one.
         vehicle:changeState(States.GoToDropoff, game)
     elseif #vehicle.trip_queue > 0 then
-        -- If we have pending pickups, go get them.
         vehicle:changeState(States.GoToPickup, game)
     else
-        -- If we have no work to do, go home.
         vehicle:changeState(States.ReturningToDepot, game)
-    end
-end
-
---------------------------------------------------------------------------------
--- State: GoToNetworkEntry (Generic)
---------------------------------------------------------------------------------
-States.GoToNetworkEntry = State:new()
-States.GoToNetworkEntry.name = "Going to Network Entry"
-function States.GoToNetworkEntry:enter(vehicle, game, params)
-    local PathfindingService = require("services.PathfindingService")
-    params = params or {}
-    local network_type = params.network_type or "highway"
-
-    print(string.format("DEBUG: %s %d finding path to nearest '%s' entry.", vehicle.type, vehicle.id, network_type))
-
-    -- THE FIX: Get a path from the depot to a random highway tile on the city map.
-    -- This forces the truck to travel across the city before changing to the regional map.
-    vehicle.path = PathfindingService.findPathToRandomHighway(vehicle, game)
-    
-    if not vehicle.path or #vehicle.path == 0 then
-        print("ERROR: GoToNetworkEntry failed to find a path to the highway.")
-        vehicle:changeState(States.Stuck, game)
-        return
-    end
-
-    -- Store the parameters so we can pass them to the next state upon arrival.
-    vehicle.network_travel_params = params
-    buildSmoothPath(vehicle, game)
-end
-
-function States.GoToNetworkEntry:update(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then
-        vehicle:changeState(States.TravelingOnNetwork, game, vehicle.network_travel_params)
-        vehicle.network_travel_params = nil
-        return
-    end
-    moveAlongPath(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then
-        vehicle:changeState(States.TravelingOnNetwork, game, vehicle.network_travel_params)
-        vehicle.network_travel_params = nil
-    end
-end
-
---------------------------------------------------------------------------------
--- State: TravelingOnNetwork (Generic)
---------------------------------------------------------------------------------
-States.TravelingOnNetwork = State:new()
-States.TravelingOnNetwork.name = "Traveling on Network"
-function States.TravelingOnNetwork:enter(vehicle, game, params)
-    params = params or {}
-    local destination_map_key = params.destination_map or "region"
-    local final_destination_plot = params.destination_plot or vehicle.cargo[1].legs[#vehicle.cargo[1].legs].end_plot
-
-    print(string.format("DEBUG: %s %d entering '%s' network. Destination map: %s", 
-          vehicle.type, vehicle.id, params.network_type or "unknown", destination_map_key))
-    
-    -- Translate the vehicle's grid anchor from city-local to region-global coordinates
-    local city_offset = game.maps.region.main_city_offset
-    if city_offset then
-        vehicle.grid_anchor.x = vehicle.grid_anchor.x + city_offset.x
-        vehicle.grid_anchor.y = vehicle.grid_anchor.y + city_offset.y
-    end
-
-    -- Switch the operational map and recalculate pixel position
-    vehicle.operational_map_key = destination_map_key
-    vehicle:recalculatePixelPosition(game)
-
-    -- Find the destination city's depot on the regional map
-    local destination_on_network = nil
-    local destination_city_data = nil
-    for _, city_data in ipairs(game.maps.region.cities_data) do
-        local cw = game.maps.city and game.maps.city.city_grid_width or game.C.MAP.CITY_GRID_WIDTH
-        if city_data.center_x ~= game.maps.region.main_city_offset.x + (cw / 2) then
-             destination_city_data = city_data
-             -- THE FIX: Find the road tile nearest the depot, not just the center.
-             local depot_plot = {
-                 x = city_data.center_x,
-                 y = city_data.center_y
-             }
-             destination_on_network = game.maps.region:findNearestRoadTile(depot_plot)
-             break
-        end
-    end
-
-    if not destination_on_network then
-        print("ERROR: Could not find destination city for plot!", final_destination_plot.x, final_destination_plot.y)
-        vehicle:changeState(States.Stuck, game)
-        return
-    end
-
-    -- Pathfind on the regional map
-    local PathfindingService = require("services.PathfindingService")
-    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, destination_on_network, game)
-
-    if not vehicle.path then
-        print("ERROR: Could not find regional path to city entrance!")
-        vehicle:changeState(States.Stuck, game)
-        return
-    end
-
-    -- Store data needed for the return trip to the city map
-    vehicle.final_destination_plot = final_destination_plot
-    vehicle.destination_city_data = destination_city_data
-    buildSmoothPath(vehicle, game)
-end
-
-function States.TravelingOnNetwork:update(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then
-        vehicle:changeState(States.ExitingNetwork, game)
-        return
-    end
-    moveAlongPath(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then
-        vehicle:changeState(States.ExitingNetwork, game)
-    end
-end
-
---------------------------------------------------------------------------------
--- State: ExitingNetwork (Generic)
---------------------------------------------------------------------------------
-States.ExitingNetwork = State:new()
-States.ExitingNetwork.name = "Exiting Network"
-function States.ExitingNetwork:enter(vehicle, game)
-    print(string.format("DEBUG: %s %d is exiting network, returning to city logic.", vehicle.type, vehicle.id))
-    
-    local final_plot = vehicle.final_destination_plot
-    local dest_city_data = vehicle.destination_city_data
-    
-    if not final_plot or not dest_city_data then
-        print("ERROR: Exiting network but final_destination_plot or city_data is nil!")
-        vehicle:changeState(States.Stuck, game)
-        return
-    end
-
-    -- THE FIX: We must generate and use a temporary, local grid for the destination city.
-    local temp_city_map = require("models.Map"):new(game.C)
-    local city_w = game.maps.city and game.maps.city.city_grid_width or game.C.MAP.CITY_GRID_WIDTH
-    local city_h = game.maps.city and game.maps.city.city_grid_height or game.C.MAP.CITY_GRID_HEIGHT
-    local city_offset_x = dest_city_data.center_x - (city_w / 2)
-    local city_offset_y = dest_city_data.center_y - (city_h / 2)
-
-    -- Populate the temporary map with the destination city's grid data from the region
-    for y=1, city_h do
-        for x=1, city_w do
-            local reg_x, reg_y = x + city_offset_x, y + city_offset_y
-            if game.maps.region.grid[reg_y] and game.maps.region.grid[reg_y][reg_x] then
-                temp_city_map.grid[y][x] = game.maps.region.grid[reg_y][reg_x]
-            else
-                temp_city_map.grid[y][x] = {type = "grass"}
-            end
-        end
-    end
-    
-    -- Translate the vehicle's grid_anchor from regional coordinates back to local city coordinates.
-    vehicle.grid_anchor.x = vehicle.grid_anchor.x - city_offset_x
-    vehicle.grid_anchor.y = vehicle.grid_anchor.y - city_offset_y
-
-    -- Switch the operational map and recalculate the vehicle's pixel position on the local grid.
-    vehicle.operational_map_key = "city" 
-    vehicle:recalculatePixelPosition(game)
-    
-    -- Translate the final destination plot to local coordinates.
-    local local_final_plot = {
-        x = final_plot.x - city_offset_x,
-        y = final_plot.y - city_offset_y
-    }
-    
-    -- Now, pathfind on the newly created local city map.
-    local PathfindingService = require("services.PathfindingService")
-    print(string.format("DEBUG: Finding final path on new local map to (%d, %d)", local_final_plot.x, local_final_plot.y))
-    vehicle.path = PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, local_final_plot, game)
-
-    if not vehicle.path then
-        print("ERROR: Could not find path from depot area to final destination on local map.")
-        vehicle:changeState(States.Stuck, game)
-        return
-    end
-
-    -- Clear the stored destination data.
-    vehicle.final_destination_plot = nil
-    vehicle.destination_city_data = nil
-    buildSmoothPath(vehicle, game)
-end
-
-function States.ExitingNetwork:update(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then
-        vehicle:changeState(States.DoDropoff, game)
-        return
-    end
-    moveAlongPath(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then
-        vehicle:changeState(States.DoDropoff, game)
     end
 end
 
@@ -558,12 +333,7 @@ function States.Stuck:update(dt, vehicle, game)
     vehicle.stuck_timer = vehicle.stuck_timer - dt
     if vehicle.stuck_timer <= 0 then
         local previous_state = vehicle.last_state_before_stuck or States.DecideNextAction
-        -- TravelingOnNetwork can't be restarted from Stuck (no params). Go to Decide instead.
-        if previous_state == States.TravelingOnNetwork or previous_state == States.GoToNetworkEntry or previous_state == States.ExitingNetwork then
-            vehicle:changeState(States.DecideNextAction, game)
-        else
-            vehicle:changeState(previous_state, game)
-        end
+        vehicle:changeState(previous_state, game)
     end
 end
 

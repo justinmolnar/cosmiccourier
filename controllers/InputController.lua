@@ -58,6 +58,42 @@ function InputController:keypressed(key)
         return
     end
 
+    -- Spawn a test inter-city trip (requires city_2 to exist)
+    if key == "l" then
+        local game = self.game
+        local city2 = game.maps and game.maps["city_2"]
+        if not city2 then
+            print("DEBUG: No city_2 — generate and send a multi-city world first")
+            return
+        end
+        local city1 = game.maps.city
+        -- pick a random building plot in city2 as destination
+        local dest_plots = city2.building_plots
+        if not dest_plots or #dest_plots == 0 then
+            print("DEBUG: city_2 has no building plots")
+            return
+        end
+        local dest_plot_local = dest_plots[love.math.random(#dest_plots)]
+        -- Convert dest_plot from city2-local to unified sub-cell coords
+        local dest_plot = {
+            x = (city2.world_mn_x - 1) * 3 + dest_plot_local.x,
+            y = (city2.world_mn_y - 1) * 3 + dest_plot_local.y,
+        }
+        -- find a client plot in city1 (use depot if no clients)
+        local src_plot = game.entities.depot_plot
+        if #game.entities.clients > 0 then
+            src_plot = game.entities.clients[1].plot
+        end
+        if not src_plot then print("DEBUG: no source plot"); return end
+
+        local Trip = require("models.Trip")
+        local t = Trip:new(500, 200)
+        t:addLeg(src_plot, dest_plot, "truck")
+        table.insert(game.entities.trips.pending, t)
+        print(string.format("DEBUG: spawned inter-city trip → city_2 unified (%d,%d)", dest_plot.x, dest_plot.y))
+        return
+    end
+
     -- Money cheats
     if key == "-" then
         if self.game.state then

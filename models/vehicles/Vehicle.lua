@@ -1,5 +1,4 @@
 -- models/vehicles/Vehicle.lua
-local CoordinateService = require("services.CoordinateService")
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
@@ -14,13 +13,10 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
     instance.icon = (properties or {}).icon or "❓"
     instance.depot_plot = depot_plot
     
-    -- Vehicle now knows its operational map.
-    instance.operational_map_key = operational_map_key or "city"
-    local home_map = game.maps[instance.operational_map_key]
-
     instance.trip_queue = {}
     instance.cargo = {}
     instance.path = {}
+    instance.pathfinding_bounds = nil  -- nil = no restriction; set for bounded vehicles (future)
 
     -- Speed modifier accumulates upgrade multipliers; base speed stays constant.
     local vt = (vehicleType or ""):upper()
@@ -32,13 +28,20 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
         instance.speed_modifier = 1.0
     end
 
-    if home_map and home_map.road_v_rxs then
-        -- Road-node map: grid_anchor is road-node coords (rx = gx-1, ry = gy-1)
-        local tps = home_map.tile_pixel_size or home_map.C.MAP.TILE_SIZE
-        local rx, ry = depot_plot.x - 1, depot_plot.y - 1
-        instance.grid_anchor = {x = rx, y = ry}
-        instance.px, instance.py = CoordinateService.roadNodeToPixel(rx, ry, tps, false)
+    local umap = game.maps and game.maps.unified
+    if umap then
+        -- Unified map: depot_plot is already in unified sub-cell coords
+        instance.operational_map_key = "unified"
+        local uts = umap.tile_pixel_size
+        instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
+        instance.px = (depot_plot.x - 0.5) * uts
+        instance.py = (depot_plot.y - 0.5) * uts
     else
+        -- Fallback: initial game state before world gen (unified map not yet built).
+        -- Use sandbox (1-indexed sub-cell) coords; PathfindingService always runs in
+        -- sandbox mode via the proxy map, so road-node coords are never needed.
+        instance.operational_map_key = operational_map_key or "city"
+        local home_map = game.maps[instance.operational_map_key]
         instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
         instance.px, instance.py = home_map:getPixelCoords(depot_plot.x, depot_plot.y)
     end
@@ -71,24 +74,11 @@ function Vehicle:canTravelTo(destination)
 end
 
 function Vehicle:recalculatePixelPosition(game)
-    local home_map = game.maps[self.operational_map_key]
-    if home_map then
-        local tps = home_map.tile_pixel_size or home_map.C.MAP.TILE_SIZE
-        if home_map.road_v_rxs then
-            self.px, self.py = CoordinateService.roadNodeToPixel(
-                self.grid_anchor.x, self.grid_anchor.y, tps, self.grid_anchor.is_tile)
-        else
-            self.px, self.py = home_map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
-        end
+    local map = game.maps[self.operational_map_key]
+    if map then
+        self.px, self.py = map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
     end
 end
-
-function Vehicle:_getRegionDrawPosition(game)
-    local region_map = game.maps.region
-    local tile_size = region_map.C.MAP.TILE_SIZE
-    return CoordinateService.applyRegionOffset(self.px, self.py, region_map.main_city_offset, tile_size)
-end
-
 
 function Vehicle:shouldDrawAtCameraScale(game)
     local s    = game.camera.scale
@@ -350,19 +340,8 @@ function Vehicle:draw(game)
     if not self:shouldDrawAtCameraScale(game) then return end
     if not self.visible then return end
 
-    local draw_px, draw_py
-    local active_map_key = game.active_map_key
+    local draw_px, draw_py = self.px, self.py
     local DrawingUtils = require("utils.DrawingUtils")
-
-    if self.operational_map_key == active_map_key then
-        draw_px, draw_py = self.px, self.py
-    else
-        if self.operational_map_key == "city" and active_map_key == "region" then
-            draw_px, draw_py = self:_getRegionDrawPosition(game)
-        else
-            draw_px, draw_py = self.px, self.py
-        end
-    end
 
     if self == game.entities.selected_vehicle then
         love.graphics.setColor(1, 1, 0, 0.8)
