@@ -17,8 +17,31 @@ function PathSmoothingService.buildSmoothPath(vehicle, game)
     end
     local tps = map.tile_pixel_size or game.C.MAP.TILE_SIZE
 
+    -- Snap highway tile centres to the smooth visual highway curve (same logic as
+    -- the trip preview).  Built once per path assignment, not per frame.
+    local hw_smooth = game._world_highway_smooth
+    local ugrid     = game.maps.unified and game.maps.unified.grid
+
     local function nodePixels(node)
-        return map:getPixelCoords(node.x, node.y)
+        local orig_px, orig_py = map:getPixelCoords(node.x, node.y)
+        if hw_smooth and ugrid then
+            local row  = ugrid[node.y]
+            local tile = row and row[node.x]
+            if tile and tile.type == "highway" then
+                local best_d2 = math.huge
+                local snap_px, snap_py = orig_px, orig_py
+                for _, chain in ipairs(hw_smooth) do
+                    for j = 1, #chain - 1, 2 do
+                        local d2 = (chain[j]-orig_px)^2 + (chain[j+1]-orig_py)^2
+                        if d2 < best_d2 then
+                            best_d2 = d2; snap_px = chain[j]; snap_py = chain[j+1]
+                        end
+                    end
+                end
+                return snap_px, snap_py
+            end
+        end
+        return orig_px, orig_py
     end
 
     local smooth = {}
