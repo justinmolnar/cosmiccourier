@@ -5,6 +5,162 @@ local Truck = require("models.vehicles.Truck")
 local FloatingTextSystem = require("services.FloatingTextSystem")
 
 
+-- Zoom threshold: above this scale draw vectors directly (crisp quality, ~1 city visible);
+-- below this scale use a cached canvas (performance when multiple cities are on screen).
+local OVERLAY_VECTOR_THRESHOLD = 5.0
+
+-- Shared drawing routine: renders all overlay layers in city-local coordinates.
+-- The caller is responsible for setting up any transform so that (0,0) maps to the
+-- city's top-left corner in the destination space (canvas or world).
+local function _renderCityOverlayContent(m, Game, RS, m_tps)
+    -- Bridges
+    if m.bridge_cells then
+        love.graphics.setLineStyle("rough")
+        love.graphics.setColor(0.72, 0.60, 0.38, 0.95)
+        love.graphics.setLineWidth(m_tps * 0.45)
+        for gy, row in pairs(m.bridge_cells) do
+            for gx, entry in pairs(row) do
+                local px = (gx - 1) * m_tps
+                local py = (gy - 1) * m_tps
+                if entry.ew then love.graphics.line(px, py + m_tps*0.5, px+m_tps, py + m_tps*0.5) end
+                if entry.ns then love.graphics.line(px + m_tps*0.5, py, px + m_tps*0.5, py+m_tps) end
+            end
+        end
+        love.graphics.setLineWidth(1)
+    end
+
+    -- Rivers
+    if not m._river_smooth_paths_v1 then
+        m._river_smooth_paths_v1 = RS.buildRiverPaths(m.grid, m_tps)
+    end
+    if m._river_smooth_paths_v1 and #m._river_smooth_paths_v1 > 0 then
+        local cap_r = m_tps * 0.4
+        love.graphics.setColor(0.20, 0.45, 0.75, 0.92)
+        love.graphics.setLineWidth(m_tps * 0.75)
+        love.graphics.setLineJoin("bevel")
+        for _, pts in ipairs(m._river_smooth_paths_v1) do
+            if #pts >= 4 then
+                love.graphics.line(pts)
+                love.graphics.circle("fill", pts[1], pts[2], cap_r)
+                love.graphics.circle("fill", pts[#pts-1], pts[#pts], cap_r)
+            end
+        end
+        love.graphics.setLineWidth(1)
+        love.graphics.setLineJoin("miter")
+    end
+
+    -- Streets (flag-gated)
+    if Game.debug_smooth_roads_like then
+        if not m._street_smooth_paths_like_v5 then
+            m._street_smooth_paths_like_v5 = RS.buildStreetPathsLike(
+                m.zone_seg_v, m.zone_seg_h, m.zone_grid, m_tps, m.grid)
+        end
+        if m._street_smooth_paths_like_v5 and #m._street_smooth_paths_like_v5 > 0 then
+            love.graphics.setColor(0.30, 0.29, 0.28, 1.0)
+            love.graphics.setLineWidth(m_tps * 0.35)
+            love.graphics.setLineStyle("smooth")
+            love.graphics.setLineJoin("miter")
+            for _, pts in ipairs(m._street_smooth_paths_like_v5) do
+                love.graphics.line(pts)
+            end
+            love.graphics.setLineStyle("rough")
+            love.graphics.setLineWidth(1)
+            love.graphics.setLineJoin("miter")
+        end
+    end
+
+    -- Arterials (flag-gated)
+    if Game.debug_smooth_roads then
+        if not m._road_smooth_paths_v8 then
+            if m.road_centerlines and #m.road_centerlines > 0 then
+                m._road_smooth_paths_v8 = RS.buildPathsFromCenterlines(m.road_centerlines, m_tps)
+            else
+                m._road_smooth_paths_v8 = RS.buildPaths(m.grid, m_tps)
+            end
+        end
+        if m._road_smooth_paths_v8 and #m._road_smooth_paths_v8 > 0 then
+            local cap_r = m_tps * 0.35
+            love.graphics.setColor(0.22, 0.21, 0.20, 1.0)
+            love.graphics.setLineWidth(m_tps * 0.7)
+            love.graphics.setLineJoin("bevel")
+            for _, pts in ipairs(m._road_smooth_paths_v8) do
+                if #pts >= 4 then
+                    love.graphics.line(pts)
+                    love.graphics.circle("fill", pts[1], pts[2], cap_r)
+                    love.graphics.circle("fill", pts[#pts-1], pts[#pts], cap_r)
+                end
+            end
+            love.graphics.setLineWidth(1)
+            love.graphics.setLineJoin("miter")
+        end
+    end
+
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.setLineWidth(1)
+    love.graphics.setLineStyle("rough")
+    love.graphics.setLineJoin("miter")
+end
+
+-- High-zoom path: draw overlay vectors directly into the world (camera transform active).
+-- m_ox / m_oy are the city's top-left in world-pixel space (including tile-copy offset).
+local function _drawCityOverlayVectors(m, Game, RS, m_ox, m_oy)
+    local m_tps = m.tile_pixel_size or Game.C.MAP.TILE_SIZE
+    love.graphics.push()
+    love.graphics.translate(m_ox, m_oy)
+    _renderCityOverlayContent(m, Game, RS, m_tps)
+    love.graphics.pop()
+end
+
+-- Low-zoom path: pre-render overlay into a Canvas (built once, reused every frame).
+local function _cityCanvasStale(m, Game)
+    if not m._overlay_canvas then return true end
+    local f = m._overlay_canvas_flags
+    return not f
+        or (f.roads      ~= (Game.debug_smooth_roads      or false))
+        or (f.roads_like ~= (Game.debug_smooth_roads_like or false))
+end
+
+local function _buildCityOverlayCanvas(m, Game, RS)
+    local ts   = Game.C.MAP.TILE_SIZE
+    local cw   = (m.world_city_mx_x - m.world_mn_x + 1) * ts
+    local ch   = (m.world_city_mx_y - m.world_mn_y + 1) * ts
+    if cw < 1 or ch < 1 then return end
+
+    if m._overlay_canvas then m._overlay_canvas:release() end
+
+    local m_tps = m.tile_pixel_size or ts
+    -- S: canvas pixels per world pixel, sized so line widths are clearly visible.
+    local S     = math.max(1, math.floor(12.0 / m_tps + 0.5))
+
+    local canvas = love.graphics.newCanvas(cw * S, ch * S)
+    canvas:setFilter("linear", "linear")
+
+    local prev_canvas = love.graphics.getCanvas()
+    -- Clear any active scissor; it is in screen coords and would corrupt canvas rendering.
+    local sc_x, sc_y, sc_w, sc_h = love.graphics.getScissor()
+    love.graphics.setScissor()
+    love.graphics.setCanvas(canvas)
+    love.graphics.push()
+    love.graphics.origin()
+    love.graphics.scale(S, S)
+    love.graphics.clear(0, 0, 0, 0)
+    love.graphics.setBlendMode("alpha")
+
+    _renderCityOverlayContent(m, Game, RS, m_tps)
+
+    love.graphics.setBlendMode("alpha")
+    love.graphics.pop()
+    love.graphics.setCanvas(prev_canvas)
+    if sc_x then love.graphics.setScissor(sc_x, sc_y, sc_w, sc_h) end
+
+    m._overlay_canvas       = canvas
+    m._overlay_canvas_scale = S
+    m._overlay_canvas_flags = {
+        roads      = Game.debug_smooth_roads      or false,
+        roads_like = Game.debug_smooth_roads_like or false,
+    }
+end
+
 local GameView = {}
 GameView.__index = GameView
 
@@ -22,16 +178,11 @@ function GameView:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
     local game_world_w = screen_w - sidebar_w
     local cx, cy = Game.camera.x, Game.camera.y
     local cs = Game.camera.scale
-    local ft_ox, ft_oy = 0, 0
-    if Game.world_gen_cam_params then
-        local ts = Game.C.MAP.TILE_SIZE
-        ft_ox = ((Game.world_gen_city_mn_x or 1) - 1) * ts
-        ft_oy = ((Game.world_gen_city_mn_y or 1) - 1) * ts
-    end
     love.graphics.setFont(Game.fonts.ui)
     for _, ft in ipairs(texts) do
-        local sx = sidebar_w + game_world_w / 2 + (ft.x + ft_ox - cx) * cs
-        local sy = screen_h / 2 + (ft.y + ft_oy - cy) * cs
+        -- ft.x/ft.y are world-pixel coords (city origin already baked in at emit time)
+        local sx = sidebar_w + game_world_w / 2 + (ft.x - cx) * cs
+        local sy = screen_h / 2 + (ft.y - cy) * cs
         love.graphics.setColor(1, 1, 0.3, ft.alpha)
         love.graphics.printf(ft.text, sx - 60, sy, 120, "center")
     end
@@ -247,114 +398,33 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         end
     end
 
-    -- LAYER: City road/river overlays (per-frame vector, tiled).
+    -- LAYER: City road/river overlays
+    -- High zoom (cs >= OVERLAY_VECTOR_THRESHOLD): draw vectors directly — crisp at any zoom,
+    --   fast because only ~1 city is visible at this scale.
+    -- Low zoom (cs < OVERLAY_VECTOR_THRESHOLD): draw a cached canvas — multiple cities may be
+    --   on screen simultaneously so the per-frame vector cost would be too high.
     if cs >= Z.CITY_IMAGE_THRESHOLD then
         local RS = require("utils.RoadSmoother")
-
+        love.graphics.setColor(1, 1, 1)
         for i = tile_i0, tile_i1 do
-        love.graphics.push()
-        love.graphics.translate(i * mpw, 0)
-        for _, m in ipairs(Game.maps.all_cities or {}) do
-            if not cityInView(m, i * mpw) then goto continue_overlay end
-            local m_ox  = (m.world_mn_x - 1) * ts
-            local m_oy  = (m.world_mn_y - 1) * ts
-            local m_tps = m.tile_pixel_size or ts
-
-            -- Bridges
-            if m.bridge_cells then
-                love.graphics.setLineStyle("rough")
-                love.graphics.setColor(0.72, 0.60, 0.38, 0.95)
-                love.graphics.setLineWidth(m_tps * 0.45)
-                for gy, row in pairs(m.bridge_cells) do
-                    for gx, entry in pairs(row) do
-                        local px = m_ox + (gx - 1) * m_tps
-                        local py = m_oy + (gy - 1) * m_tps
-                        if entry.ew then love.graphics.line(px, py + m_tps*0.5, px+m_tps, py + m_tps*0.5) end
-                        if entry.ns then love.graphics.line(px + m_tps*0.5, py, px + m_tps*0.5, py+m_tps) end
+            for _, m in ipairs(Game.maps.all_cities or {}) do
+                if not cityInView(m, i * mpw) then goto continue_overlay end
+                local m_ox = (m.world_mn_x - 1) * ts
+                local m_oy = (m.world_mn_y - 1) * ts
+                if cs >= OVERLAY_VECTOR_THRESHOLD then
+                    _drawCityOverlayVectors(m, Game, RS, i * mpw + m_ox, m_oy)
+                else
+                    if _cityCanvasStale(m, Game) then
+                        _buildCityOverlayCanvas(m, Game, RS)
+                    end
+                    if m._overlay_canvas then
+                        local S = m._overlay_canvas_scale or 1
+                        love.graphics.draw(m._overlay_canvas, i * mpw + m_ox, m_oy, 0, 1/S, 1/S)
                     end
                 end
-                love.graphics.setLineWidth(1)
-                love.graphics.setColor(1, 1, 1)
+                ::continue_overlay::
             end
-
-            -- Rivers
-            if not m._river_smooth_paths_v1 then
-                m._river_smooth_paths_v1 = RS.buildRiverPaths(m.grid, m_tps)
-            end
-            if m._river_smooth_paths_v1 and #m._river_smooth_paths_v1 > 0 then
-                local cap_r = m_tps * 0.4
-                love.graphics.setColor(0.20, 0.45, 0.75, 0.92)
-                love.graphics.setLineWidth(m_tps * 0.75)
-                love.graphics.setLineJoin("bevel")
-                for _, pts in ipairs(m._river_smooth_paths_v1) do
-                    if #pts >= 4 then
-                        local s2 = {}
-                        for i = 1, #pts, 2 do s2[i] = m_ox + pts[i]; s2[i+1] = m_oy + pts[i+1] end
-                        love.graphics.line(s2)
-                        love.graphics.circle("fill", s2[1], s2[2], cap_r)
-                        love.graphics.circle("fill", s2[#s2-1], s2[#s2], cap_r)
-                    end
-                end
-                love.graphics.setLineWidth(1)
-                love.graphics.setLineJoin("miter")
-                love.graphics.setColor(1, 1, 1)
-            end
-
-            -- Street lines (debug_smooth_roads_like)
-            if Game.debug_smooth_roads_like then
-                if not m._street_smooth_paths_like_v5 then
-                    m._street_smooth_paths_like_v5 = RS.buildStreetPathsLike(
-                        m.zone_seg_v, m.zone_seg_h, m.zone_grid, m_tps, m.grid)
-                end
-                if m._street_smooth_paths_like_v5 and #m._street_smooth_paths_like_v5 > 0 then
-                    love.graphics.setColor(0.30, 0.29, 0.28, 1.0)
-                    love.graphics.setLineWidth(m_tps * 0.35)
-                    love.graphics.setLineStyle("smooth")
-                    love.graphics.setLineJoin("miter")
-                    for _, pts in ipairs(m._street_smooth_paths_like_v5) do
-                        local s2 = {}
-                        for i = 1, #pts, 2 do s2[i] = m_ox + pts[i]; s2[i+1] = m_oy + pts[i+1] end
-                        love.graphics.line(s2)
-                    end
-                    love.graphics.setLineStyle("rough")
-                    love.graphics.setLineWidth(1)
-                    love.graphics.setLineJoin("miter")
-                    love.graphics.setColor(1, 1, 1)
-                end
-            end
-
-            -- Arterials (debug_smooth_roads)
-            if Game.debug_smooth_roads then
-                if not m._road_smooth_paths_v8 then
-                    if m.road_centerlines and #m.road_centerlines > 0 then
-                        m._road_smooth_paths_v8 = RS.buildPathsFromCenterlines(m.road_centerlines, m_tps)
-                    else
-                        m._road_smooth_paths_v8 = RS.buildPaths(m.grid, m_tps)
-                    end
-                end
-                if m._road_smooth_paths_v8 and #m._road_smooth_paths_v8 > 0 then
-                    local cap_r = m_tps * 0.35
-                    love.graphics.setColor(0.22, 0.21, 0.20, 1.0)
-                    love.graphics.setLineWidth(m_tps * 0.7)
-                    love.graphics.setLineJoin("bevel")
-                    for _, pts in ipairs(m._road_smooth_paths_v8) do
-                        if #pts >= 4 then
-                            local s2 = {}
-                            for i = 1, #pts, 2 do s2[i] = m_ox + pts[i]; s2[i+1] = m_oy + pts[i+1] end
-                            love.graphics.line(s2)
-                            love.graphics.circle("fill", s2[1], s2[2], cap_r)
-                            love.graphics.circle("fill", s2[#s2-1], s2[#s2], cap_r)
-                        end
-                    end
-                    love.graphics.setLineWidth(1)
-                    love.graphics.setLineJoin("miter")
-                    love.graphics.setColor(1, 1, 1)
-                end
-            end
-            ::continue_overlay::
-        end  -- end all_cities for loop
-        love.graphics.pop()
-        end  -- end tile loop
+        end
     end  -- CITY_IMAGE_THRESHOLD
 
     -- LAYER: Entities (tiled so every copy is fully populated)

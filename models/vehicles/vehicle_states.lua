@@ -303,7 +303,13 @@ function States.DoDropoff:enter(vehicle, game)
         if is_final_destination then
             -- FINAL DELIVERY
             local final_payout = trip.base_payout + trip.speed_bonus
-            local event_data = { payout = final_payout, bonus = trip.speed_bonus, base = trip.base_payout, x = vehicle.px, y = vehicle.py }
+            -- Convert city-local px/py to world-pixel coords so floating text
+            -- renders at the right position regardless of which city this vehicle is in.
+            local ts   = game.C.MAP.TILE_SIZE
+            local vmap = game.maps and game.maps[vehicle.operational_map_key]
+            local wx   = vehicle.px + ((vmap and vmap.world_mn_x or 1) - 1) * ts
+            local wy   = vehicle.py + ((vmap and vmap.world_mn_y or 1) - 1) * ts
+            local event_data = { payout = final_payout, bonus = trip.speed_bonus, base = trip.base_payout, x = wx, y = wy }
             game.EventBus:publish("package_delivered", event_data)
             trip_index_to_remove = i
         else
