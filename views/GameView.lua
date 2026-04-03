@@ -177,6 +177,7 @@ local function _renderCityOverlayContent(m, Game, RS, m_tps)
         if not m._street_smooth_paths_like_v5 then
             m._street_smooth_paths_like_v5 = RS.buildStreetPathsLike(
                 m.zone_seg_v, m.zone_seg_h, m.zone_grid, m_tps, m.grid)
+            if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
         end
         if m._street_smooth_paths_like_v5 and #m._street_smooth_paths_like_v5 > 0 then
             love.graphics.setColor(0.30, 0.29, 0.28, 1.0)
@@ -200,6 +201,7 @@ local function _renderCityOverlayContent(m, Game, RS, m_tps)
             else
                 m._road_smooth_paths_v8 = RS.buildPaths(m.grid, m_tps)
             end
+            if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
         end
         if m._road_smooth_paths_v8 and #m._road_smooth_paths_v8 > 0 then
             local cap_r = m_tps * 0.35
@@ -317,6 +319,15 @@ end
 function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
     local Game = self.Game
     local DrawingUtils = require("utils.DrawingUtils")
+    -- Compute viewport bounds in world-pixel space for culling.
+    local fb_cs = Game.camera.scale
+    local fb_game_world_w = screen_w - sidebar_w
+    local fb_half_w = fb_game_world_w * 0.5 / fb_cs
+    local fb_half_h = screen_h * 0.5 / fb_cs
+    local fb_vp_left  = Game.camera.x - fb_half_w
+    local fb_vp_right = Game.camera.x + fb_half_w
+    local fb_vp_top   = Game.camera.y - fb_half_h
+    local fb_vp_bot   = Game.camera.y + fb_half_h
     love.graphics.push()
     local game_world_w = screen_w - sidebar_w
     love.graphics.translate(sidebar_w + game_world_w / 2, screen_h / 2)
@@ -354,7 +365,10 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
         end
     end
     for _, vehicle in ipairs(Game.entities.vehicles) do
-        if vehicle.visible then vehicle:draw(Game) end
+        if vehicle.visible and vehicle.px > fb_vp_left and vehicle.px < fb_vp_right
+        and vehicle.py > fb_vp_top and vehicle.py < fb_vp_bot then
+            vehicle:draw(Game)
+        end
     end
     if Game.active_map_key == "city" and ui_manager.hovered_trip_index then
         local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
@@ -416,7 +430,10 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
     end
     if Game.debug_mode then
         for _, vehicle in ipairs(Game.entities.vehicles) do
-            if vehicle.visible then vehicle:drawDebug(Game) end
+            if vehicle.visible and vehicle.px > fb_vp_left and vehicle.px < fb_vp_right
+            and vehicle.py > fb_vp_top and vehicle.py < fb_vp_bot then
+                vehicle:drawDebug(Game)
+            end
         end
     end
     love.graphics.pop()
@@ -515,7 +532,8 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     if Game.world_highway_map and next(Game.world_highway_map) and not Game.overlay_only_mode then
         if not Game._world_highway_smooth then
             Game._world_highway_smooth = _buildWorldHighwayPaths(Game, ts)
-            Game._trip_preview_cache   = nil  -- invalidate so preview rebuilds with snap
+            Game._trip_preview_cache   = nil
+            if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
         end
         local hpaths = Game._world_highway_smooth
         if hpaths and #hpaths > 0 then
@@ -583,6 +601,12 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
             end
         end
     end  -- CITY_IMAGE_THRESHOLD
+
+    -- Rebuild snap lookup if city smooth paths were newly built this frame
+    if Game.maps.unified and not Game.maps.unified._snap_lookup then
+        require("services.PathSmoothingService").buildSnapLookup(Game)
+        Game._trip_preview_cache = nil
+    end
 
     -- LAYER: City-local debug overlays (building plots, road nodes — use city translate)
     for i = tile_i0, tile_i1 do
@@ -652,7 +676,9 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         -- Clients
         if cs >= Z.ZONE_THRESHOLD then
             for _, client in ipairs(Game.entities.clients) do
-                DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
+                if client.px > vp_left and client.px < vp_right and client.py > vp_top and client.py < vp_bot then
+                    DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
+                end
             end
         end
 
@@ -678,15 +704,21 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
             DrawingUtils.drawWorldIcon(Game, "☎️", Game.event_spawner.clickable.x, Game.event_spawner.clickable.y)
         end
 
-        -- Vehicles
+        -- Vehicles (viewport culled)
         for _, v in ipairs(Game.entities.vehicles) do
-            if v.visible and v:shouldDrawAtCameraScale(Game) then v:draw(Game) end
+            if v.visible and v:shouldDrawAtCameraScale(Game)
+            and v.px > vp_left and v.px < vp_right and v.py > vp_top and v.py < vp_bot then
+                v:draw(Game)
+            end
         end
 
-        -- Debug vehicle overlay
+        -- Debug vehicle overlay (viewport culled)
         if Game.debug_mode then
             for _, vehicle in ipairs(Game.entities.vehicles) do
-                if vehicle.visible then vehicle:drawDebug(Game) end
+                if vehicle.visible
+                and vehicle.px > vp_left and vehicle.px < vp_right and vehicle.py > vp_top and vehicle.py < vp_bot then
+                    vehicle:drawDebug(Game)
+                end
             end
         end
 
@@ -715,26 +747,48 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                 local PathfindingService = require("services.PathfindingService")
                 local path = PathfindingService.findVehiclePath(mock, leg.start_plot, leg.end_plot, Game)
                 if path and #path >= 2 then
-                    -- hw_smooth is built lazily by the highway draw block above us;
-                    -- if nil (e.g. first frame before draw), snapping is skipped gracefully.
-                    local hw_smooth = Game._world_highway_smooth
+                    local hw_smooth  = Game._world_highway_smooth
+                    local all_cities = Game.maps.all_cities or {}
+                    local function snapToChains(opx, opy, chains, wox, woy)
+                        local bd, sx, sy = math.huge, opx, opy
+                        for _, ch in ipairs(chains) do
+                            for j = 1, #ch - 1, 2 do
+                                local d2 = (ch[j]+wox-opx)^2 + (ch[j+1]+woy-opy)^2
+                                if d2 < bd then bd=d2; sx=ch[j]+wox; sy=ch[j+1]+woy end
+                            end
+                        end
+                        return sx, sy
+                    end
                     local pixel_path = {}
                     for _, node in ipairs(path) do
                         local orig_px = (node.x - 0.5) * uts
                         local orig_py = (node.y - 0.5) * uts
                         local px, py  = orig_px, orig_py
-                        -- Snap highway nodes to the smooth visual highway curve.
-                        if hw_smooth and umap.grid[node.y] then
-                            local tile = umap.grid[node.y][node.x]
-                            if tile and tile.type == "highway" then
-                                local best_d2 = math.huge
-                                for _, chain in ipairs(hw_smooth) do
-                                    for j = 1, #chain - 1, 2 do
-                                        local d2 = (chain[j]-orig_px)^2 + (chain[j+1]-orig_py)^2
-                                        if d2 < best_d2 then
-                                            best_d2 = d2; px = chain[j]; py = chain[j+1]
-                                        end
+                        local tile = umap.grid[node.y] and umap.grid[node.y][node.x]
+                        local tt   = tile and tile.type
+                        if tt == "highway" and hw_smooth then
+                            local bd = math.huge
+                            for _, chain in ipairs(hw_smooth) do
+                                for j = 1, #chain - 1, 2 do
+                                    local d2 = (chain[j]-orig_px)^2 + (chain[j+1]-orig_py)^2
+                                    if d2 < bd then bd=d2; px=chain[j]; py=chain[j+1] end
+                                end
+                            end
+                        elseif tt == "arterial" or tt == "road" or tt == "downtown_road" then
+                            for _, cmap in ipairs(all_cities) do
+                                local ox = (cmap.world_mn_x - 1) * 3
+                                local oy = (cmap.world_mn_y - 1) * 3
+                                local cw = cmap.city_grid_width  or (cmap.grid[1] and #cmap.grid[1] or 0)
+                                local ch = cmap.city_grid_height or #cmap.grid
+                                if node.x > ox and node.x <= ox+cw and node.y > oy and node.y <= oy+ch then
+                                    local chains = (tt == "arterial") and cmap._road_smooth_paths_v8
+                                               or cmap._street_smooth_paths_like_v5
+                                    if chains then
+                                        local wox = (cmap.world_mn_x - 1) * ts
+                                        local woy = (cmap.world_mn_y - 1) * ts
+                                        px, py = snapToChains(orig_px, orig_py, chains, wox, woy)
                                     end
+                                    break
                                 end
                             end
                         end

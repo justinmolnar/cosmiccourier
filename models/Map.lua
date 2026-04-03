@@ -149,28 +149,84 @@ function Map:drawRoads()
     love.graphics.setColor(1, 1, 1, 1)
 end
 
+function Map:buildTileCanvas()
+    local C_MAP = self.C.MAP
+    local grid = self.grid
+    if not grid or #grid == 0 then return end
+    local grid_h = #grid
+    local grid_w = #grid[1]
+    if grid_w == 0 then return end
+    local tile_size = self.tile_pixel_size or C_MAP.TILE_SIZE
+    local cw = grid_w * tile_size
+    local ch = grid_h * tile_size
+    if cw < 1 or ch < 1 then return end
+
+    local dt_x_min = self.downtown_offset and self.downtown_offset.x or 0
+    local dt_y_min = self.downtown_offset and self.downtown_offset.y or 0
+    local dt_x_max = dt_x_min + (self.downtown_grid_width  or 0)
+    local dt_y_max = dt_y_min + (self.downtown_grid_height or 0)
+
+    local prev_canvas = love.graphics.getCanvas()
+    local sc_x, sc_y, sc_w, sc_h = love.graphics.getScissor()
+    love.graphics.setScissor()
+
+    local canvas = love.graphics.newCanvas(cw, ch)
+    canvas:setFilter("nearest", "nearest")
+    love.graphics.setCanvas(canvas)
+    love.graphics.push()
+    love.graphics.origin()
+    love.graphics.clear(0, 0, 0, 0)
+
+    for y = 1, grid_h do
+        for x = 1, grid_w do
+            local tile = grid[y][x]
+            local is_in_downtown = (x >= dt_x_min and x < dt_x_max and y >= dt_y_min and y < dt_y_max)
+            local color = getTileColor(tile.type, is_in_downtown, C_MAP)
+            love.graphics.setColor(color[1], color[2], color[3], 1)
+            love.graphics.rectangle("fill", (x-1)*tile_size, (y-1)*tile_size, tile_size, tile_size)
+        end
+    end
+
+    love.graphics.pop()
+    love.graphics.setCanvas(prev_canvas)
+    if sc_x then love.graphics.setScissor(sc_x, sc_y, sc_w, sc_h) end
+    love.graphics.setColor(1, 1, 1, 1)
+    self._tile_canvas = canvas
+end
+
 function Map:drawGrid(grid, alpha)
     local C_MAP = self.C.MAP
     if not grid or #grid == 0 then return end
-    
+
+    -- Fast path: use pre-rendered canvas when drawing self.grid at full alpha.
+    if grid == self.grid and (alpha == nil or alpha == 1) then
+        if not self._tile_canvas then
+            self:buildTileCanvas()
+        end
+        if self._tile_canvas then
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.draw(self._tile_canvas, 0, 0)
+            return
+        end
+    end
+
+    -- Fallback: per-tile rendering (first frame before canvas is ready, or non-self grids).
     local grid_h, grid_w = #grid, #grid[1]
     local tile_size = self.tile_pixel_size or C_MAP.TILE_SIZE
-    
+
     local dt_x_min = self.downtown_offset.x
     local dt_y_min = self.downtown_offset.y
     local dt_x_max = self.downtown_offset.x + self.downtown_grid_width
     local dt_y_max = self.downtown_offset.y + self.downtown_grid_height
 
-    for y = 1, grid_h do 
+    for y = 1, grid_h do
         for x = 1, grid_w do
             local tile = grid[y][x]
             local is_in_downtown = (x >= dt_x_min and x < dt_x_max and y >= dt_y_min and y < dt_y_max)
-            
             local color = getTileColor(tile.type, is_in_downtown, C_MAP)
-            
             love.graphics.setColor(color[1], color[2], color[3], alpha or 1)
             love.graphics.rectangle("fill", (x-1) * tile_size, (y-1) * tile_size, tile_size, tile_size)
-        end 
+        end
     end
 end
 

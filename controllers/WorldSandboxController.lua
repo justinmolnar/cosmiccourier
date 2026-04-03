@@ -1510,7 +1510,7 @@ function WorldSandboxController:sendToGame()
     game.entities.depot_plot = new_depot
     local uts = game.maps.unified.tile_pixel_size
     for _, v in ipairs(game.entities.vehicles) do
-        v.cargo = {}; v.trip_queue = {}; v.path = {}; v.smooth_path = nil
+        v.cargo = {}; v.trip_queue = {}; v.path = {}; v.smooth_path = nil; v.smooth_path_i = nil
         v.operational_map_key = "unified"
         if new_depot then
             v.depot_plot  = new_depot
@@ -1539,6 +1539,7 @@ function WorldSandboxController:sendToGame()
     -- Reset per-city canvas caches (new map objects have nil canvas already, but be explicit)
     for _, m in ipairs(game.maps and game.maps.all_cities or {}) do
         m._overlay_canvas = nil
+        m._tile_canvas    = nil
     end
 
     -- Zoom to downtown and close sandbox
