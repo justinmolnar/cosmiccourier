@@ -4,6 +4,13 @@ local IMPASSABLE     = WGC.IMPASSABLE_COST
 local SNAP_CAP       = WGC.SNAP_SEARCH_CAP
 local PathCacheService = require("services.PathCacheService")
 
+-- Integer → string tile type translation for FFI grid reads.
+-- Indices match TILE_INT in WorldSandboxController and C.TILE in constants.lua.
+local _TILE_NAMES = {
+    [0]="grass", [1]="road", [2]="downtown_road", [3]="arterial", [4]="highway",
+    [5]="water",  [6]="mountain", [7]="river", [8]="plot", [9]="downtown_plot",
+}
+
 local PathfindingService = {}
 
 -- ── Snap helper ───────────────────────────────────────────────────────────────
@@ -14,10 +21,16 @@ local function _snapToNearestTraversable(plot, map, path_grid, grid_w, grid_h, v
     local x, y = plot.x, plot.y
     local zsv = map.zone_seg_v
     local zsh = map.zone_seg_h
+    local fgi = map.ffi_grid
+    local fgw = grid_w
     local function inBounds(gx, gy) return gx>=1 and gx<=grid_w and gy>=1 and gy<=grid_h end
+    local function getTileType(cx, cy)
+        if fgi then return _TILE_NAMES[fgi[(cy-1)*fgw + (cx-1)].type] or "grass" end
+        return path_grid[cy][cx].type
+    end
     local function isTraversable(cx, cy)
         if not inBounds(cx, cy) then return false end
-        local t = path_grid[cy][cx].type
+        local t = getTileType(cx, cy)
         if map:isRoad(t) and vehicle:getMovementCostFor(t) < IMPASSABLE then return true end
         -- Zone_seg-adjacent: a plot cell flanking a street edge is traversable at road cost.
         if vehicle:getMovementCostFor("road") < IMPASSABLE then
@@ -49,8 +62,17 @@ end
 -- ── Sandbox A* (used for all vehicle pathfinding on the unified map) ──────────
 
 local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
-    local path_grid = map.grid
-    local grid_h, grid_w = #path_grid, #path_grid[1]
+    local path_grid = map.grid  -- nil for unified map (FFI); Lua table for city maps
+    local grid_h = map._h or (path_grid and #path_grid or 0)
+    local grid_w = map._w or (path_grid and path_grid[1] and #path_grid[1] or 0)
+
+    -- FFI tile type read (unified map) or Lua table read (city/sandbox maps).
+    local fgi = map.ffi_grid
+    local fgw = grid_w
+    local function getTileType(gx, gy)
+        if fgi then return _TILE_NAMES[fgi[(gy-1)*fgw + (gx-1)].type] or "grass" end
+        return path_grid[gy][gx].type
+    end
 
     local start_sub = _snapToNearestTraversable(start_node, map, path_grid, grid_w, grid_h, vehicle)
     if not start_sub then return nil end
@@ -63,7 +85,7 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
                     or node_y < bounds.y1 or node_y > bounds.y2) then
             return IMPASSABLE
         end
-        local t = path_grid[node_y][node_x].type
+        local t = getTileType(node_x, node_y)
         local cost = vehicle:getMovementCostFor(t)
         -- Streets are edges (zone_seg), not cells. A cell flanking a street edge is
         -- traversable at road cost even if its tile type is plot/downtown_plot/etc.
@@ -81,8 +103,8 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
         local nx, ny = end_plot.x + d[1], end_plot.y + d[2]
         if nx >= 1 and nx <= grid_w and ny >= 1 and ny <= grid_h then
-            local tile = path_grid[ny][nx]
-            if tile and map:isRoad(tile.type) and vehicle:getMovementCostFor(tile.type) < IMPASSABLE then
+            local t = getTileType(nx, ny)
+            if map:isRoad(t) and vehicle:getMovementCostFor(t) < IMPASSABLE then
                 local key = ny * 10000 + nx
                 if not seen[key] then seen[key] = true; end_candidates[#end_candidates+1] = {x=nx, y=ny} end
             end
@@ -106,7 +128,7 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     local best_path = nil
     for _, end_node in ipairs(end_candidates) do
         if end_node.x == start_sub.x and end_node.y == start_sub.y then return {} end
-        local path = game.pathfinder.findPath(path_grid, start_sub, end_node, get_cost, sandbox_proxy)
+        local path = game.pathfinder.findPath(path_grid or {}, start_sub, end_node, get_cost, sandbox_proxy)
         if path and (not best_path or #path < #best_path) then best_path = path end
     end
 
@@ -134,8 +156,8 @@ function PathfindingService.findVehiclePath(vehicle, start_node, end_plot, game)
             vehicle.operational_map_key, vehicle.id))
         return nil
     end
-    local path_grid = map.grid
-    if not path_grid or #path_grid == 0 then
+    -- Unified map uses FFI grid (map.ffi_grid); city maps use Lua grid (map.grid).
+    if not map.ffi_grid and (not map.grid or #map.grid == 0) then
         print(string.format("ERROR: PathfindingService - No map grid available for %s %d", vehicle.type, vehicle.id))
         return nil
     end

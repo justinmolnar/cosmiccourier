@@ -1,5 +1,15 @@
 -- controllers/WorldSandboxController.lua
 
+local ffi = require("ffi")
+local _ffi_cdef_done = false  -- guard: ffi.cdef must only run once per Lua state
+
+-- Integer tile type encoding for the FFI unified grid.
+-- Must stay in sync with C.TILE in constants.lua and _TILE_NAMES in PathfindingService.
+local TILE_INT = {
+    grass=0, road=1, downtown_road=2, arterial=3, highway=4,
+    water=5, mountain=6, river=7, plot=8, downtown_plot=9,
+}
+
 local WorldSandboxController = {}
 WorldSandboxController.__index = WorldSandboxController
 
@@ -1311,33 +1321,41 @@ function WorldSandboxController:sendToGame()
     -- Build the unified navigation grid: one sub-cell grid spanning the entire world.
     -- Each world cell (wx,wy) maps to 3×3 sub-cells at unified coords
     -- ((wx-1)*3+1 … wx*3, same for y).
+    -- Stored as a flat LuaJIT FFI C array (CosmicTile[uw*uh]) instead of a 2D
+    -- Lua table, keeping it outside the GC heap. Index: (uy-1)*uw + (ux-1).
     do
+        if not _ffi_cdef_done then
+            ffi.cdef[[ typedef struct { uint8_t type; uint8_t _pad[3]; } CosmicTile; ]]
+            _ffi_cdef_done = true
+        end
+
         local hw   = self.highway_map or {}
         local ww   = self.world_w
         local wh   = self.world_h
         local uw   = ww * 3
         local uh   = wh * 3
-        local GRASS   = {type = "grass"}
-        local HIGHWAY = {type = "highway"}
-        local ugrid = {}
-        for uy = 1, uh do
-            ugrid[uy] = {}
-            for ux = 1, uw do ugrid[uy][ux] = GRASS end
-        end
+
+        -- ffi.new zeroes the array, so all cells start as type=0 (GRASS).
+        local ffi_grid = ffi.new("CosmicTile[?]", uw * uh)
+
+        -- Copy city sub-cell grids into the unified FFI grid.
         for _, cmap in ipairs(game.maps.all_cities) do
             local ox = (cmap.world_mn_x - 1) * 3
             local oy = (cmap.world_mn_y - 1) * 3
             for cy = 1, #cmap.grid do
-                for cx = 1, #cmap.grid[cy] do
-                    ugrid[oy + cy][ox + cx] = cmap.grid[cy][cx]
+                local row = cmap.grid[cy]
+                local base = (oy + cy - 1) * uw + ox
+                for cx = 1, #row do
+                    ffi_grid[base + cx - 1].type = TILE_INT[row[cx].type] or 0
                 end
             end
         end
+
         -- Stamp highway AFTER city copy.
         -- For world cells outside city territory: always stamp as highway.
-        -- For world cells inside city territory: only stamp if they border a non-city cell
-        -- (boundary entry/exit points). Interior city cells keep their city tile types so
-        -- inner-city pathfinding uses zone_seg streets rather than snapping to the highway.
+        -- For world cells inside city territory: only stamp boundary cells
+        -- (those adjacent to a non-city cell) so inner-city pathfinding keeps
+        -- using zone_seg streets rather than snapping to the highway band.
         local dirs4 = {{1,0},{-1,0},{0,1},{0,-1}}
         for ci, _ in pairs(hw) do
             local wx = (ci - 1) % ww + 1
@@ -1358,10 +1376,9 @@ function WorldSandboxController:sendToGame()
             end
             if not is_city or is_boundary then
                 for dy = 0, 2 do
+                    local base = ((wy - 1) * 3 + dy) * uw + (wx - 1) * 3
                     for dx = 0, 2 do
-                        local ux = (wx - 1) * 3 + 1 + dx
-                        local uy = (wy - 1) * 3 + 1 + dy
-                        ugrid[uy][ux] = HIGHWAY
+                        ffi_grid[base + dx].type = 4  -- HIGHWAY
                     end
                 end
             end
@@ -1407,10 +1424,14 @@ function WorldSandboxController:sendToGame()
         end
 
         local uts = C.MAP.TILE_SIZE / 3
-        local umap = { grid = ugrid, tile_pixel_size = uts, _w = uw, _h = uh }
+        -- grid = nil: tile data lives in ffi_grid. Pathfinder and PathfindingService
+        -- use _w/_h for dimensions and ffi_grid for tile type reads.
+        local umap = { grid = nil, ffi_grid = ffi_grid, tile_pixel_size = uts, _w = uw, _h = uh }
         umap.zone_seg_v = uzsv
         umap.zone_seg_h = uzsh
         function umap:isRoad(t)
+            -- Accepts integer (FFI grid) or string (city map fallback).
+            if type(t) == "number" then return t >= 1 and t <= 4 end
             return t == "road" or t == "downtown_road" or t == "arterial" or t == "highway"
         end
         function umap:getPixelCoords(x, y)
@@ -1418,13 +1439,14 @@ function WorldSandboxController:sendToGame()
         end
         function umap:findNearestRoadTile(plot)
             local gw, gh = self._w, self._h
+            local fg = self.ffi_grid
             local sx = math.max(1, math.min(gw, plot.x))
             local sy = math.max(1, math.min(gh, plot.y))
             local visited = {[sy * (gw + 1) + sx] = true}
             local q, qi = {{sx, sy}}, 1
             while qi <= #q and qi <= 4000 do
                 local cx, cy = q[qi][1], q[qi][2]; qi = qi + 1
-                if self:isRoad(self.grid[cy][cx].type) then return {x=cx, y=cy} end
+                if self:isRoad(fg[(cy-1)*gw + (cx-1)].type) then return {x=cx, y=cy} end
                 for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
                     local nx, ny = cx+d[1], cy+d[2]
                     local k = ny*(gw+1)+nx

@@ -12,7 +12,7 @@ local PathSmoothingService = {}
 -- Call this from GameView whenever new smooth paths are built.
 function PathSmoothingService.buildSnapLookup(game)
     local umap = game.maps.unified
-    if not umap or not umap.grid then return end
+    if not umap then return end
 
     local uts = umap.tile_pixel_size
     local uw  = umap._w

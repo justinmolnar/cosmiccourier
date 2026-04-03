@@ -149,28 +149,40 @@ The lazy-deletion heap can produce slightly more memory allocation than a proper
 
 #### 3b — Path result cache
 
+**Status: Implemented as sub-cell cache (low hit rate). Needs refinement — see 3b-v2 below.**
+
+Tasks 3.7–3.9 are done. PathCacheService is an 800-entry LRU keyed on `"snapped_start_x,y > end_plot_x,y"`. The LRU infrastructure is correct and invalidation works. However, because the key includes the vehicle's exact snapped sub-cell start position, hit rate is near zero in practice: each vehicle starts a trip from a slightly different position so no two requests share the same key.
+
+#### 3b-v2 — Coarse-node path cache (refinement)
+
+**Goal:** Replace the exact-sub-cell cache key with coarse zone keys so paths between the same general areas are shared. The approach is a two-level path: short local A* from vehicle to nearest coarse node, cached A* between coarse nodes, short local A* from coarse node to destination.
+
+**Coarse nodes** are one per world cell (each world cell = 3×3 sub-cells). A coarse node is the sub-cell at the center of its world cell: `cx = (wx-1)*3 + 2`, `cy = (wy-1)*3 + 2`. There are `world_w × world_h` coarse nodes (~180,000 at a 600×300 world). Cache key: `"cnx1,cny1>cnx2,cny2"`.
+
 | # | File | Change |
 |---|------|--------|
-| 3.7 | `services/PathCacheService.lua` | **New file.** LRU cache keyed by `"sx,sy>ex,ey"` string. Max 800 entries. `get(sx,sy,ex,ey)` returns cached path or nil. `put(sx,sy,ex,ey,path)` stores result, evicting oldest entry if at cap. `invalidate()` clears cache entirely (call on world regeneration). |
-| 3.8 | `services/PathfindingService.lua` | In `findVehiclePathSandbox()`, before calling A*: check `PathCacheService.get(start.x, start.y, end_plot.x, end_plot.y)`. If hit, return it. After A* completes, call `PathCacheService.put(...)` with the result. |
-| 3.9 | `controllers/WorldSandboxController.lua` | In `sendToGame()`, after world setup: call `require("services.PathCacheService").invalidate()` to clear any stale paths from a previous generation. |
+| 3.10 | `services/PathCacheService.lua` | Add `PathCacheService.nearestCoarseNode(sx, sy, world_w)` — rounds sub-cell coords to the nearest world-cell center: `cnx = math.floor((sx-1)/3)*3 + 2`, `cny = math.floor((sy-1)/3)*3 + 2`. Update `get`/`put` to use `cnx,cny` keys instead of exact sub-cell coords. |
+| 3.11 | `services/PathfindingService.lua` | In `findVehiclePathSandbox()`, split the path into three segments: (1) local: `start_sub → coarse_start` (short A*, not cached), (2) trunk: `coarse_start → coarse_end` (cached A*), (3) local: `coarse_end → end_node` (short A*, not cached). If coarse_start == coarse_end (same world cell), skip cache and run a single direct A*. Concatenate the three segments into one path before returning. |
+| 3.12 | `services/PathfindingService.lua` | Add a `_localBudget` cap (e.g. 200 nodes explored) to the local A* calls in 3.11 so they stay cheap. If local A* fails within budget, fall back to direct full A* uncached. |
 
 ### Expected Outcome
 
-GC pressure from path array manipulation is eliminated. Bikes making repeat runs between the same buildings skip A* entirely on the second trip. After 2–3 minutes of F-test gameplay, A* call rate visible in PathScheduler queue should drop noticeably (add a temporary `print` counter if you want to verify).
+Hit rate on the trunk segment climbs to near 100% after the first trip between any two world cells. Bikes and trucks making repeat inter-city runs skip the expensive cross-map A* entirely after warm-up. The cache still contains only ~`world_w * world_h` distinct keys in the worst case.
 
 ### Testing
 
 - 1000+ frame run with F-test → no GC-pause stutter (the periodic freezes every few seconds should be gone or greatly reduced).
 - Vehicles reach correct destinations: path_i approach is functionally identical to table.remove — verify with a few manual trips.
 - After `sendToGame()`, force a new inter-city trip → path is recomputed (cache correctly invalidated).
-- Deliberately re-run the same route (use L key twice to same destination) → second trip should not show PathScheduler queue grow (cache hit).
+- Two trucks traveling the same inter-city route: second truck's PathScheduler call should show no A* debug print for the trunk segment (cache hit).
 
 ### AI Notes
 
-The cache stores path table references. Vehicles must not mutate the path array they receive — with the `path_i` approach from 3a they only read from it, so this is safe. If any code path still calls `table.remove(vehicle.path, ...)`, the cache will be silently corrupted; audit thoroughly.
+The local segments (vehicle → coarse node, coarse node → destination) are short by definition (at most ~6 sub-cells within one world cell), so they can use a node budget cap without risk of failure on valid maps. The trunk A* is the expensive part and is the one being cached.
 
-Cache key collision is impossible with `"sx,sy>ex,ey"` format as long as coordinates fit in Lua's default number-to-string conversion. Coordinates are integers, so this is guaranteed.
+If a coarse node center falls on an impassable tile (water, mountain), snap it to the nearest traversable sub-cell before caching. Use the existing `_snapToNearestTraversable` for this.
+
+The path table stored in the cache is the trunk segment only. The caller concatenates local + trunk + local into a new table for each vehicle, so the cached trunk is never mutated even though different vehicles share the same reference for their own copies.
 
 ---
 
@@ -216,6 +228,8 @@ end
 
 The `umap:findNearestRoadTile()` BFS currently reads `self.grid[cy][cx].type` as a string. Update to read from `ffi_grid` with integer comparison once 4.3 is in place.
 
+**Missing task (added after road refactor):** The pathfinder's own `getNeighbors` sandbox branch (pathfinder.lua) reads tile types directly from the Lua grid: `local cur_t = grid[y][x].type` and `local target_t = grid[ny][nx].type`. These are used for `map:isRoad()` and the highway bridge check. Task 4.4 only updates PathfindingService — add a parallel update to pathfinder.lua's sandbox getNeighbors to read from `ffi_grid[(ny-1)*uw + (nx-1)].type` (integer). Zone_seg (`map.zone_seg_v/h`) is read from the map object, not the grid, so it is unaffected.
+
 ---
 
 ## Phase 5 — Quick Wins and Tuning
@@ -227,7 +241,8 @@ The `umap:findNearestRoadTile()` BFS currently reads `self.grid[cy][cx].type` as
 | # | File | Change |
 |---|------|--------|
 | 5.1 | `main.lua` | Add GC tuning immediately after `_buildGame()`: `collectgarbage("setpause", 300)` and `collectgarbage("setstepmul", 400)`. These reduce GC pause frequency at the cost of slightly higher peak memory. Two lines, immediate effect. |
-| 5.2 | `controllers/InputController.lua` | Fix the S-key smooth vehicle movement toggle. When toggled ON: (1) call `require("services.PathSmoothingService").buildSnapLookup(game)` to ensure the snap lookup exists, then (2) iterate all vehicles and call `buildSmoothPath(v, game)` for any vehicle with `v.path and #v.path > 0`. Currently vehicles mid-path when S is pressed never get smooth paths until their next trip. |
+| 5.2 | `controllers/InputController.lua` | Fix the S-key smooth vehicle movement toggle. When toggled ON: (1) call `require("services.PathSmoothingService").buildSnapLookup(game)` to ensure the snap lookup exists, then (2) iterate all vehicles and call `buildSmoothPath(v, game)` for any vehicle where `(v.path_i or 1) <= #v.path` (i.e. has remaining path nodes — **not** `#v.path > 0` which is always true after Phase 3**). Currently vehicles mid-path when S is pressed never get smooth paths until their next trip. |
+| 5.2a | `services/PathSmoothingService.lua` | `buildSmoothPath` currently iterates `for _, node in ipairs(vehicle.path)` from index 1. When called mid-path (path_i > 1), this builds a smooth curve through already-traversed nodes, which sends the vehicle backward. Change the loop to iterate from `vehicle.path_i`: `for i = (vehicle.path_i or 1), #vehicle.path do local node = vehicle.path[i] ...`. This fix must ship with 5.2 since 5.2 is the only caller that triggers mid-path rebuilds. |
 | 5.3 | `models/AutoDispatcher.lua` | Type-index vehicles at dispatch time. Before the trip loop, build `local by_type = {}` partitioning all vehicles by `v.type`. In the inner loop, iterate `by_type[leg.vehicleType]` instead of all vehicles. Cuts inner loop by ~50% when fleet is split bikes/trucks. |
 | 5.4 | `services/PathSmoothingService.lua` | Fix `buildSmoothPath` to handle the case where `game.maps.unified._snap_lookup` is nil — call `buildSnapLookup` internally rather than silently failing. This is a correctness fix that also makes the S-toggle work reliably. |
 

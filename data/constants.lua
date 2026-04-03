@@ -225,6 +225,22 @@ local C = {
         PAYOUT_TEXT_LIFESPAN_SEC = 3,
         PAYOUT_TEXT_FLOAT_SPEED  = -20,
     },
+
+    -- Integer tile type constants for the FFI unified grid.
+    -- Must match the TILE_INT table in WorldSandboxController and
+    -- the _TILE_NAMES table in PathfindingService.
+    TILE = {
+        GRASS        = 0,
+        ROAD         = 1,
+        DOWNTOWN_ROAD= 2,
+        ARTERIAL     = 3,
+        HIGHWAY      = 4,
+        WATER        = 5,
+        MOUNTAIN     = 6,
+        RIVER        = 7,
+        PLOT         = 8,
+        DOWNTOWN_PLOT= 9,
+    },
 }
 
 return C

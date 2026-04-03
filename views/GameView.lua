@@ -759,13 +759,16 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                         end
                         return sx, sy
                     end
+                    local _fg = umap.ffi_grid
+                    local _fgw = umap._w
+                    local _TN = _fg and {[0]="grass",[1]="road",[2]="downtown_road",[3]="arterial",[4]="highway"} or nil
                     local pixel_path = {}
                     for _, node in ipairs(path) do
                         local orig_px = (node.x - 0.5) * uts
                         local orig_py = (node.y - 0.5) * uts
                         local px, py  = orig_px, orig_py
-                        local tile = umap.grid[node.y] and umap.grid[node.y][node.x]
-                        local tt   = tile and tile.type
+                        local tt = _fg and _TN[_fg[(node.y-1)*_fgw + (node.x-1)].type]
+                                       or (umap.grid and umap.grid[node.y] and umap.grid[node.y][node.x] and umap.grid[node.y][node.x].type)
                         if tt == "highway" and hw_smooth then
                             local bd = math.huge
                             for _, chain in ipairs(hw_smooth) do
@@ -1118,11 +1121,11 @@ function GameView:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
     if not Game.debug_unified_grid then return end
     local umap  = Game.maps and Game.maps.unified
     if not umap then return end
-    local ugrid = umap.grid
-    local gh    = #ugrid
-    if gh == 0 then return end
-    local gw    = #ugrid[1]
-    if gw == 0 then return end
+    local fgi = umap.ffi_grid
+    if not fgi then return end
+    local gw = umap._w
+    local gh = umap._h
+    if gw == 0 or gh == 0 then return end
 
     local ts  = Game.C.MAP.TILE_SIZE
     local uts = umap.tile_pixel_size or (ts / 3)
@@ -1144,19 +1147,14 @@ function GameView:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
 
     -- Filled tiles: highway (orange), arterial (cyan)
     for uy = uy0, uy1 do
-        local row = ugrid[uy]
-        if row then
-            for ux = ux0, ux1 do
-                local tile = row[ux]
-                if tile then
-                    local t = tile.type
-                    if     t == "highway"  then love.graphics.setColor(1.0,  0.55, 0.0,  0.80)
-                    elseif t == "arterial" then love.graphics.setColor(0.0,  1.0,  0.75, 0.80)
-                    else t = nil end
-                    if t then
-                        love.graphics.rectangle("fill", (ux-1)*uts, (uy-1)*uts, uts, uts)
-                    end
-                end
+        local base = (uy - 1) * gw
+        for ux = ux0, ux1 do
+            local ti = fgi[base + ux - 1].type
+            if     ti == 4 then love.graphics.setColor(1.0,  0.55, 0.0,  0.80)  -- highway
+            elseif ti == 3 then love.graphics.setColor(0.0,  1.0,  0.75, 0.80)  -- arterial
+            else ti = nil end
+            if ti then
+                love.graphics.rectangle("fill", (ux-1)*uts, (uy-1)*uts, uts, uts)
             end
         end
     end

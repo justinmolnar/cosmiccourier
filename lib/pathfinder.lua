@@ -13,6 +13,12 @@ local function nodeKey(node)
     return (node.is_tile and "t" or "") .. node.y .. "," .. node.x
 end
 
+-- Integer → string tile name table for FFI grid reads (matches PathfindingService).
+local _TILE_NAMES = {
+    [0]="grass", [1]="road", [2]="downtown_road", [3]="arterial", [4]="highway",
+    [5]="water",  [6]="mountain", [7]="river", [8]="plot", [9]="downtown_plot",
+}
+
 local function getNeighbors(node, grid, grid_width, grid_height, map)
     local neighbors = {}
     local x, y = node.x, node.y
@@ -25,11 +31,18 @@ local function getNeighbors(node, grid, grid_width, grid_height, map)
         -- (non-obstacle) to transition from world highways into city street network.
         local zsv = map.zone_seg_v
         local zsh = map.zone_seg_h
-        local cur_t = grid[y] and grid[y][x] and grid[y][x].type
+        -- FFI grid (unified map) or Lua grid (city/sandbox maps).
+        local fgi = map.ffi_grid
+        local fgw = grid_width
+        local function getTT(gx, gy)
+            if fgi then return _TILE_NAMES[fgi[(gy-1)*fgw + (gx-1)].type] or "grass" end
+            return grid[gy] and grid[gy][gx] and grid[gy][gx].type
+        end
+        local cur_t = getTT(x, y)
         for _, dir in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
             local nx, ny = x + dir[1], y + dir[2]
             if nx > 0 and nx <= grid_width and ny > 0 and ny <= grid_height then
-                local target_t = grid[ny][nx].type
+                local target_t = getTT(nx, ny)
                 local ok = map:isRoad(target_t)
                 if not ok then
                     -- Check zone_seg edge between current and target cell
@@ -157,8 +170,8 @@ function Pathfinder.findPath(grid, startNode, endNode, costs, map)
         return nil
     end
 
-    local grid_height = #grid
-    local grid_width = #grid[1]
+    local grid_height = map._h or (grid and #grid or 0)
+    local grid_width  = map._w or (grid and grid[1] and #grid[1] or 0)
 
     local startKey = nodeKey(startNode)
     local endKey   = nodeKey(endNode)
