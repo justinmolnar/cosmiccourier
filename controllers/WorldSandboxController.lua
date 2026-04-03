@@ -1259,6 +1259,7 @@ function WorldSandboxController:sendToGame()
             for ci in pairs(bnds) do all_claimed[ci] = idx end
         end
     end
+    game.hw_all_claimed = all_claimed
 
     -- Build starter city: grid + zone + road network (identical pipeline to extra cities)
     local new_map = self:_buildCityMap(start_idx, city_mn_x, city_mx_x, city_mn_y, city_mx_y, art_sci, all_claimed)
@@ -1317,6 +1318,9 @@ function WorldSandboxController:sendToGame()
     end
     -- Named keys for city maps ("city_1", "city_2", …) used by rendering
     for i, m in ipairs(game.maps.all_cities) do game.maps["city_" .. i] = m end
+
+    -- Clear stale path cache before building new unified grid and pre-warming trunk paths.
+    require("services.PathCacheService").invalidate()
 
     -- Build the unified navigation grid: one sub-cell grid spanning the entire world.
     -- Each world cell (wx,wy) maps to 3×3 sub-cells at unified coords
@@ -1458,6 +1462,139 @@ function WorldSandboxController:sendToGame()
             return nil
         end
         game.maps.unified = umap
+        umap.world_w = ww
+
+        -- ── Attachment nodes ──────────────────────────────────────────────────
+        -- An attachment node is the centre sub-cell of a highway world cell that
+        -- directly borders a city. These are the fixed endpoints for trunk caching.
+        -- game.hw_attachment_nodes[city_idx] = {{ux,uy,key}, ...}
+        local attachment_nodes = {}
+
+        for ci, _ in pairs(hw) do
+            local wx2 = (ci - 1) % ww + 1
+            local wy2 = math.floor((ci - 1) / ww) + 1
+            local this_city = all_claimed[ci]
+            for _, d in ipairs(dirs4) do
+                local nx2, ny2 = wx2 + d[1], wy2 + d[2]
+                if nx2 >= 1 and nx2 <= ww and ny2 >= 1 and ny2 <= wh then
+                    local neighbor_city = all_claimed[(ny2 - 1) * ww + nx2]
+                    local relevant_city = this_city or neighbor_city
+                    if relevant_city and this_city ~= neighbor_city then
+                        -- Always use this highway cell (wx2,wy2) as the attachment node.
+                        local ux2 = (wx2 - 1) * 3 + 2
+                        local uy2 = (wy2 - 1) * 3 + 2
+                        if not attachment_nodes[relevant_city] then attachment_nodes[relevant_city] = {} end
+                        local key2 = uy2 * 10000 + ux2
+                        local already = false
+                        for _, n in ipairs(attachment_nodes[relevant_city]) do
+                            if n.key == key2 then already = true; break end
+                        end
+                        if not already then
+                            attachment_nodes[relevant_city][#attachment_nodes[relevant_city]+1] = {ux=ux2, uy=uy2, key=key2}
+                        end
+                    end
+                end
+            end
+        end
+
+        game.hw_attachment_nodes = attachment_nodes
+
+        -- ── City edges via highway connected-component analysis ───────────────
+        -- Cities are never directly adjacent — they're separated by unclaimed
+        -- highway cells. BFS the world-level highway graph to find components,
+        -- then two cities share an edge iff they have attachment nodes on the
+        -- same component. Trunk paths are computed lazily on first vehicle use.
+        local hw_comp = {}   -- [world_ci] = component_id
+        local n_comp  = 0
+        for hci, _ in pairs(hw) do
+            if not hw_comp[hci] then
+                n_comp = n_comp + 1
+                local bq, bqi = {hci}, 1
+                hw_comp[hci] = n_comp
+                while bqi <= #bq do
+                    local cc = bq[bqi]; bqi = bqi + 1
+                    local cwx2 = (cc - 1) % ww + 1
+                    local cwy2 = math.floor((cc - 1) / ww) + 1
+                    for _, d2 in ipairs(dirs4) do
+                        local nwx2, nwy2 = cwx2 + d2[1], cwy2 + d2[2]
+                        if nwx2 >= 1 and nwx2 <= ww and nwy2 >= 1 and nwy2 <= wh then
+                            local nci2 = (nwy2 - 1) * ww + nwx2
+                            if hw[nci2] and not hw_comp[nci2] then
+                                hw_comp[nci2] = n_comp
+                                bq[#bq + 1] = nci2
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Map each city to its component(s) via its attachment nodes.
+        local city_comp = {}  -- [city_idx][comp_id] = attachment node
+        for city_idx, nodes2 in pairs(attachment_nodes) do
+            city_comp[city_idx] = {}
+            for _, att in ipairs(nodes2) do
+                local awx = math.ceil(att.ux / 3)
+                local awy = math.ceil(att.uy / 3)
+                local comp2 = hw_comp[(awy - 1) * ww + awx]
+                if comp2 and not city_comp[city_idx][comp2] then
+                    city_comp[city_idx][comp2] = att
+                end
+            end
+        end
+
+        -- Build city_edges: cities sharing a highway component are connected.
+        local city_edges = {}
+        for city_a, comps_a in pairs(city_comp) do
+            for city_b, comps_b in pairs(city_comp) do
+                if city_a < city_b then
+                    for comp3, att_a in pairs(comps_a) do
+                        local att_b = comps_b[comp3]
+                        if att_b then
+                            if not city_edges[city_a] then city_edges[city_a] = {} end
+                            if not city_edges[city_a][city_b] then
+                                city_edges[city_a][city_b] = {from={ux=att_a.ux,uy=att_a.uy}, to={ux=att_b.ux,uy=att_b.uy}}
+                            end
+                            if not city_edges[city_b] then city_edges[city_b] = {} end
+                            if not city_edges[city_b][city_a] then
+                                city_edges[city_b][city_a] = {from={ux=att_b.ux,uy=att_b.uy}, to={ux=att_a.ux,uy=att_a.uy}}
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        game.hw_city_edges = city_edges
+
+        -- ── City sub-cell bounding boxes ──────────────────────────────────────
+        -- Used by PathfindingService to limit Tier 1 / Tier 4 A* to the city's
+        -- sub-cell area (+ margin), preventing them from exploring the full 1800×900
+        -- unified grid and causing per-frame stutter.
+        local city_sc_bounds = {}
+        local MARGIN = 6   -- extra sub-cells beyond city border (covers highway attachment nodes)
+        local cbl = self.city_bounds_list or {}
+        for city_idx, bounds_set in pairs(cbl) do
+            local mn_wx, mx_wx = ww + 1, 0
+            local mn_wy, mx_wy = wh + 1, 0
+            for ci in pairs(bounds_set) do
+                local cwx2 = (ci - 1) % ww + 1
+                local cwy2 = math.floor((ci - 1) / ww) + 1
+                if cwx2 < mn_wx then mn_wx = cwx2 end
+                if cwx2 > mx_wx then mx_wx = cwx2 end
+                if cwy2 < mn_wy then mn_wy = cwy2 end
+                if cwy2 > mx_wy then mx_wy = cwy2 end
+            end
+            if mn_wx <= mx_wx then
+                city_sc_bounds[city_idx] = {
+                    x1 = math.max(1,  (mn_wx - 1) * 3 + 1 - MARGIN),
+                    y1 = math.max(1,  (mn_wy - 1) * 3 + 1 - MARGIN),
+                    x2 = math.min(uw, mx_wx * 3 + MARGIN),
+                    y2 = math.min(uh, mx_wy * 3 + MARGIN),
+                }
+            end
+        end
+        game.hw_city_sc_bounds = city_sc_bounds
     end
 
     -- Reset vehicles using unified sub-cell coordinates
@@ -1467,10 +1604,33 @@ function WorldSandboxController:sendToGame()
         x = (new_map.world_mn_x - 1) * 3 + city_depot_local.x,
         y = (new_map.world_mn_y - 1) * 3 + city_depot_local.y,
     }
+    -- Snap depot to the nearest city road tile (type 1-3, not highway=4) so
+    -- vehicles start on the street network, not on the world highway band.
+    if new_depot then
+        local _umap = game.maps.unified
+        local _fg, _gw, _gh = _umap.ffi_grid, _umap._w, _umap._h
+        local _sx = math.max(1, math.min(_gw, new_depot.x))
+        local _sy = math.max(1, math.min(_gh, new_depot.y))
+        local _visited = {[_sy*(_gw+1)+_sx] = true}
+        local _q, _qi = {{_sx, _sy}}, 1
+        local _snapped = nil
+        while _qi <= #_q and _qi <= 4000 do
+            local _cx, _cy = _q[_qi][1], _q[_qi][2]; _qi = _qi + 1
+            local _ti = _fg[(_cy-1)*_gw + (_cx-1)].type
+            if _ti == 1 or _ti == 2 then _snapped = {x=_cx, y=_cy}; break end
+            for _, _d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+                local _nx, _ny = _cx+_d[1], _cy+_d[2]
+                local _k = _ny*(_gw+1)+_nx
+                if _nx>=1 and _nx<=_gw and _ny>=1 and _ny<=_gh and not _visited[_k] then
+                    _visited[_k]=true; _q[#_q+1]={_nx, _ny}
+                end
+            end
+        end
+        if _snapped then new_depot = _snapped end
+    end
     game.entities.depot_plot = new_depot
     local uts = game.maps.unified.tile_pixel_size
     require("services.PathScheduler").clear()
-    require("services.PathCacheService").invalidate()
     for _, v in ipairs(game.entities.vehicles) do
         v.cargo = {}; v.trip_queue = {}; v.path = {}; v.path_i = 1; v.smooth_path = nil; v.smooth_path_i = nil
         v._path_pending = false

@@ -13,6 +13,48 @@ local _TILE_NAMES = {
 
 local PathfindingService = {}
 
+-- ── HPA* helpers ──────────────────────────────────────────────────────────────
+
+-- O(1) city membership lookup for a unified sub-cell position.
+local function _cityOf(ux, uy, game)
+    local umap = game.maps.unified
+    if not umap or not umap.world_w then return nil end
+    local wx = math.ceil(ux / 3)
+    local wy = math.ceil(uy / 3)
+    local ci = (wy - 1) * umap.world_w + wx
+    return game.hw_all_claimed and game.hw_all_claimed[ci] or nil
+end
+
+-- BFS on the city graph to find the shortest sequence of city hops from
+-- start_city to end_city. Returns a list of hop tables:
+--   {from_city, to_city, edge={from={ux,uy}, to={ux,uy}}}
+-- Returns nil if no route exists.
+local function _planCityRoute(start_city, end_city, city_edges, max_hops)
+    if start_city == end_city then return {} end
+    local visited = {[start_city] = true}
+    local q = {{city = start_city, path = {}}}
+    local qi = 1
+    while qi <= #q do
+        local cur = q[qi]; qi = qi + 1
+        local edges = city_edges[cur.city]
+        if edges then
+            for neighbor, edge in pairs(edges) do
+                if not visited[neighbor] then
+                    local new_path = {}
+                    for _, e in ipairs(cur.path) do new_path[#new_path+1] = e end
+                    new_path[#new_path+1] = {from_city=cur.city, to_city=neighbor, edge=edge}
+                    if neighbor == end_city then return new_path end
+                    if #new_path < (max_hops or 10) then
+                        visited[neighbor] = true
+                        q[#q+1] = {city=neighbor, path=new_path}
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 -- ── Snap helper ───────────────────────────────────────────────────────────────
 
 -- BFS snap to nearest traversable tile on a sandbox (sub-cell) map.
@@ -120,6 +162,110 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     -- the pathfinder always uses sandbox (sub-cell) neighbor logic, even for
     -- city maps that also carry road-node data.
     local sandbox_proxy = setmetatable({road_v_rxs = false}, {__index = map})
+
+    -- ── HPA* inter-city hierarchical routing ──────────────────────────────────
+    -- Only runs for highway-capable vehicles (bikes cannot traverse highways).
+    -- Falls through to direct A* on failure or same-city trips.
+    -- _cityOf falls back to original start_node in case the snap moved the vehicle
+    -- onto a highway cell just outside city bounds (e.g. city boundary highway tile).
+    local can_highway = vehicle:getMovementCostFor("highway") < IMPASSABLE
+    local start_city  = can_highway and (_cityOf(start_sub.x, start_sub.y, game)
+                                      or _cityOf(start_node.x, start_node.y, game)) or nil
+    local end_city    = can_highway and _cityOf(end_plot.x, end_plot.y, game) or nil
+
+    if start_city and end_city and start_city ~= end_city and game.hw_city_edges then
+        local hops = _planCityRoute(start_city, end_city, game.hw_city_edges)
+
+        if hops and #hops > 0 then
+            local full = {}
+
+            -- Trunk cost: vehicle-agnostic, highway-first. Trunk paths are shared
+            -- across all highway-capable vehicle types so they stay in the cache.
+            local _umap = game.maps.unified
+            local _tfgi = _umap and _umap.ffi_grid
+            local _tgw  = _umap and _umap._w or 0
+            local trunk_proxy = setmetatable({road_v_rxs = false}, {__index = _umap or map})
+            local function trunk_cost(x, y)
+                if not _tfgi then return IMPASSABLE end
+                local ti = _tfgi[(y-1)*_tgw + (x-1)].type
+                if ti == 4 then return 1 end   -- highway
+                if ti == 3 then return 5 end   -- arterial
+                if ti == 1 or ti == 2 then return 10 end
+                return IMPASSABLE
+            end
+
+            -- Tier 1: local out — snapped start → first attachment node.
+            -- Bounded to the start city's sub-cell area to avoid exploring the full grid.
+            local first_att = hops[1].edge.from
+            local bounds1 = game.hw_city_sc_bounds and game.hw_city_sc_bounds[start_city]
+            local function tier1_cost(x, y)
+                if bounds1 and (x < bounds1.x1 or x > bounds1.x2
+                             or y < bounds1.y1 or y > bounds1.y2) then
+                    return IMPASSABLE
+                end
+                return get_cost(x, y)
+            end
+            local seg1 = game.pathfinder.findPath(path_grid or {}, start_sub,
+                {x=first_att.ux, y=first_att.uy}, tier1_cost, sandbox_proxy)
+            if seg1 then for _, n in ipairs(seg1) do full[#full+1] = n end end
+
+            -- Tiers 2 + 3: for each city hop, trunk segment then (if not last) intra-city transit.
+            for hi, hop in ipairs(hops) do
+                local att_out = hop.edge.from
+                local att_in  = hop.edge.to
+
+                -- Tier 2: trunk (cached highway segment, vehicle-agnostic cost).
+                local trunk = PathCacheService.get(att_out.ux, att_out.uy, att_in.ux, att_in.uy)
+                if not trunk then
+                    trunk = game.pathfinder.findPath({},
+                        {x=att_out.ux,y=att_out.uy}, {x=att_in.ux,y=att_in.uy}, trunk_cost, trunk_proxy)
+                    if trunk then PathCacheService.put(att_out.ux, att_out.uy, att_in.ux, att_in.uy, trunk) end
+                end
+                if trunk then for _, n in ipairs(trunk) do full[#full+1] = n end end
+
+                -- Tier 3: intra-city transit when more hops follow (also trunk cost).
+                if hi < #hops then
+                    local next_att_out = hops[hi+1].edge.from
+                    local transit = PathCacheService.get(att_in.ux, att_in.uy, next_att_out.ux, next_att_out.uy)
+                    if not transit then
+                        transit = game.pathfinder.findPath({},
+                            {x=att_in.ux,y=att_in.uy}, {x=next_att_out.ux,y=next_att_out.uy}, trunk_cost, trunk_proxy)
+                        if transit then PathCacheService.put(att_in.ux, att_in.uy, next_att_out.ux, next_att_out.uy, transit) end
+                    end
+                    if transit then for _, n in ipairs(transit) do full[#full+1] = n end end
+                end
+            end
+
+            -- Tier 4: local in — final attachment node → destination.
+            -- Bounded to the end city's sub-cell area to avoid exploring the full grid.
+            local last_in = hops[#hops].edge.to
+            local local_in = PathCacheService.get(last_in.ux, last_in.uy, end_plot.x, end_plot.y)
+            if not local_in then
+                local end_node = end_candidates[1]
+                if end_node then
+                    local bounds4 = game.hw_city_sc_bounds and game.hw_city_sc_bounds[end_city]
+                    local function tier4_cost(x, y)
+                        if bounds4 and (x < bounds4.x1 or x > bounds4.x2
+                                     or y < bounds4.y1 or y > bounds4.y2) then
+                            return IMPASSABLE
+                        end
+                        return get_cost(x, y)
+                    end
+                    local_in = game.pathfinder.findPath(path_grid or {},
+                        {x=last_in.ux,y=last_in.uy}, end_node, tier4_cost, sandbox_proxy)
+                    if local_in then PathCacheService.put(last_in.ux, last_in.uy, end_plot.x, end_plot.y, local_in) end
+                end
+            end
+            if local_in then for _, n in ipairs(local_in) do full[#full+1] = n end end
+
+            if #full > 0 then
+                table.remove(full, 1)  -- remove start node (vehicle already there)
+                return full
+            end
+        end
+        -- Fallback: direct full A* if city graph route failed.
+    end
+    -- ── End HPA* ─────────────────────────────────────────────────────────────
 
     -- Cache lookup: key on snapped start + original end_plot
     local cached = PathCacheService.get(start_sub.x, start_sub.y, end_plot.x, end_plot.y)
