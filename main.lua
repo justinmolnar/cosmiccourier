@@ -183,6 +183,8 @@ end
 function love.load()
     local C = _initCore()
     local Game = _buildGame(C)
+    collectgarbage("setpause", 300)
+    collectgarbage("setstepmul", 400)
     _loadSave(Game)
     _initSystems(Game)
     _initInputDispatcher(Game)

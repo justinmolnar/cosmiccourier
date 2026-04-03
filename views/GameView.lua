@@ -1194,6 +1194,158 @@ function GameView:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
     love.graphics.setColor(1, 1, 1)
 end
 
+function GameView:_drawF3Overlay()
+    local Game       = self.Game
+    local screen_w, screen_h = love.graphics.getDimensions()
+    local font       = Game.fonts and Game.fonts.ui_small
+    if not font then return end
+
+    local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
+    local lh = 15   -- line height
+    local px = sidebar_w + 6  -- left column starts after sidebar
+    local py = 6    -- top padding
+    local col2_x = screen_w - 320  -- right column x
+
+    -- ── Gather data ──────────────────────────────────────────────────────────
+
+    local fps       = love.timer.getFPS()
+    local frame_ms  = Game.game_controller and Game.game_controller.performance_stats.avg_frame_time * 1000 or 0
+    local gc_kb     = collectgarbage("count")
+    local gc_mb     = gc_kb / 1024
+    local gfx_stats = love.graphics.getStats()
+
+    local entities  = Game.entities
+    local vehicles  = entities and entities.vehicles or {}
+    local clients   = entities and entities.clients  or {}
+    local pending   = entities and entities.trips and entities.trips.pending or {}
+
+    local n_bikes, n_trucks = 0, 0
+    local states_count = {}
+    for _, v in ipairs(vehicles) do
+        if v.type == "bike"  then n_bikes  = n_bikes  + 1 end
+        if v.type == "truck" then n_trucks = n_trucks + 1 end
+        local sn = v.state and v.state.name or "?"
+        states_count[sn] = (states_count[sn] or 0) + 1
+    end
+    local state_parts = {}
+    for sn, cnt in pairs(states_count) do state_parts[#state_parts+1] = sn..":"..cnt end
+    table.sort(state_parts)
+
+    local PathScheduler    = require("services.PathScheduler")
+    local PathCacheService = require("services.PathCacheService")
+    local sched_queue = #PathScheduler._queue
+    local cache_entries = PathCacheService._count or 0
+
+    local umap   = Game.maps and Game.maps.unified
+    local uw     = umap and umap._w  or 0
+    local uh     = umap and umap._h  or 0
+    local ww     = Game.world_w or 0
+    local wh     = Game.world_h or 0
+
+    local n_cities = 0
+    local n_att_nodes = 0
+    if Game.hw_attachment_nodes then
+        for _, nodes in pairs(Game.hw_attachment_nodes) do
+            n_cities = n_cities + 1
+            n_att_nodes = n_att_nodes + #nodes
+        end
+    end
+    local n_city_edges = 0
+    if Game.hw_city_edges then
+        for ca, row in pairs(Game.hw_city_edges) do
+            for _ in pairs(row) do n_city_edges = n_city_edges + 1 end
+        end
+        n_city_edges = n_city_edges / 2  -- each edge stored in both directions
+    end
+
+    local cam    = Game.camera
+    local cam_x  = cam and math.floor(cam.x) or 0
+    local cam_y  = cam and math.floor(cam.y) or 0
+    local cam_z  = cam and string.format("%.2f", cam.scale) or "?"
+
+    local gc_pause   = 300
+    local gc_stepmul = 400
+
+    -- ── Left column lines ─────────────────────────────────────────────────────
+
+    local left = {
+        string.format("FPS: %d  (%.2f ms/frame)", fps, frame_ms),
+        string.format("GC heap: %.1f MB  (%.0f KB)", gc_mb, gc_kb),
+        string.format("GC pause: %d%%  stepmul: %d%%", gc_pause, gc_stepmul),
+        "",
+        string.format("Draw calls:    %d", gfx_stats.drawcalls),
+        string.format("Canvas sw:     %d", gfx_stats.canvasswitches),
+        string.format("Image binds:   %d", gfx_stats.texturememory and math.floor(gfx_stats.texturememory/1024) or 0) .. " KB tex mem",
+        string.format("Shader sw:     %d", gfx_stats.shaderswitches),
+        "",
+        string.format("PathScheduler queue: %d / %d budget", sched_queue, PathScheduler.budget),
+        string.format("PathCache entries:   %d / 3000", cache_entries),
+        "",
+        string.format("Smooth movement: %s", Game.debug_smooth_vehicle_movement and "ON" or "off"),
+        string.format("Snap lookup:     %s", (umap and umap._snap_lookup) and "built" or "nil"),
+    }
+
+    -- ── Right column lines ────────────────────────────────────────────────────
+
+    local right = {
+        string.format("World:  %d x %d cells", ww, wh),
+        string.format("Unified grid:  %d x %d sub-cells", uw, uh),
+        string.format("FFI grid:  %s", (umap and umap.ffi_grid) and "yes" or "no"),
+        "",
+        string.format("Cities:        %d", n_cities),
+        string.format("Att. nodes:    %d total", n_att_nodes),
+        string.format("City edges:    %d", math.floor(n_city_edges)),
+        "",
+        string.format("Vehicles:  %d  (bikes %d  trucks %d)", #vehicles, n_bikes, n_trucks),
+        string.format("Clients:   %d", #clients),
+        string.format("Trips pending: %d", #pending),
+        "",
+        "Vehicle states:",
+    }
+    for _, s in ipairs(state_parts) do right[#right+1] = "  " .. s end
+    right[#right+1] = ""
+    right[#right+1] = string.format("Camera: (%d, %d)  zoom: %s", cam_x, cam_y, cam_z)
+    right[#right+1] = string.format("Active map: %s", Game.active_map_key or "?")
+    right[#right+1] = string.format("Map scale: %s", tostring(Game.state and Game.state.current_map_scale))
+
+    -- ── Draw ─────────────────────────────────────────────────────────────────
+
+    love.graphics.setFont(font)
+
+    -- measure max widths for background panels
+    local lw, rw = 0, 0
+    for _, line in ipairs(left)  do lw = math.max(lw, font:getWidth(line)) end
+    for _, line in ipairs(right) do rw = math.max(rw, font:getWidth(line)) end
+
+    local pad = 4
+    love.graphics.setColor(0, 0, 0, 0.65)
+    love.graphics.rectangle("fill", px - pad, py - pad, lw + pad*2, #left * lh + pad*2)
+    love.graphics.rectangle("fill", col2_x - pad, py - pad, rw + pad*2, #right * lh + pad*2)
+
+    for i, line in ipairs(left) do
+        if line == "" then
+            -- skip blank lines (already accounted for in height)
+        else
+            local r, g, b = 1, 1, 1
+            -- colour-code FPS line
+            if i == 1 then
+                if fps >= 55 then r,g,b = 0.4,1,0.4
+                elseif fps >= 30 then r,g,b = 1,1,0.4
+                else r,g,b = 1,0.4,0.4 end
+            end
+            love.graphics.setColor(r, g, b, 1)
+        end
+        love.graphics.print(line, px, py + (i-1)*lh)
+    end
+
+    for i, line in ipairs(right) do
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.print(line, col2_x, py + (i-1)*lh)
+    end
+
+    love.graphics.setColor(1, 1, 1, 1)
+end
+
 function GameView:draw()
     local Game = self.Game
     local active_map = Game.maps[Game.active_map_key]
@@ -1214,6 +1366,7 @@ function GameView:draw()
     end
     self:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
     love.graphics.setScissor()
+    if Game.debug_f3 then self:_drawF3Overlay() end
 end
 
 return GameView

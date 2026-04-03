@@ -22,6 +22,12 @@ function InputController:keypressed(key)
         return
     end
 
+    -- F3: Minecraft-style debug overlay
+    if key == "f3" then
+        self.game.debug_f3 = not (self.game.debug_f3 or false)
+        return
+    end
+
     -- Debug mode toggle
     if key == "tab" then
         self.game.debug_mode = not self.game.debug_mode
@@ -41,7 +47,6 @@ function InputController:keypressed(key)
         m = { field = "debug_smooth_roads_merged", label = "merged street overlay" },
         j = { field = "debug_smooth_roads_like",   label = "streets-like-big-roads overlay" },
         o = { field = "overlay_only_mode",             label = "overlay-only mode" },
-        s = { field = "debug_smooth_vehicle_movement", label = "smooth vehicle movement" },
         d = { field = "debug_district_overlay",    label = "district overlay" },
         i = { field = "debug_biome_overlay",       label = "biome overlay" },
         u = { field = "debug_unified_grid",        label = "unified pathfinding grid" },
@@ -50,6 +55,25 @@ function InputController:keypressed(key)
     if toggle then
         self.game[toggle.field] = not (self.game[toggle.field] or false)
         print("DEBUG: " .. toggle.label .. " " .. (self.game[toggle.field] and "ON" or "OFF"))
+        return
+    end
+
+    -- S: toggle smooth vehicle movement; rebuild smooth paths for vehicles already mid-path
+    if key == "s" then
+        local g = self.game
+        g.debug_smooth_vehicle_movement = not (g.debug_smooth_vehicle_movement or false)
+        print("DEBUG: smooth vehicle movement " .. (g.debug_smooth_vehicle_movement and "ON" or "OFF"))
+        if g.debug_smooth_vehicle_movement then
+            local PSS = require("services.PathSmoothingService")
+            if g.maps.unified and not g.maps.unified._snap_lookup then
+                PSS.buildSnapLookup(g)
+            end
+            for _, v in ipairs(g.entities.vehicles) do
+                if v.path and (v.path_i or 1) <= #v.path then
+                    PSS.buildSmoothPath(v, g)
+                end
+            end
+        end
         return
     end
 

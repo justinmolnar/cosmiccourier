@@ -78,8 +78,12 @@ function PathSmoothingService.buildSmoothPath(vehicle, game)
     end
     local tps = map.tile_pixel_size or game.C.MAP.TILE_SIZE
 
-    local snap_lookup = game.maps.unified and game.maps.unified._snap_lookup
-    local uw = game.maps.unified and game.maps.unified._w or 0
+    local umap = game.maps.unified
+    if umap and not umap._snap_lookup then
+        PathSmoothingService.buildSnapLookup(game)
+    end
+    local snap_lookup = umap and umap._snap_lookup
+    local uw = umap and umap._w or 0
 
     local function nodePixels(node)
         local orig_px, orig_py = map:getPixelCoords(node.x, node.y)
@@ -108,8 +112,10 @@ function PathSmoothingService.buildSmoothPath(vehicle, game)
     end
 
     local chain = {vehicle.px, vehicle.py}
+    local path_start = vehicle.path_i or 1
 
-    for _, node in ipairs(vehicle.path) do
+    for i = path_start, #vehicle.path do
+        local node = vehicle.path[i]
         local npx, npy = nodePixels(node)
         if node.is_tile then
             flush_chain(chain)

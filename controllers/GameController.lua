@@ -123,7 +123,7 @@ function GameController:checkCriticalErrors()
     
     -- Check memory usage (if it gets too high, log a warning)
     local memory_usage = collectgarbage("count")
-    if memory_usage > 500000 then -- 500MB threshold
+    if memory_usage > 700000 then -- 700MB threshold (GC pause=300% allows higher peaks)
         self.game.error_service.logWarning("GameController", 
             string.format("High memory usage detected: %.1f MB", memory_usage / 1024))
     end
