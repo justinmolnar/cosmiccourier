@@ -46,10 +46,12 @@ function InputController:keypressed(key)
         n = { field = "debug_hide_roads",          label = "hide roads" },
         m = { field = "debug_smooth_roads_merged", label = "merged street overlay" },
         j = { field = "debug_smooth_roads_like",   label = "streets-like-big-roads overlay" },
-        o = { field = "overlay_only_mode",             label = "overlay-only mode" },
+        o = { field = "overlay_only_mode",         label = "overlay-only mode" },
         d = { field = "debug_district_overlay",    label = "district overlay" },
         i = { field = "debug_biome_overlay",       label = "biome overlay" },
         u = { field = "debug_unified_grid",        label = "unified pathfinding grid" },
+        t = { field = "debug_trip_hover",          label = "trip hover delivery debug (hover trip in sidebar)" },
+        k = { field = "debug_stuck_vehicles",      label = "stuck vehicle delivery debug" },
     }
     local toggle = DEBUG_TOGGLES[key]
     if toggle then

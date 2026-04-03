@@ -52,9 +52,13 @@ local function getNeighbors(node, grid, grid_width, grid_height, map)
                     elseif dir[2] == -1 then ok = zsh and zsh[ny] and zsh[ny][x]  -- North
                     end
                 end
-                if not ok and (cur_t == "highway" or target_t == "highway") then
-                    -- Highway bridge: any vehicle can cross between highway and adjacent cells
-                    local other_t = cur_t == "highway" and target_t or cur_t
+                local cur_big    = cur_t    == "highway" or cur_t    == "arterial"
+                local target_big = target_t == "highway" or target_t == "arterial"
+                if not ok and (cur_big or target_big) then
+                    -- Bridge: vehicles can exit/enter arterial and highway tiles to reach
+                    -- adjacent zone_seg cells (streets are edges, not tiles, so no isRoad
+                    -- match exists when crossing from a big-road tile into a city block).
+                    local other_t = cur_big and target_t or cur_t
                     ok = other_t ~= "mountain" and other_t ~= "water"
                       and other_t ~= "river"   and other_t ~= "grass"
                 end

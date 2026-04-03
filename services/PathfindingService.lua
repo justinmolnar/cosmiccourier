@@ -74,7 +74,6 @@ local function _snapToNearestTraversable(plot, map, path_grid, grid_w, grid_h, v
         if not inBounds(cx, cy) then return false end
         local t = getTileType(cx, cy)
         if map:isRoad(t) and vehicle:getMovementCostFor(t) < IMPASSABLE then return true end
-        -- Zone_seg-adjacent: a plot cell flanking a street edge is traversable at road cost.
         if vehicle:getMovementCostFor("road") < IMPASSABLE then
             if (zsv and zsv[cy] and (zsv[cy][cx] or zsv[cy][cx-1]))
             or (zsh and zsh[cy]   and zsh[cy][cx])
@@ -141,12 +140,13 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
         return cost
     end
 
+    -- end_candidates: traversable cardinal neighbours of end_plot.
+    -- Uses get_cost which handles both road tiles and zone_seg edge adjacency.
     local end_candidates, seen = {}, {}
     for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
         local nx, ny = end_plot.x + d[1], end_plot.y + d[2]
         if nx >= 1 and nx <= grid_w and ny >= 1 and ny <= grid_h then
-            local t = getTileType(nx, ny)
-            if map:isRoad(t) and vehicle:getMovementCostFor(t) < IMPASSABLE then
+            if get_cost(nx, ny) < IMPASSABLE then
                 local key = ny * 10000 + nx
                 if not seen[key] then seen[key] = true; end_candidates[#end_candidates+1] = {x=nx, y=ny} end
             end

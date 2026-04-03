@@ -722,34 +722,6 @@ function WorldSandboxController:_buildRoadNetwork(new_map, ctx)
         print("DEBUG road_h_rys rows: " .. table.concat(hry_list, ","))
     end
 
-    -- Building plots: plot/downtown_plot cells beside a street line or arterial/highway.
-    local function is_road_tile(x, y)
-        if x < 1 or x > sub_cw or y < 1 or y > sub_ch then return false end
-        local tt = grid[y] and grid[y][x] and grid[y][x].type
-        return tt == "arterial" or tt == "highway"
-    end
-    local building_plots = {}
-    local seen_b = {}
-    for gy = 1, sub_ch do
-        for gx = 1, sub_cw do
-            local t = grid[gy][gx].type
-            if t == "plot" or t == "downtown_plot" then
-                if road_v_rxs[gx-1] or road_v_rxs[gx] or
-                   road_h_rys[gy-1] or road_h_rys[gy] or
-                   is_road_tile(gx-1,gy) or is_road_tile(gx+1,gy) or
-                   is_road_tile(gx,gy-1) or is_road_tile(gx,gy+1) then
-                    local key = gy * 10000 + gx
-                    if not seen_b[key] then
-                        seen_b[key] = true
-                        table.insert(building_plots, {x=gx, y=gy})
-                    end
-                end
-            end
-        end
-    end
-    print(string.format("DEBUG building_plots=%d (total plot/dt_plot cells scanned in %dx%d grid)", #building_plots, sub_cw, sub_ch))
-    new_map.building_plots = building_plots
-
     -- Override road_v_rxs / road_h_rys / road_nodes with sub-cell zone boundaries.
     do
         local zg = new_map.zone_grid
@@ -827,6 +799,35 @@ function WorldSandboxController:_buildRoadNetwork(new_map, ctx)
                 end
             end
             new_map.bridge_cells = bridge_cells
+
+            -- Building plots: plot/downtown_plot cells reachable via an adjacent zone_seg
+            -- street edge, arterial, or highway. Computed here so validation matches
+            -- the actual pathfinding road system (zone_seg_v/h already built above).
+            local building_plots = {}
+            local seen_b = {}
+            for gy = 1, sub_ch do
+                for gx = 1, sub_cw do
+                    local t = grid[gy][gx].type
+                    if t == "plot" or t == "downtown_plot" then
+                        local reachable =
+                            (zone_seg_v[gy] and (zone_seg_v[gy][gx-1] or zone_seg_v[gy][gx]))
+                         or (zone_seg_h[gy-1] and zone_seg_h[gy-1][gx])
+                         or (zone_seg_h[gy]   and zone_seg_h[gy][gx])
+                         or (grid[gy][gx-1] and (grid[gy][gx-1].type == "arterial" or grid[gy][gx-1].type == "highway"))
+                         or (grid[gy][gx+1] and (grid[gy][gx+1].type == "arterial" or grid[gy][gx+1].type == "highway"))
+                         or (grid[gy-1] and grid[gy-1][gx] and (grid[gy-1][gx].type == "arterial" or grid[gy-1][gx].type == "highway"))
+                         or (grid[gy+1] and grid[gy+1][gx] and (grid[gy+1][gx].type == "arterial" or grid[gy+1][gx].type == "highway"))
+                        if reachable then
+                            local key = gy * 10000 + gx
+                            if not seen_b[key] then
+                                seen_b[key] = true
+                                building_plots[#building_plots+1] = {x=gx, y=gy}
+                            end
+                        end
+                    end
+                end
+            end
+            new_map.building_plots = building_plots
 
             -- road_v_rxs must remain truthy so PathfindingService treats this as a road-node map.
             new_map.road_v_rxs  = {}

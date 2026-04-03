@@ -827,7 +827,131 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         end
     end
 
+    -- LAYER: Delivery debug overlays (T = trip hover, K = stuck vehicles)
+    if (Game.debug_trip_hover or Game.debug_stuck_vehicles) and umap then
+        self:_drawDeliveryDebug(umap, uts, tile_i0, tile_i1, mpw, cs)
+    end
+
     love.graphics.pop()  -- camera transform pop
+end
+
+function GameView:_drawDeliveryDebug(umap, uts, tile_i0, tile_i1, mpw, cs)
+    local Game   = self.Game
+    local zsv    = umap.zone_seg_v
+    local zsh    = umap.zone_seg_h
+    local fgi    = umap.ffi_grid
+    local fgw    = umap._w or 0
+    local fgh    = umap._h or 0
+    local _TNAMES= {[0]="grass",[1]="road",[2]="downtown_road",[3]="arterial",[4]="highway",
+                    [5]="water",[6]="mountain",[7]="river",[8]="plot",[9]="downtown_plot"}
+
+    local function ttype(gx, gy)
+        if fgi and gx >= 1 and gx <= fgw and gy >= 1 and gy <= fgh then
+            return _TNAMES[fgi[(gy-1)*fgw+(gx-1)].type] or "grass"
+        end
+        return "grass"
+    end
+
+    -- Draw one cell rect (top-left corner coords in unified world pixels)
+    local function cell(gx, gy, r, g, b, a)
+        love.graphics.setColor(r, g, b, a)
+        love.graphics.rectangle("fill", (gx-1)*uts, (gy-1)*uts, uts, uts)
+    end
+
+    -- Highlight the traversable neighbours of a plot cell (zone_seg edges + arterials/highways)
+    local function neighbours(gx, gy)
+        local dirs = {{-1,0},{1,0},{0,-1},{0,1}}
+        local checks = {
+            -- {dx, dy, zsv_rx_offset, use_zsv}
+            -- left:  zone_seg_v[gy][gx-1]
+            -- right: zone_seg_v[gy][gx]
+            -- up:    zone_seg_h[gy-1][gx]
+            -- down:  zone_seg_h[gy][gx]
+        }
+        for _, d in ipairs(dirs) do
+            local nx, ny = gx+d[1], gy+d[2]
+            if nx >= 1 and nx <= fgw and ny >= 1 and ny <= fgh then
+                local has_edge = false
+                if d[1] == -1 then has_edge = zsv and zsv[gy] and zsv[gy][gx-1]
+                elseif d[1] ==  1 then has_edge = zsv and zsv[gy] and zsv[gy][gx]
+                elseif d[2] == -1 then has_edge = zsh and zsh[gy-1] and zsh[gy-1][gx]
+                elseif d[2] ==  1 then has_edge = zsh and zsh[gy]   and zsh[gy][gx]
+                end
+                local tt = ttype(nx, ny)
+                if has_edge or tt == "arterial" or tt == "highway" or tt == "road" or tt == "downtown_road" then
+                    cell(nx, ny, 1, 1, 0, 0.45)  -- yellow: reachable road cell
+                end
+            end
+        end
+    end
+
+    -- Draw origin (green) and destination (orange) with adjacent road highlights
+    local function drawOD(origin, dest)
+        if origin then
+            neighbours(origin.x, origin.y)
+            cell(origin.x, origin.y, 0.15, 1, 0.15, 0.85)   -- green = origin
+        end
+        if dest then
+            neighbours(dest.x, dest.y)
+            cell(dest.x, dest.y, 1, 0.45, 0.05, 0.85)        -- orange = destination
+        end
+    end
+
+    -- Collect (origin, dest) pairs to draw
+    local pairs_to_draw = {}
+
+    -- T: trip hover debug — highlight hovered trip's leg plots
+    if Game.debug_trip_hover then
+        local ui_manager = Game.ui_manager
+        local idx = ui_manager and ui_manager.hovered_trip_index
+        if idx then
+            local trip = Game.entities.trips.pending[idx]
+            local leg  = trip and trip.legs and trip.legs[trip.current_leg]
+            if leg then
+                pairs_to_draw[#pairs_to_draw+1] = {leg.start_plot, leg.end_plot}
+            end
+        end
+    end
+
+    -- K: stuck vehicle debug — highlight each stuck vehicle and its trip plots
+    if Game.debug_stuck_vehicles then
+        for _, v in ipairs(Game.entities.vehicles) do
+            if v.state and v.state.name == "Stuck" then
+                local origin, dest
+                local lsbs = v.last_state_before_stuck
+                local sname = lsbs and (lsbs.name or "") or ""
+                if sname == "To Pickup" then
+                    local trip = v.trip_queue and v.trip_queue[1]
+                    local leg  = trip and trip.legs and trip.legs[trip.current_leg]
+                    origin = leg and leg.start_plot
+                    dest   = leg and leg.end_plot
+                elseif sname == "To Dropoff" then
+                    local trip = v.cargo and v.cargo[1]
+                    local leg  = trip and trip.legs and trip.legs[trip.current_leg]
+                    origin = leg and leg.start_plot
+                    dest   = leg and leg.end_plot
+                elseif sname == "Returning" then
+                    dest = Game.entities.depot_plot
+                end
+                pairs_to_draw[#pairs_to_draw+1] = {origin, dest}
+                -- Red dot on vehicle position
+                love.graphics.setColor(1, 0, 0, 0.9)
+                love.graphics.circle("fill", v.px, v.py, uts * 0.7)
+            end
+        end
+    end
+
+    -- Render all OD pairs (tiled)
+    if #pairs_to_draw == 0 then return end
+    for i = tile_i0, tile_i1 do
+        love.graphics.push()
+        love.graphics.translate(i * mpw, 0)
+        for _, od in ipairs(pairs_to_draw) do
+            drawOD(od[1], od[2])
+        end
+        love.graphics.pop()
+    end
+    love.graphics.setColor(1, 1, 1)
 end
 
 function GameView:_drawDistrictOverlay(active_map, sidebar_w, screen_w, screen_h)
