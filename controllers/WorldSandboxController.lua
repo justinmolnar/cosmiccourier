@@ -1324,17 +1324,6 @@ function WorldSandboxController:sendToGame()
             ugrid[uy] = {}
             for ux = 1, uw do ugrid[uy][ux] = GRASS end
         end
-        for ci, _ in pairs(hw) do
-            local wx = (ci - 1) % ww + 1
-            local wy = math.floor((ci - 1) / ww) + 1
-            for dy = 0, 2 do
-                for dx = 0, 2 do
-                    local ux = (wx - 1) * 3 + 1 + dx
-                    local uy = (wy - 1) * 3 + 1 + dy
-                    if ugrid[uy][ux] == GRASS then ugrid[uy][ux] = HIGHWAY end
-                end
-            end
-        end
         for _, cmap in ipairs(game.maps.all_cities) do
             local ox = (cmap.world_mn_x - 1) * 3
             local oy = (cmap.world_mn_y - 1) * 3
@@ -1344,125 +1333,72 @@ function WorldSandboxController:sendToGame()
                 end
             end
         end
-
-        -- Second pass: bake road-segment connectivity into the unified grid.
-        -- The city sub-cell grid only has "arterial"/"highway" at intersections;
-        -- segments between intersections are "plot"/"downtown_plot".  Road-node
-        -- pathfinding jumped intersection-to-intersection, so this was fine.
-        -- Tile-level sandbox pathfinding needs contiguous road tiles, so we fill
-        -- every road-column and road-row position with the right road type.
-        local ROAD_TILE    = {type = "road"}
-        local DT_ROAD_TILE = {type = "downtown_road"}
-        for _, cmap in ipairs(game.maps.all_cities) do
-            local ox     = (cmap.world_mn_x - 1) * 3
-            local oy     = (cmap.world_mn_y - 1) * 3
-            local rv     = cmap.street_v_rxs or {}   -- keys: 0-indexed sub-cell x
-            local rh     = cmap.street_h_rys or {}   -- keys: 0-indexed sub-cell y
-            local dto    = cmap.downtown_offset
-            local dt_x1  = dto and dto.x or 1
-            local dt_y1  = dto and dto.y or 1
-            local dt_x2  = dt_x1 + (cmap.downtown_grid_width  or 0) - 1
-            local dt_y2  = dt_y1 + (cmap.downtown_grid_height or 0) - 1
-            local sub_cw = cmap.city_grid_width  or (cmap.grid[1] and #cmap.grid[1] or 0)
-            local sub_ch = cmap.city_grid_height or #cmap.grid
-            for lscy = 0, sub_ch - 1 do
-                local cy        = lscy + 1
-                local on_rh_row = rh[lscy]
-                for lscx = 0, sub_cw - 1 do
-                    if rv[lscx] or on_rh_row then
-                        local cx  = lscx + 1
-                        local cur = ugrid[oy + cy][ox + cx]
-                        if cur.type ~= "arterial" and cur.type ~= "highway" then
-                            local in_dt = cx >= dt_x1 and cx <= dt_x2
-                                      and cy >= dt_y1 and cy <= dt_y2
-                            ugrid[oy + cy][ox + cx] = in_dt and DT_ROAD_TILE or ROAD_TILE
+        -- Stamp highway AFTER city copy.
+        -- For world cells outside city territory: always stamp as highway.
+        -- For world cells inside city territory: only stamp if they border a non-city cell
+        -- (boundary entry/exit points). Interior city cells keep their city tile types so
+        -- inner-city pathfinding uses zone_seg streets rather than snapping to the highway.
+        local dirs4 = {{1,0},{-1,0},{0,1},{0,-1}}
+        for ci, _ in pairs(hw) do
+            local wx = (ci - 1) % ww + 1
+            local wy = math.floor((ci - 1) / ww) + 1
+            local is_city = all_claimed[ci]
+            local is_boundary = false
+            if is_city then
+                for _, d in ipairs(dirs4) do
+                    local nx, ny = wx + d[1], wy + d[2]
+                    if nx >= 1 and nx <= ww and ny >= 1 and ny <= wh then
+                        if not all_claimed[(ny - 1) * ww + nx] then
+                            is_boundary = true; break
                         end
+                    else
+                        is_boundary = true; break
+                    end
+                end
+            end
+            if not is_city or is_boundary then
+                for dy = 0, 2 do
+                    for dx = 0, 2 do
+                        local ux = (wx - 1) * 3 + 1 + dx
+                        local uy = (wy - 1) * 3 + 1 + dy
+                        ugrid[uy][ux] = HIGHWAY
                     end
                 end
             end
         end
-        -- Third pass: connect isolated arterials/highways to the road network.
-        -- After the second pass, arterials at positions not on any road column/row have no
-        -- traversable neighbors, so A* fails when they are used as end-candidates.
-        -- For each such isolated tile, scan horizontally for the nearest road tile and
-        -- fill the gap, then vertically if horizontal scan finds nothing.
-        do
-            local function has_traversable_neighbor(ux, uy)
-                for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
-                    local nx, ny = ux+d[1], uy+d[2]
-                    if nx>=1 and nx<=uw and ny>=1 and ny<=uh then
-                        local nt = ugrid[ny][nx].type
-                        if nt == "road" or nt == "downtown_road"
-                        or nt == "arterial" or nt == "highway" then
-                            return true
+
+        -- Unified zone_seg: copy each city's street edges into unified coordinates.
+        -- zone_seg_v[gy][rx] = N-S street between cells (rx,gy) and (rx+1,gy) [1-indexed].
+        -- zone_seg_h[ry][gx] = E-W street between cells (gx,ry) and (gx,ry+1) [1-indexed].
+        -- Offset by city origin (ox,oy). No tiles stamped — streets remain as edges.
+        -- The pathfinder sandbox branch reads these to allow movement across street edges.
+        local uzsv, uzsh = {}, {}
+        for _, cmap in ipairs(game.maps.all_cities) do
+            local ox = (cmap.world_mn_x - 1) * 3
+            local oy = (cmap.world_mn_y - 1) * 3
+            if cmap.zone_seg_v then
+                for gy, row in pairs(cmap.zone_seg_v) do
+                    local uy = oy + gy
+                    if uy >= 1 and uy <= uh then
+                        for rx in pairs(row) do
+                            local ux = ox + rx
+                            if ux >= 1 and ux <= uw then
+                                if not uzsv[uy] then uzsv[uy] = {} end
+                                uzsv[uy][ux] = true
+                            end
                         end
                     end
                 end
-                return false
             end
-            for _, cmap in ipairs(game.maps.all_cities) do
-                local ox     = (cmap.world_mn_x - 1) * 3
-                local oy     = (cmap.world_mn_y - 1) * 3
-                local sub_cw = cmap.city_grid_width  or (cmap.grid[1] and #cmap.grid[1] or 0)
-                local sub_ch = cmap.city_grid_height or #cmap.grid
-                local dto    = cmap.downtown_offset
-                local dt_x1  = dto and dto.x or 1
-                local dt_y1  = dto and dto.y or 1
-                local dt_x2  = dt_x1 + (cmap.downtown_grid_width  or 0) - 1
-                local dt_y2  = dt_y1 + (cmap.downtown_grid_height or 0) - 1
-                local function fill_tile(ux, uy)
-                    local lcx, lcy = ux - ox, uy - oy
-                    local in_dt = lcx >= dt_x1 and lcx <= dt_x2 and lcy >= dt_y1 and lcy <= dt_y2
-                    ugrid[uy][ux] = in_dt and {type="downtown_road"} or {type="road"}
-                end
-                for cy = 1, sub_ch do
-                    for cx = 1, sub_cw do
-                        local ux, uy = ox + cx, oy + cy
-                        local t = ugrid[uy][ux].type
-                        if (t == "arterial" or t == "highway")
-                        and not has_traversable_neighbor(ux, uy) then
-                            -- Scan horizontally first
-                            local found_x = nil
-                            for step = 1, sub_cw do
-                                if ux-step >= 1 then
-                                    local lt = ugrid[uy][ux-step].type
-                                    if lt == "road" or lt == "downtown_road" then found_x = ux-step; break end
-                                end
-                                if ux+step <= uw then
-                                    local rt = ugrid[uy][ux+step].type
-                                    if rt == "road" or rt == "downtown_road" then found_x = ux+step; break end
-                                end
-                            end
-                            if found_x then
-                                local step = found_x > ux and 1 or -1
-                                local tx = ux + step
-                                while tx ~= found_x do
-                                    local ft = ugrid[uy][tx].type
-                                    if ft ~= "arterial" and ft ~= "highway" then fill_tile(tx, uy) end
-                                    tx = tx + step
-                                end
-                            else
-                                -- Scan vertically
-                                local found_y = nil
-                                for step = 1, sub_ch do
-                                    if uy-step >= 1 then
-                                        local ut = ugrid[uy-step][ux].type
-                                        if ut == "road" or ut == "downtown_road" then found_y = uy-step; break end
-                                    end
-                                    if uy+step <= uh then
-                                        local dt = ugrid[uy+step][ux].type
-                                        if dt == "road" or dt == "downtown_road" then found_y = uy+step; break end
-                                    end
-                                end
-                                if found_y then
-                                    local step = found_y > uy and 1 or -1
-                                    local ty = uy + step
-                                    while ty ~= found_y do
-                                        local ft = ugrid[ty][ux].type
-                                        if ft ~= "arterial" and ft ~= "highway" then fill_tile(ux, ty) end
-                                        ty = ty + step
-                                    end
-                                end
+            if cmap.zone_seg_h then
+                for ry, row in pairs(cmap.zone_seg_h) do
+                    local uy = oy + ry
+                    if uy >= 1 and uy <= uh then
+                        for gx in pairs(row) do
+                            local ux = ox + gx
+                            if ux >= 1 and ux <= uw then
+                                if not uzsh[uy] then uzsh[uy] = {} end
+                                uzsh[uy][ux] = true
                             end
                         end
                     end
@@ -1472,6 +1408,8 @@ function WorldSandboxController:sendToGame()
 
         local uts = C.MAP.TILE_SIZE / 3
         local umap = { grid = ugrid, tile_pixel_size = uts, _w = uw, _h = uh }
+        umap.zone_seg_v = uzsv
+        umap.zone_seg_h = uzsh
         function umap:isRoad(t)
             return t == "road" or t == "downtown_road" or t == "arterial" or t == "highway"
         end
@@ -1509,8 +1447,10 @@ function WorldSandboxController:sendToGame()
     }
     game.entities.depot_plot = new_depot
     local uts = game.maps.unified.tile_pixel_size
+    require("services.PathScheduler").clear()
     for _, v in ipairs(game.entities.vehicles) do
         v.cargo = {}; v.trip_queue = {}; v.path = {}; v.smooth_path = nil; v.smooth_path_i = nil
+        v._path_pending = false
         v.operational_map_key = "unified"
         if new_depot then
             v.depot_plot  = new_depot

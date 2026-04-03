@@ -79,7 +79,9 @@ end
 
 function Entities:update(dt, game)
     local C_GAMEPLAY = game.C.GAMEPLAY
-    
+
+    require("services.PathScheduler").flush()
+
     for _, trip in ipairs(self.trips.pending) do
         if not trip.is_in_transit then
             trip.speed_bonus = math.max(0, trip.speed_bonus - (dt * C_GAMEPLAY.BONUS_DECAY_RATE))

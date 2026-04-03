@@ -27,21 +27,25 @@ function moveAlongPath(dt, vehicle, game)
     local travel_dist = normalized_speed * dt
 
     -- Smooth visual movement along Chaikin-curved waypoints.
-    if vehicle.smooth_path and #vehicle.smooth_path > 0 then
-        local target = vehicle.smooth_path[1]
+    local spi = vehicle.smooth_path_i
+    if vehicle.smooth_path and spi and spi <= #vehicle.smooth_path then
+        local target = vehicle.smooth_path[spi]
         local dx = target[1] - vehicle.px
         local dy = target[2] - vehicle.py
         local dist_sq = dx * dx + dy * dy
         if dist_sq <= travel_dist * travel_dist then
             vehicle.px, vehicle.py = target[1], target[2]
-            table.remove(vehicle.smooth_path, 1)
-            if #vehicle.smooth_path == 0 then
+            spi = spi + 1
+            vehicle.smooth_path_i = spi
+            if spi > #vehicle.smooth_path then
                 -- Smooth path exhausted: sync grid_anchor to last node and signal arrival.
                 if vehicle.path and #vehicle.path > 0 then
                     local last = vehicle.path[#vehicle.path]
                     vehicle.grid_anchor = {x = last.x, y = last.y}
                 end
                 vehicle.path = {}
+                vehicle.smooth_path   = nil
+                vehicle.smooth_path_i = nil
                 vehicle.current_path_eta = nil  -- don't let abstracted sim delay the transition
             end
         else
@@ -105,7 +109,8 @@ States.Idle = State:new()
 States.Idle.name = "Idle"
 function States.Idle:enter(vehicle, game)
     vehicle.path = {}
-    vehicle.smooth_path = nil
+    vehicle.smooth_path   = nil
+    vehicle.smooth_path_i = nil
 end
 function States.Idle:update(dt, vehicle, game)
     -- If we have been assigned work, change state.
@@ -120,22 +125,22 @@ end
 States.ReturningToDepot = State:new()
 States.ReturningToDepot.name = "Returning"
 function States.ReturningToDepot:enter(vehicle, game)
-    local PathfindingService = require("services.PathfindingService")
-    
-    print(string.format("%s %d returning to depot.", vehicle.type, vehicle.id))
-    
-    vehicle.path = PathfindingService.findPathToDepot(vehicle, game)
-
-    if not vehicle.path then
-        vehicle:changeState(States.Stuck, game)
-        return
-    end
-
-    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
-    buildSmoothPath(vehicle, game)
+    local PathScheduler = require("services.PathScheduler")
+    PathScheduler.request(vehicle, function()
+        local PathfindingService = require("services.PathfindingService")
+        vehicle._path_pending = false
+        vehicle.path = PathfindingService.findPathToDepot(vehicle, game)
+        if not vehicle.path then
+            vehicle:changeState(States.Stuck, game)
+            return
+        end
+        vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
+        if game.debug_smooth_vehicle_movement then buildSmoothPath(vehicle, game) end
+    end)
 end
 
 function States.ReturningToDepot:update(dt, vehicle, game)
+    if vehicle._path_pending then return end
     if #vehicle.trip_queue > 0 then
         vehicle:changeState(States.GoToPickup, game)
         return
@@ -156,28 +161,27 @@ end
 States.GoToPickup = State:new()
 States.GoToPickup.name = "To Pickup"
 function States.GoToPickup:enter(vehicle, game)
-    local PathfindingService = require("services.PathfindingService")
-    
-    print(string.format("%s %d going to pickup.", vehicle.type, vehicle.id))
-    
     local trip_to_get = vehicle.trip_queue[1]
     if not trip_to_get then
         vehicle:changeState(States.Stuck, game)
         return
     end
-    
-    vehicle.path = PathfindingService.findPathToPickup(vehicle, trip_to_get, game)
-
-    if not vehicle.path then
-        vehicle:changeState(States.Stuck, game)
-        return
-    end
-
-    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
-    buildSmoothPath(vehicle, game)
+    local PathScheduler = require("services.PathScheduler")
+    PathScheduler.request(vehicle, function()
+        local PathfindingService = require("services.PathfindingService")
+        vehicle._path_pending = false
+        vehicle.path = PathfindingService.findPathToPickup(vehicle, trip_to_get, game)
+        if not vehicle.path then
+            vehicle:changeState(States.Stuck, game)
+            return
+        end
+        vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
+        if game.debug_smooth_vehicle_movement then buildSmoothPath(vehicle, game) end
+    end)
 end
 
 function States.GoToPickup:update(dt, vehicle, game)
+    if vehicle._path_pending then return end
     if not vehicle.path or #vehicle.path == 0 then
         vehicle:changeState(States.DoPickup, game)
         return
@@ -213,7 +217,6 @@ function States.DoPickup:enter(vehicle, game)
         table.insert(vehicle.cargo, trip)
     end
     
-    print(string.format("%s %d picked up %d packages (frozen %d timers).", vehicle.type, vehicle.id, #trips_to_pickup, #trips_to_pickup))
     
     -- After picking up, immediately decide the next state here.
     if #vehicle.cargo > 0 then
@@ -229,21 +232,30 @@ end
 States.GoToDropoff = State:new()
 States.GoToDropoff.name = "To Dropoff"
 function States.GoToDropoff:enter(vehicle, game)
-    local PathfindingService = require("services.PathfindingService")
-
-    vehicle.path = PathfindingService.findPathToDropoff(vehicle, game)
-
-    if not vehicle.path then
-        print(string.format("ERROR: %s %d failed to find dropoff path", vehicle.type, vehicle.id))
-        vehicle:changeState(States.Stuck, game)
-        return
-    end
-
-    vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
-    buildSmoothPath(vehicle, game)
+    local PathScheduler = require("services.PathScheduler")
+    PathScheduler.request(vehicle, function()
+        local PathfindingService = require("services.PathfindingService")
+        vehicle._path_pending = false
+        local leg = vehicle.cargo[1] and vehicle.cargo[1].legs[vehicle.cargo[1].current_leg]
+        if leg then
+            print(string.format("DEBUG dropoff: %s %d anchor=(%d,%d) dest=(%d,%d) map=%s",
+                vehicle.type, vehicle.id,
+                vehicle.grid_anchor.x, vehicle.grid_anchor.y,
+                leg.end_plot.x, leg.end_plot.y,
+                vehicle.operational_map_key))
+        end
+        vehicle.path = PathfindingService.findPathToDropoff(vehicle, game)
+        if not vehicle.path then
+            vehicle:changeState(States.Stuck, game)
+            return
+        end
+        vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
+        if game.debug_smooth_vehicle_movement then buildSmoothPath(vehicle, game) end
+    end)
 end
 
 function States.GoToDropoff:update(dt, vehicle, game)
+    if vehicle._path_pending then return end
     if not vehicle.path or #vehicle.path == 0 then
         vehicle:changeState(States.DoDropoff, game)
         return
@@ -320,7 +332,8 @@ end
 States.Stuck = State:new()
 States.Stuck.name = "Stuck"
 function States.Stuck:enter(vehicle, game)
-    vehicle.smooth_path = nil
+    vehicle.smooth_path   = nil
+    vehicle.smooth_path_i = nil
     -- When a vehicle gets stuck, remember what it was trying to do.
     -- Use previous_state (saved before the transition) not vehicle.state (which is already Stuck).
     vehicle.last_state_before_stuck = vehicle.previous_state

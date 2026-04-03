@@ -1108,6 +1108,94 @@ function GameView:_drawBiomeOverlay(active_map, sidebar_w, screen_w, screen_h)
     love.graphics.setColor(1, 1, 1)
 end
 
+-- Press U to toggle.  Draws the unified navigation grid in world-pixel space:
+--   highway      = blue filled tile
+--   arterial     = cyan filled tile
+--   plot cells   = faint gray (city footprint)
+--   streets      = white line segments drawn BETWEEN cells (zone_seg edges)
+function GameView:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
+    local Game = self.Game
+    if not Game.debug_unified_grid then return end
+    local umap  = Game.maps and Game.maps.unified
+    if not umap then return end
+    local ugrid = umap.grid
+    local gh    = #ugrid
+    if gh == 0 then return end
+    local gw    = #ugrid[1]
+    if gw == 0 then return end
+
+    local ts  = Game.C.MAP.TILE_SIZE
+    local uts = umap.tile_pixel_size or (ts / 3)
+    local cs  = Game.camera.scale
+    local vw  = screen_w - sidebar_w
+
+    -- Viewport bounds in world-pixel space for culling
+    local vp_hw = vw * 0.5 / cs
+    local vp_hh = screen_h * 0.5 / cs
+    local ux0 = math.max(1,  math.floor((Game.camera.x - vp_hw) / uts))
+    local ux1 = math.min(gw, math.ceil( (Game.camera.x + vp_hw) / uts) + 1)
+    local uy0 = math.max(1,  math.floor((Game.camera.y - vp_hh) / uts))
+    local uy1 = math.min(gh, math.ceil( (Game.camera.y + vp_hh) / uts) + 1)
+
+    love.graphics.push()
+    love.graphics.translate(sidebar_w + vw / 2, screen_h / 2)
+    love.graphics.scale(cs, cs)
+    love.graphics.translate(-Game.camera.x, -Game.camera.y)
+
+    -- Filled tiles: highway (orange), arterial (cyan)
+    for uy = uy0, uy1 do
+        local row = ugrid[uy]
+        if row then
+            for ux = ux0, ux1 do
+                local tile = row[ux]
+                if tile then
+                    local t = tile.type
+                    if     t == "highway"  then love.graphics.setColor(1.0,  0.55, 0.0,  0.80)
+                    elseif t == "arterial" then love.graphics.setColor(0.0,  1.0,  0.75, 0.80)
+                    else t = nil end
+                    if t then
+                        love.graphics.rectangle("fill", (ux-1)*uts, (uy-1)*uts, uts, uts)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Street edges: draw zone_seg boundaries as line segments between cells.
+    -- zone_seg_v[uy][ux] = N-S street between cells (ux,uy) and (ux+1,uy): vertical line at x=ux*uts
+    -- zone_seg_h[uy][ux] = E-W street between cells (ux,uy) and (ux,uy+1): horizontal line at y=uy*uts
+    local uzsv = umap.zone_seg_v
+    local uzsh = umap.zone_seg_h
+    love.graphics.setLineWidth(1.5 / cs)
+    if uzsv then
+        love.graphics.setColor(0.0, 1.0, 0.2, 0.9)
+        for uy, row in pairs(uzsv) do
+            if uy >= uy0 and uy <= uy1 then
+                for ux in pairs(row) do
+                    if ux >= ux0 and ux <= ux1 then
+                        love.graphics.line(ux*uts, (uy-1)*uts, ux*uts, uy*uts)
+                    end
+                end
+            end
+        end
+    end
+    if uzsh then
+        love.graphics.setColor(0.2, 0.5, 1.0, 0.9)
+        for uy, row in pairs(uzsh) do
+            if uy >= uy0 and uy <= uy1 then
+                for ux in pairs(row) do
+                    if ux >= ux0 and ux <= ux1 then
+                        love.graphics.line((ux-1)*uts, uy*uts, ux*uts, uy*uts)
+                    end
+                end
+            end
+        end
+    end
+    love.graphics.setLineWidth(1)
+    love.graphics.pop()
+    love.graphics.setColor(1, 1, 1)
+end
+
 function GameView:draw()
     local Game = self.Game
     local active_map = Game.maps[Game.active_map_key]
@@ -1122,6 +1210,7 @@ function GameView:draw()
         self:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w, screen_h)
         self:_drawDistrictOverlay(active_map, sidebar_w, screen_w, screen_h)
         self:_drawBiomeOverlay(active_map, sidebar_w, screen_w, screen_h)
+        self:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
     else
         self:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
     end

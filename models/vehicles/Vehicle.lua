@@ -105,7 +105,6 @@ end
 function Vehicle:assignTrip(trip, game)
     if not self:isAvailable(game) then return end
 
-    print("Queuing trip for " .. self.type .. " " .. self.id)
     table.insert(self.trip_queue, trip)
 end
 
@@ -254,7 +253,7 @@ end
 function Vehicle:shouldUseAbstractedSimulation(game)
     -- Always animate when there is an active path or smooth path to follow.
     if self.path and #self.path > 0 then return false end
-    if self.smooth_path and #self.smooth_path > 0 then return false end
+    if self.smooth_path and self.smooth_path_i and self.smooth_path_i <= #self.smooth_path then return false end
 
     local vcfg = game.C.VEHICLES[self.type:upper()]
     if vcfg and vcfg.downtown_only_sim and game.camera.scale < game.C.ZOOM.BIKE_THRESHOLD then

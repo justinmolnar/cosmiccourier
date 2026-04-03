@@ -65,6 +65,7 @@ local function _buildGame(C)
         debug_hide_roads = true,
         debug_smooth_roads = true,
         debug_smooth_roads_like = true,
+        debug_smooth_vehicle_movement = false,
     }
 
     return Game

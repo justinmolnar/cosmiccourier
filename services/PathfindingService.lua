@@ -8,21 +8,32 @@ local PathfindingService = {}
 -- ── Snap helper ───────────────────────────────────────────────────────────────
 
 -- BFS snap to nearest traversable tile on a sandbox (sub-cell) map.
+-- Accepts road-type tiles AND zone_seg-adjacent cells (city streets are edges, not tiles).
 local function _snapToNearestTraversable(plot, map, path_grid, grid_w, grid_h, vehicle)
     local x, y = plot.x, plot.y
+    local zsv = map.zone_seg_v
+    local zsh = map.zone_seg_h
     local function inBounds(gx, gy) return gx>=1 and gx<=grid_w and gy>=1 and gy<=grid_h end
-    if inBounds(x, y) and map:isRoad(path_grid[y][x].type)
-       and vehicle:getMovementCostFor(path_grid[y][x].type) < IMPASSABLE then
-        return {x=x, y=y}
+    local function isTraversable(cx, cy)
+        if not inBounds(cx, cy) then return false end
+        local t = path_grid[cy][cx].type
+        if map:isRoad(t) and vehicle:getMovementCostFor(t) < IMPASSABLE then return true end
+        -- Zone_seg-adjacent: a plot cell flanking a street edge is traversable at road cost.
+        if vehicle:getMovementCostFor("road") < IMPASSABLE then
+            if (zsv and zsv[cy] and (zsv[cy][cx] or zsv[cy][cx-1]))
+            or (zsh and zsh[cy]   and zsh[cy][cx])
+            or (zsh and zsh[cy-1] and zsh[cy-1][cx]) then
+                return true
+            end
+        end
+        return false
     end
+    if isTraversable(x, y) then return {x=x, y=y} end
     local visited = {[y*10000+x] = true}
     local q, qi = {{x, y}}, 1
     while qi <= #q and qi <= SNAP_CAP do
         local cx, cy = q[qi][1], q[qi][2]; qi = qi + 1
-        if inBounds(cx, cy) and map:isRoad(path_grid[cy][cx].type)
-           and vehicle:getMovementCostFor(path_grid[cy][cx].type) < IMPASSABLE then
-            return {x=cx, y=cy}
-        end
+        if isTraversable(cx, cy) then return {x=cx, y=cy} end
         for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
             local nx, ny = cx+d[1], cy+d[2]
             local k = ny*10000+nx
@@ -44,12 +55,25 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     if not start_sub then return nil end
 
     local bounds = vehicle.pathfinding_bounds
+    local zsv = map.zone_seg_v
+    local zsh = map.zone_seg_h
     local function get_cost(node_x, node_y)
         if bounds and (node_x < bounds.x1 or node_x > bounds.x2
                     or node_y < bounds.y1 or node_y > bounds.y2) then
             return IMPASSABLE
         end
-        return vehicle:getMovementCostFor(path_grid[node_y][node_x].type)
+        local t = path_grid[node_y][node_x].type
+        local cost = vehicle:getMovementCostFor(t)
+        -- Streets are edges (zone_seg), not cells. A cell flanking a street edge is
+        -- traversable at road cost even if its tile type is plot/downtown_plot/etc.
+        if cost >= IMPASSABLE and (zsv or zsh) then
+            local has_edge =
+                (zsv and zsv[node_y] and (zsv[node_y][node_x] or zsv[node_y][node_x-1]))
+             or (zsh and zsh[node_y]   and zsh[node_y][node_x])
+             or (zsh and zsh[node_y-1] and zsh[node_y-1][node_x])
+            if has_edge then return vehicle:getMovementCostFor("road") end
+        end
+        return cost
     end
 
     local end_candidates, seen = {}, {}
@@ -82,7 +106,8 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     end
 
     if not best_path then
-        print(string.format("ERROR: PathfindingService - No path found for %s %d", vehicle.type, vehicle.id))
+        print(string.format("ERROR: PathfindingService - No path found for %s %d. start_sub=(%d,%d) end_candidates=%d grid=%dx%d",
+            vehicle.type, vehicle.id, start_sub.x, start_sub.y, #end_candidates, grid_w, grid_h))
         return nil
     end
 
@@ -145,18 +170,11 @@ function PathfindingService.estimatePathTravelTime(path, vehicle, game)
 end
 
 function PathfindingService.findPathToDropoff(vehicle, game)
-    local current_pos   = vehicle.grid_anchor
-    local best_path, shortest_len = nil, math.huge
-    for _, trip in ipairs(vehicle.cargo) do
-        local leg = trip.legs[trip.current_leg]
-        if leg then
-            local path = PathfindingService.findVehiclePath(vehicle, current_pos, leg.end_plot, game)
-            if path and #path < shortest_len then
-                shortest_len = #path; best_path = path
-            end
-        end
-    end
-    return best_path
+    -- Only pathfind to the first cargo trip's destination.
+    -- Running one A* per cargo item is too expensive on the unified grid.
+    local leg = vehicle.cargo[1] and vehicle.cargo[1].legs[vehicle.cargo[1].current_leg]
+    if not leg then return nil end
+    return PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, leg.end_plot, game)
 end
 
 return PathfindingService

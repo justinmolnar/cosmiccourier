@@ -40,9 +40,11 @@ function InputController:keypressed(key)
         n = { field = "debug_hide_roads",          label = "hide roads" },
         m = { field = "debug_smooth_roads_merged", label = "merged street overlay" },
         j = { field = "debug_smooth_roads_like",   label = "streets-like-big-roads overlay" },
-        o = { field = "overlay_only_mode",         label = "overlay-only mode" },
+        o = { field = "overlay_only_mode",             label = "overlay-only mode" },
+        s = { field = "debug_smooth_vehicle_movement", label = "smooth vehicle movement" },
         d = { field = "debug_district_overlay",    label = "district overlay" },
         i = { field = "debug_biome_overlay",       label = "biome overlay" },
+        u = { field = "debug_unified_grid",        label = "unified pathfinding grid" },
     }
     local toggle = DEBUG_TOGGLES[key]
     if toggle then
@@ -91,6 +93,78 @@ function InputController:keypressed(key)
         t:addLeg(src_plot, dest_plot, "truck")
         table.insert(game.entities.trips.pending, t)
         print(string.format("DEBUG: spawned inter-city trip → city_2 unified (%d,%d)", dest_plot.x, dest_plot.y))
+        return
+    end
+
+    -- Stress test: 50 bikes + 50 trucks + 25 clients + 100 trips, autodispatch on
+    if key == "f" then
+        local game = self.game
+        if not game.maps or not game.maps.unified then
+            print("DEBUG: Stress test requires world to be generated first (press F9)")
+            return
+        end
+        local TripGenerator = require("services.TripGenerator")
+        local Trip = require("models.Trip")
+        local cmap = game.maps.city
+
+        game.state.money = game.state.money + 9999999
+        game.state.upgrades.auto_dispatch_unlocked = true
+        game.state.upgrades.max_pending_trips  = math.max(game.state.upgrades.max_pending_trips,  200)
+
+        for _ = 1, 50 do game.entities:addVehicle(game, "bike")  end
+        for _ = 1, 50 do game.entities:addVehicle(game, "truck") end
+        for _ = 1, 25 do game.entities:addClient(game)           end
+
+        local payout = game.C.GAMEPLAY.BASE_TRIP_PAYOUT
+        local bonus  = game.C.GAMEPLAY.INITIAL_SPEED_BONUS
+
+        local function toUnified(plot_local)
+            return { x = (cmap.world_mn_x - 1) * 3 + plot_local.x,
+                     y = (cmap.world_mn_y - 1) * 3 + plot_local.y }
+        end
+
+        -- 50 downtown bike trips
+        for _ = 1, 50 do
+            local pl = cmap:getRandomDowntownBuildingPlot()
+            if pl then
+                local t = TripGenerator._createDowntownTrip(toUnified(pl), payout, bonus, game)
+                if t then table.insert(game.entities.trips.pending, t) end
+            end
+        end
+
+        -- 25 intra-city truck trips
+        for _ = 1, 25 do
+            local pl = cmap:getRandomDowntownBuildingPlot()
+            if pl then
+                local t = TripGenerator._createCityTrip(toUnified(pl), payout, bonus, game)
+                if t then table.insert(game.entities.trips.pending, t) end
+            end
+        end
+
+        -- 25 inter-city truck trips (city_2 if available, else more intra-city)
+        local city2 = game.maps["city_2"]
+        local bp2   = city2 and city2.building_plots
+        for _ = 1, 25 do
+            if bp2 and #bp2 > 0 then
+                local dpl = bp2[love.math.random(#bp2)]
+                local dest = { x = (city2.world_mn_x - 1) * 3 + dpl.x,
+                               y = (city2.world_mn_y - 1) * 3 + dpl.y }
+                local spl  = cmap:getRandomDowntownBuildingPlot()
+                local src  = spl and toUnified(spl) or game.entities.depot_plot
+                local t = Trip:new(payout * 3, bonus * 2)
+                t:addLeg(src, dest, "truck")
+                table.insert(game.entities.trips.pending, t)
+            else
+                local pl = cmap:getRandomDowntownBuildingPlot()
+                if pl then
+                    local t = TripGenerator._createCityTrip(toUnified(pl), payout, bonus, game)
+                    if t then table.insert(game.entities.trips.pending, t) end
+                end
+            end
+        end
+
+        print(string.format("DEBUG: Stress test — 50 bikes, 50 trucks, 25 clients, %d trips queued",
+            #game.entities.trips.pending))
         return
     end
 

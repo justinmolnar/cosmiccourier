@@ -18,13 +18,34 @@ local function getNeighbors(node, grid, grid_width, grid_height, map)
     local x, y = node.x, node.y
 
     if not map.road_v_rxs then
-        -- Sandbox map: sub-cell coords, single-step, check tile type directly.
+        -- Sandbox map: movement allowed if target is road type OR crosses a zone_seg edge.
+        -- zone_seg_v[y][x] = N-S street between cells (x,y) and (x+1,y) [1-indexed].
+        -- zone_seg_h[y][x] = E-W street between cells (x,y) and (x,y+1) [1-indexed].
+        -- Highway bridge: from a highway cell, allow entry to any adjacent city cell
+        -- (non-obstacle) to transition from world highways into city street network.
+        local zsv = map.zone_seg_v
+        local zsh = map.zone_seg_h
+        local cur_t = grid[y] and grid[y][x] and grid[y][x].type
         for _, dir in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
             local nx, ny = x + dir[1], y + dir[2]
             if nx > 0 and nx <= grid_width and ny > 0 and ny <= grid_height then
-                if map:isRoad(grid[ny][nx].type) then
-                    table.insert(neighbors, {x = nx, y = ny, dist = 1})
+                local target_t = grid[ny][nx].type
+                local ok = map:isRoad(target_t)
+                if not ok then
+                    -- Check zone_seg edge between current and target cell
+                    if     dir[1] ==  1 then ok = zsv and zsv[y]  and zsv[y][x]   -- East
+                    elseif dir[1] == -1 then ok = zsv and zsv[y]  and zsv[y][nx]  -- West
+                    elseif dir[2] ==  1 then ok = zsh and zsh[y]  and zsh[y][x]   -- South
+                    elseif dir[2] == -1 then ok = zsh and zsh[ny] and zsh[ny][x]  -- North
+                    end
                 end
+                if not ok and (cur_t == "highway" or target_t == "highway") then
+                    -- Highway bridge: any vehicle can cross between highway and adjacent cells
+                    local other_t = cur_t == "highway" and target_t or cur_t
+                    ok = other_t ~= "mountain" and other_t ~= "water"
+                      and other_t ~= "river"   and other_t ~= "grass"
+                end
+                if ok then table.insert(neighbors, {x = nx, y = ny, dist = 1}) end
             end
         end
         return neighbors
@@ -142,39 +163,73 @@ function Pathfinder.findPath(grid, startNode, endNode, costs, map)
     local startKey = nodeKey(startNode)
     local endKey   = nodeKey(endNode)
 
-    local openSet = {[startKey] = startNode}
-    local cameFrom = {}
-    local gScore   = {[startKey] = 0}
-    local fScore   = {[startKey] = heuristic(startNode, endNode)}
-
-    while next(openSet) do
-        local current, lowestF = nil, math.huge
-        for _, node in pairs(openSet) do
-            local f = fScore[nodeKey(node)]
-            if f < lowestF then lowestF = f; current = node end
+    -- Binary min-heap ordered by fScore.
+    -- Lazy deletion: when a shorter path to an already-queued node is found,
+    -- push a new entry with the better score. When popping, skip nodes already
+    -- in closedSet (their best path was already processed).
+    local heap = {}
+    local function heap_push(f, node)
+        local i = #heap + 1
+        heap[i] = {f = f, node = node}
+        while i > 1 do
+            local p = math.floor(i / 2)
+            if heap[p].f > heap[i].f then
+                heap[p], heap[i] = heap[i], heap[p]; i = p
+            else break end
         end
-
-        if nodeKey(current) == endKey then
-            return reconstructPath(cameFrom, current)
+    end
+    local function heap_pop()
+        local top = heap[1]
+        local n = #heap
+        heap[1] = heap[n]; heap[n] = nil
+        local i = 1
+        while true do
+            local l, r, s = 2*i, 2*i+1, i
+            if l <= #heap and heap[l].f < heap[s].f then s = l end
+            if r <= #heap and heap[r].f < heap[s].f then s = r end
+            if s == i then break end
+            heap[i], heap[s] = heap[s], heap[i]; i = s
         end
+        return top
+    end
 
-        local curKey = nodeKey(current)
-        openSet[curKey] = nil
+    local cameFrom  = {}
+    local gScore    = {[startKey] = 0}
+    local closedSet = {}
 
-        for _, neighbor in ipairs(getNeighbors(current, grid, grid_width, grid_height, map)) do
-            local move_cost = costs(neighbor.x, neighbor.y) * (neighbor.dist or 1)
-            local tentative  = gScore[curKey] + move_cost
-            local nk         = nodeKey(neighbor)
+    heap_push(heuristic(startNode, endNode), startNode)
 
-            if not gScore[nk] or tentative < gScore[nk] then
-                cameFrom[nk]  = current
-                gScore[nk]    = tentative
-                fScore[nk]    = tentative + heuristic(neighbor, endNode)
-                if not openSet[nk] then openSet[nk] = neighbor end
+    while #heap > 0 do
+        local entry   = heap_pop()
+        local current = entry.node
+        local curKey  = nodeKey(current)
+
+        if not closedSet[curKey] then
+            closedSet[curKey] = true
+
+            if curKey == endKey then
+                return reconstructPath(cameFrom, current)
+            end
+
+            for _, neighbor in ipairs(getNeighbors(current, grid, grid_width, grid_height, map)) do
+                local nk = nodeKey(neighbor)
+                if not closedSet[nk] then
+                    local move_cost = costs(neighbor.x, neighbor.y) * (neighbor.dist or 1)
+                    local tentative = gScore[curKey] + move_cost
+                    if not gScore[nk] or tentative < gScore[nk] then
+                        cameFrom[nk] = current
+                        gScore[nk]   = tentative
+                        heap_push(tentative + heuristic(neighbor, endNode), neighbor)
+                    end
+                end
             end
         end
     end
 
+    -- Heap exhausted: no path exists between start and end.
+    local closed_count = 0
+    for _ in pairs(closedSet) do closed_count = closed_count + 1 end
+    print(string.format("DEBUG pathfinder: no path found. start=%s end=%s explored=%d", startKey, endKey, closed_count))
     return nil
 end
 

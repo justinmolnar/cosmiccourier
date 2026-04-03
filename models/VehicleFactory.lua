@@ -30,7 +30,6 @@ function VehicleFactory.createVehicle(vehicleType, id, depot_plot, game)
     -- IMPORTANT: Recalculate position for the current map scale
     vehicle:recalculatePixelPosition(game)
     
-    print("VehicleFactory: Created " .. vehicleType .. " #" .. id .. " on map '" .. operational_map_key .. "'")
     
     return vehicle
 end
