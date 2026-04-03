@@ -39,11 +39,11 @@ function moveAlongPath(dt, vehicle, game)
             vehicle.smooth_path_i = spi
             if spi > #vehicle.smooth_path then
                 -- Smooth path exhausted: sync grid_anchor to last node and signal arrival.
-                if vehicle.path and #vehicle.path > 0 then
+                if vehicle.path and (vehicle.path_i or 1) <= #vehicle.path then
                     local last = vehicle.path[#vehicle.path]
                     vehicle.grid_anchor = {x = last.x, y = last.y}
                 end
-                vehicle.path = {}
+                vehicle.path = {}; vehicle.path_i = 1
                 vehicle.smooth_path   = nil
                 vehicle.smooth_path_i = nil
                 vehicle.current_path_eta = nil  -- don't let abstracted sim delay the transition
@@ -57,22 +57,22 @@ function moveAlongPath(dt, vehicle, game)
         -- Keep grid_anchor walking forward so mid-path rerouting starts near the
         -- vehicle's actual position, not the stale start of the previous trip.
         -- We pop all but the last node so vehicle.path never empties prematurely.
-        if vehicle.path and #vehicle.path > 1 then
-            local head = vehicle.path[1]
+        if vehicle.path and vehicle.path_i < #vehicle.path then
+            local head = vehicle.path[vehicle.path_i]
             local hdx = (head.x - 0.5) * tps - vehicle.px
             local hdy = (head.y - 0.5) * tps - vehicle.py
             if hdx * hdx + hdy * hdy < (tps * 0.5) * (tps * 0.5) then
                 vehicle.grid_anchor = {x = head.x, y = head.y}
-                table.remove(vehicle.path, 1)
+                vehicle.path_i = vehicle.path_i + 1
             end
         end
         return
     end
 
     -- Fallback: straight-line movement between grid nodes (sandbox maps, or no smooth path).
-    if not vehicle.path or #vehicle.path == 0 then return end
+    if not vehicle.path or (vehicle.path_i or 1) > #vehicle.path then return end
 
-    local target_node = vehicle.path[1]
+    local target_node = vehicle.path[vehicle.path_i]
     local target_px, target_py = map_for_pathing:getPixelCoords(target_node.x, target_node.y)
 
     local dist_x = target_px - vehicle.px
@@ -82,7 +82,7 @@ function moveAlongPath(dt, vehicle, game)
     if dist_sq <= travel_dist * travel_dist then
         vehicle.grid_anchor = {x = target_node.x, y = target_node.y}
         vehicle:recalculatePixelPosition(game)
-        table.remove(vehicle.path, 1)
+        vehicle.path_i = vehicle.path_i + 1
     else
         local angle = math.atan2(dist_y, dist_x)
         vehicle.px = vehicle.px + math.cos(angle) * travel_dist
@@ -108,7 +108,7 @@ function State:exit(vehicle, game) end
 States.Idle = State:new()
 States.Idle.name = "Idle"
 function States.Idle:enter(vehicle, game)
-    vehicle.path = {}
+    vehicle.path = {}; vehicle.path_i = 1
     vehicle.smooth_path   = nil
     vehicle.smooth_path_i = nil
 end
@@ -130,6 +130,7 @@ function States.ReturningToDepot:enter(vehicle, game)
         local PathfindingService = require("services.PathfindingService")
         vehicle._path_pending = false
         vehicle.path = PathfindingService.findPathToDepot(vehicle, game)
+        vehicle.path_i = 1
         if not vehicle.path then
             vehicle:changeState(States.Stuck, game)
             return
@@ -145,12 +146,12 @@ function States.ReturningToDepot:update(dt, vehicle, game)
         vehicle:changeState(States.GoToPickup, game)
         return
     end
-    if not vehicle.path or #vehicle.path == 0 then
+    if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
         vehicle:changeState(States.Idle, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then
+    if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
         vehicle:changeState(States.Idle, game)
     end
 end
@@ -171,6 +172,7 @@ function States.GoToPickup:enter(vehicle, game)
         local PathfindingService = require("services.PathfindingService")
         vehicle._path_pending = false
         vehicle.path = PathfindingService.findPathToPickup(vehicle, trip_to_get, game)
+        vehicle.path_i = 1
         if not vehicle.path then
             vehicle:changeState(States.Stuck, game)
             return
@@ -182,12 +184,12 @@ end
 
 function States.GoToPickup:update(dt, vehicle, game)
     if vehicle._path_pending then return end
-    if not vehicle.path or #vehicle.path == 0 then
+    if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
         vehicle:changeState(States.DoPickup, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then
+    if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
         vehicle:changeState(States.DoPickup, game)
     end
 end
@@ -245,6 +247,7 @@ function States.GoToDropoff:enter(vehicle, game)
                 vehicle.operational_map_key))
         end
         vehicle.path = PathfindingService.findPathToDropoff(vehicle, game)
+        vehicle.path_i = 1
         if not vehicle.path then
             vehicle:changeState(States.Stuck, game)
             return
@@ -256,12 +259,12 @@ end
 
 function States.GoToDropoff:update(dt, vehicle, game)
     if vehicle._path_pending then return end
-    if not vehicle.path or #vehicle.path == 0 then
+    if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
         vehicle:changeState(States.DoDropoff, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
-    if not vehicle.path or #vehicle.path == 0 then
+    if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
         vehicle:changeState(States.DoDropoff, game)
     end
 end

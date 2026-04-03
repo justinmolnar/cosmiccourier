@@ -16,6 +16,7 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
     instance.trip_queue = {}
     instance.cargo = {}
     instance.path = {}
+    instance.path_i = 1
     instance.pathfinding_bounds = nil  -- nil = no restriction; set for bounded vehicles (future)
 
     -- Speed modifier accumulates upgrade multipliers; base speed stays constant.
@@ -192,18 +193,18 @@ end
 function Vehicle:updateAbstracted(dt, game)
     if not self.current_path_eta or self.current_path_eta <= 0 then
         if not self.current_path_eta then
-            if self.state and (self.state.name == "Picking Up" or 
-                              self.state.name == "Dropping Off" or 
+            if self.state and (self.state.name == "Picking Up" or
+                              self.state.name == "Dropping Off" or
                               self.state.name == "Deciding") then
                 self:_resolveOffScreenState(game)
-                if self.path and #self.path > 0 then
+                if self.path and (self.path_i or 1) <= #self.path then
                     local PathfindingService = require("services.PathfindingService")
                     self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
                 end
             elseif self.state and self.state.name == "Idle" and #self.trip_queue > 0 then
                 local States = require("models.vehicles.vehicle_states")
                 self:changeState(States.GoToPickup, game)
-                if self.path and #self.path > 0 then
+                if self.path and (self.path_i or 1) <= #self.path then
                     local PathfindingService = require("services.PathfindingService")
                     self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
                 end
@@ -216,7 +217,7 @@ function Vehicle:updateAbstracted(dt, game)
         if self.state and self.state.name == "Returning" and #self.trip_queue > 0 then
             local States = require("models.vehicles.vehicle_states")
             self:changeState(States.GoToPickup, game)
-            if self.path and #self.path > 0 then
+            if self.path and (self.path_i or 1) <= #self.path then
                 local PathfindingService = require("services.PathfindingService")
                 self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
             end
@@ -227,16 +228,16 @@ function Vehicle:updateAbstracted(dt, game)
     self.current_path_eta = self.current_path_eta - dt
 
     if self.current_path_eta <= 0 then
-        if self.path and #self.path > 0 then
+        if self.path and (self.path_i or 1) <= #self.path then
             local final_node = self.path[#self.path]
             self.grid_anchor = {x = final_node.x, y = final_node.y, is_tile = final_node.is_tile}
             self:recalculatePixelPosition(game)
-            self.path = {}
+            self.path = {}; self.path_i = 1
         end
 
         self:_resolveOffScreenState(game)
-        
-        if self.path and #self.path > 0 then
+
+        if self.path and (self.path_i or 1) <= #self.path then
             local PathfindingService = require("services.PathfindingService")
             self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
         else
@@ -252,7 +253,7 @@ end
 
 function Vehicle:shouldUseAbstractedSimulation(game)
     -- Always animate when there is an active path or smooth path to follow.
-    if self.path and #self.path > 0 then return false end
+    if self.path and (self.path_i or 1) <= #self.path then return false end
     if self.smooth_path and self.smooth_path_i and self.smooth_path_i <= #self.smooth_path then return false end
 
     local vcfg = game.C.VEHICLES[self.type:upper()]
@@ -268,8 +269,9 @@ function Vehicle:drawDebug(game)
     -- All coordinates are relative to the vehicle's world pixel position (self.px, self.py).
     local screen_x, screen_y = self.px, self.py
 
-    -- Draw the vehicle's current path
-    if self.path and #self.path > 0 then
+    -- Draw the vehicle's current path (remaining nodes only)
+    local _pi = self.path_i or 1
+    if self.path and _pi <= #self.path then
         love.graphics.setColor(0, 0, 1, 0.7) -- Blue for path
         love.graphics.setLineWidth(2 / game.camera.scale)
         local pixel_path = {}
@@ -277,7 +279,8 @@ function Vehicle:drawDebug(game)
         table.insert(pixel_path, self.py)
         local path_map = game.maps[self.operational_map_key]
         local path_tps = path_map.tile_pixel_size or game.C.MAP.TILE_SIZE
-        for _, node in ipairs(self.path) do
+        for i = _pi, #self.path do
+            local node = self.path[i]
             local px, py
             if path_map.road_v_rxs then
                 if node.is_tile then
@@ -302,10 +305,11 @@ function Vehicle:drawDebug(game)
     local menu_y = screen_y - (20 * scale)
 
     local state_name = self.state and self.state.name or "N/A"
-    local path_count = self.path and #self.path or 0
+    local pi = self.path_i or 1
+    local path_count = self.path and math.max(0, #self.path - pi + 1) or 0
     local target_text = "None"
-    if self.path and #self.path > 0 then
-        target_text = string.format("(%d, %d)", self.path[1].x, self.path[1].y)
+    if self.path and pi <= #self.path then
+        target_text = string.format("(%d, %d)", self.path[pi].x, self.path[pi].y)
     end
     local debug_lines = {
         string.format("ID: %d | Type: %s", self.id, self.type),

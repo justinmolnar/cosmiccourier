@@ -1448,8 +1448,9 @@ function WorldSandboxController:sendToGame()
     game.entities.depot_plot = new_depot
     local uts = game.maps.unified.tile_pixel_size
     require("services.PathScheduler").clear()
+    require("services.PathCacheService").invalidate()
     for _, v in ipairs(game.entities.vehicles) do
-        v.cargo = {}; v.trip_queue = {}; v.path = {}; v.smooth_path = nil; v.smooth_path_i = nil
+        v.cargo = {}; v.trip_queue = {}; v.path = {}; v.path_i = 1; v.smooth_path = nil; v.smooth_path_i = nil
         v._path_pending = false
         v.operational_map_key = "unified"
         if new_depot then

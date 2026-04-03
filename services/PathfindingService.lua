@@ -1,7 +1,8 @@
 -- services/PathfindingService.lua
-local WGC       = require("data.WorldGenConfig")
-local IMPASSABLE = WGC.IMPASSABLE_COST
-local SNAP_CAP   = WGC.SNAP_SEARCH_CAP
+local WGC            = require("data.WorldGenConfig")
+local IMPASSABLE     = WGC.IMPASSABLE_COST
+local SNAP_CAP       = WGC.SNAP_SEARCH_CAP
+local PathCacheService = require("services.PathCacheService")
 
 local PathfindingService = {}
 
@@ -98,6 +99,10 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     -- city maps that also carry road-node data.
     local sandbox_proxy = setmetatable({road_v_rxs = false}, {__index = map})
 
+    -- Cache lookup: key on snapped start + original end_plot
+    local cached = PathCacheService.get(start_sub.x, start_sub.y, end_plot.x, end_plot.y)
+    if cached then return cached end
+
     local best_path = nil
     for _, end_node in ipairs(end_candidates) do
         if end_node.x == start_sub.x and end_node.y == start_sub.y then return {} end
@@ -112,6 +117,7 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     end
 
     if #best_path > 0 then table.remove(best_path, 1) end
+    PathCacheService.put(start_sub.x, start_sub.y, end_plot.x, end_plot.y, best_path)
     return best_path
 end
 
