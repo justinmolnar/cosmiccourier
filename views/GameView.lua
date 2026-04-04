@@ -23,21 +23,39 @@ local _zone_shader = love.graphics.newShader([[
 local CITY_OVERLAY = {
     cs_start = 1.5,   -- CITY_IMAGE_THRESHOLD — where cities first appear
 
-    road_alpha_min = 0.50,  road_alpha_max = 1.00,  road_cs_full =   6.0,  -- solid well before mid-zoom
-    zone_alpha_min = 0.30,  zone_alpha_max = 1.00,  zone_cs_full =  30.0,  -- full before high zoom
-    zone_sat_min   = 0.30,  zone_sat_max   = 0.60,  sat_cs_full  = 400.0,  -- slowest, only 60% at max zoom
+    road_alpha_min = 0.50,  road_alpha_max = 1.00,  road_cs_full =   6.0,
+    zone_alpha_min = 0.30,  zone_alpha_max = 1.00,  zone_cs_full =  30.0,
+    zone_sat_min   = 0.30,  zone_sat_max   = 0.60,  sat_cs_full  = 400.0,
 }
+do  -- precompute log denominators once at startup
+    local ls = math.log(CITY_OVERLAY.cs_start)
+    CITY_OVERLAY._log_start   = ls
+    CITY_OVERLAY._road_denom  = math.log(CITY_OVERLAY.road_cs_full) - ls
+    CITY_OVERLAY._zone_denom  = math.log(CITY_OVERLAY.zone_cs_full) - ls
+    CITY_OVERLAY._sat_denom   = math.log(CITY_OVERLAY.sat_cs_full)  - ls
+end
+
+-- Cache: skip recompute when cs hasn't changed; shader send skipped when sat is unchanged.
+local _overlay_cache = { cs = -1, road_alpha = 1, zone_alpha = 1, zone_sat = 1 }
 
 local function _cityOverlayParams(cs)
-    local C = CITY_OVERLAY
-    local function ramp(cs_full, v_min, v_max)
-        local t = (math.log(cs) - math.log(C.cs_start)) / (math.log(cs_full) - math.log(C.cs_start))
+    if cs == _overlay_cache.cs then
+        return _overlay_cache.road_alpha, _overlay_cache.zone_alpha, _overlay_cache.zone_sat
+    end
+    local C      = CITY_OVERLAY
+    local log_cs = math.log(cs)
+    local function ramp(denom, v_min, v_max)
+        local t = (log_cs - C._log_start) / denom
         return v_min + (v_max - v_min) * math.max(0, math.min(1, t))
     end
-    return
-        ramp(C.road_cs_full, C.road_alpha_min, C.road_alpha_max),
-        ramp(C.zone_cs_full, C.zone_alpha_min, C.zone_alpha_max),
-        ramp(C.sat_cs_full,  C.zone_sat_min,   C.zone_sat_max)
+    local ra = ramp(C._road_denom, C.road_alpha_min, C.road_alpha_max)
+    local za = ramp(C._zone_denom, C.zone_alpha_min, C.zone_alpha_max)
+    local zs = ramp(C._sat_denom,  C.zone_sat_min,   C.zone_sat_max)
+    _overlay_cache.cs         = cs
+    _overlay_cache.road_alpha = ra
+    _overlay_cache.zone_alpha = za
+    _overlay_cache.zone_sat   = zs
+    return ra, za, zs
 end
 
 -- Zoom threshold: above this scale draw vectors directly (crisp quality, ~1 city visible);
@@ -571,12 +589,16 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     -- LAYER: City background images (tiled, culled)
     -- Drawn after highways so the opaque image hides the in-city highway portion.
     if cs >= Z.CITY_IMAGE_THRESHOLD and not Game.overlay_only_mode then
-        _zone_shader:send("saturation", _zone_sat)
-        love.graphics.setShader(_zone_shader)
+        local shader_active = false
         love.graphics.setColor(1, 1, 1, _zone_alpha)
         for i = tile_i0, tile_i1 do
             for _, m in ipairs(Game.maps.all_cities or {}) do
                 if m.city_image and cityInView(m, i * mpw) then
+                    if not shader_active then
+                        _zone_shader:send("saturation", _zone_sat)
+                        love.graphics.setShader(_zone_shader)
+                        shader_active = true
+                    end
                     local K = m.city_img_K or 9
                     love.graphics.draw(m.city_image,
                         i * mpw + (m.city_img_min_x - 1) * ts,
@@ -585,7 +607,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                 end
             end
         end
-        love.graphics.setShader()
+        if shader_active then love.graphics.setShader() end
         love.graphics.setColor(1, 1, 1)
     end
 
