@@ -22,9 +22,13 @@ function GameController:new(game)
         avg_frame_time = 0,
         last_fps_update = 0
     }
-    
+
+    instance._gc_step_timer  = 0
+    instance._gc_hard_timer  = 0
+    instance._mem_warn_timer = 0
+
     game.error_service.logInfo("GameController", "Game controller initialized")
-    
+
     return instance
 end
 
@@ -86,6 +90,7 @@ function GameController:update(dt)
     end
     
     -- Check for any critical errors that should pause the game
+    self:stepGC(dt)
     self:checkCriticalErrors()
 end
 
@@ -113,6 +118,26 @@ function GameController:updatePerformanceStats(dt)
     end
 end
 
+function GameController:stepGC(dt)
+    self._gc_step_timer = self._gc_step_timer + dt
+    self._gc_hard_timer = self._gc_hard_timer + dt
+
+    -- Incremental GC step every 5 seconds to keep GC from falling behind
+    if self._gc_step_timer >= 5 then
+        self._gc_step_timer = 0
+        collectgarbage("step", 1)
+    end
+
+    -- Full collection if above 512 MB, at most once every 30 seconds
+    if self._gc_hard_timer >= 30 then
+        self._gc_hard_timer = 0
+        local mem_kb = collectgarbage("count")
+        if mem_kb > 512 * 1024 then
+            collectgarbage("collect")
+        end
+    end
+end
+
 function GameController:checkCriticalErrors()
     -- MODIFIED: Check for the maps table instead of a single map
     if not self.game.maps or not self.game.entities or not self.game.state then
@@ -120,12 +145,16 @@ function GameController:checkCriticalErrors()
         self:pauseGame()
         return
     end
-    
-    -- Check memory usage (if it gets too high, log a warning)
-    local memory_usage = collectgarbage("count")
-    if memory_usage > 700000 then -- 700MB threshold (GC pause=300% allows higher peaks)
-        self.game.error_service.logWarning("GameController", 
-            string.format("High memory usage detected: %.1f MB", memory_usage / 1024))
+
+    -- Check memory usage, rate-limited to once per 10 seconds
+    self._mem_warn_timer = self._mem_warn_timer + (self.performance_stats.avg_frame_time or 0.016)
+    if self._mem_warn_timer >= 10 then
+        self._mem_warn_timer = 0
+        local memory_usage = collectgarbage("count")
+        if memory_usage > 700000 then -- 700MB threshold
+            self.game.error_service.logWarning("GameController",
+                string.format("High memory usage detected: %.1f MB", memory_usage / 1024))
+        end
     end
 end
 

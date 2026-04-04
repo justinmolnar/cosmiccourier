@@ -163,8 +163,9 @@ local function traceRiversAndLakes(w, h, p, heightmap, colormap, pre_ridge)
     -- then continue the river from that rim — rivers never end mid-land.
     -- Two traces that reach the same cell merge naturally.
     -- Hoisted so Pass 4 (biome map) can read which cells are water.
-    local painted = {}   -- river + lake cell indices
-    local is_lake = {}   -- lake-only subset for merging
+    local painted     = {}   -- river + lake cell indices
+    local is_lake     = {}   -- lake-only subset for merging
+    local river_paths = {}   -- [{x,y}, ...] per river for vector rendering
 
     local river_count = math.floor(p.river_count or 0)
     if river_count > 0 then
@@ -397,9 +398,12 @@ local function traceRiversAndLakes(w, h, p, heightmap, colormap, pre_ridge)
         -- Trace each source downstream to the ocean (or merge with existing river/lake).
         -- Uses choose_next (stochastic downhill) for meandering paths.
         -- True pits (no downhill neighbour) → fill_and_spill lake → carve fallback.
+        -- Also capture each river as a sequence of {x,y} cells for vector rendering.
+        river_paths = {}
         for _, src in ipairs(sources) do
             local i     = src.i
             local steps = 0
+            local path  = {}
             while i and i > 0 and steps < w * h do
                 steps = steps + 1
                 if is_ocean[i]  then break end
@@ -408,12 +412,16 @@ local function traceRiversAndLakes(w, h, p, heightmap, colormap, pre_ridge)
                 local cy = math.floor((i - 1) / w) + 1
                 local cx = (i - 1) % w + 1
                 colormap[cy][cx] = RIVER_COLOR
+                path[#path + 1] = { x = cx, y = cy }
                 local nxt = choose_next(i)
                 if nxt == nil then
                     nxt = fill_and_spill(i)
                     if nxt == nil then nxt = carve_step(i) end
                 end
                 i = nxt
+            end
+            if #path >= 2 then
+                river_paths[#river_paths + 1] = path
             end
         end
 
@@ -448,7 +456,7 @@ local function traceRiversAndLakes(w, h, p, heightmap, colormap, pre_ridge)
         end
     end
 
-    return painted, is_lake
+    return painted, is_lake, river_paths
 end
 
 -- ── Phase 3: biomes + suitability ─────────────────────────────────────────────
@@ -1020,7 +1028,7 @@ function WorldNoiseService.generate(w, h, p)
     local heightmap, colormap, pre_ridge, moisture_map =
         generateHeightMap(w, h, p)
 
-    local painted, is_lake =
+    local painted, is_lake, river_paths =
         traceRiversAndLakes(w, h, p, heightmap, colormap, pre_ridge)
 
     local biome_colormap, biome_data, suitability_colormap, raw_suit =
@@ -1033,6 +1041,7 @@ function WorldNoiseService.generate(w, h, p)
     return {
         heightmap            = heightmap,
         colormap             = colormap,
+        moisture_map         = moisture_map,
         biome_colormap       = biome_colormap,
         biome_data           = biome_data,
         suitability_colormap = suitability_colormap,
@@ -1043,6 +1052,7 @@ function WorldNoiseService.generate(w, h, p)
         region_colormap      = region_colormap,
         region_map           = region_map,
         regions_list         = regions_list,
+        river_paths          = river_paths,
     }
 end
 

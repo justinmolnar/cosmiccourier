@@ -24,12 +24,14 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.regions_acc      = Accordion:new("Regions",            false, 150)
     inst.highways_acc     = Accordion:new("Highways",           false, 120)
     inst.citygen_acc      = Accordion:new("City Gen",           false, 110)
+    inst.visual_acc       = Accordion:new("Visual Quality",     false, 120)
     inst.actions_acc      = Accordion:new("Actions",            true,  340)
 
     inst.accordions = {
         inst.world_acc, inst.continental_acc, inst.terrain_acc,
         inst.detail_acc, inst.biomes_acc, inst.suitability_acc,
-        inst.regions_acc, inst.highways_acc, inst.citygen_acc, inst.actions_acc,
+        inst.regions_acc, inst.highways_acc, inst.citygen_acc,
+        inst.visual_acc, inst.actions_acc,
     }
 
     local p = wsc.params
@@ -135,7 +137,17 @@ function WorldSandboxSidebarManager:new(wsc, game)
         Slider:new("Seed Spacing",  5,  80,   p.region_min_sep,       true,  function(v) wsc.params.region_min_sep       = v end, game),
     }
 
-    -- Panel widget lists aligned with accordions (index 10 = actions, handled directly)
+    -- Visual Quality sliders (Hi-Res Scale + Color Variation)
+    inst.visual_sliders = {
+        Slider:new("Hi-Res Scale",    1,   8,   p.vq_hires_scale,     true,  function(v) wsc.params.vq_hires_scale     = v end, game),
+        Slider:new("Color Variation", 0, 0.3,   p.vq_color_variation, false, function(v) wsc.params.vq_color_variation = v end, game),
+    }
+    -- Visual mode buttons
+    inst.btn_vq_tile  = { x = 0, y = 0, w = 0, h = 30 }
+    inst.btn_vq_hires = { x = 0, y = 0, w = 0, h = 30 }
+    inst.btn_vq_apply = { x = 0, y = 0, w = 0, h = 30 }
+
+    -- Panel widget lists aligned with accordions (index 10 = visual, index 11 = actions)
     inst.panel_widgets = {
         inst.world_sliders,
         inst.continental_sliders,
@@ -146,7 +158,8 @@ function WorldSandboxSidebarManager:new(wsc, game)
         inst.region_sliders,
         inst.highway_sliders,
         inst.citygen_sliders,
-        {},
+        {},  -- visual (index 10): handled specially like actions
+        {},  -- actions (index 11): handled specially
     }
 
     -- Action button rects (set in _doLayout)
@@ -185,6 +198,11 @@ function WorldSandboxSidebarManager:_doLayout()
         local panel = self.panel_widgets[i]
         local total_h = 4
         if i == 10 then
+            -- Visual Quality: mode buttons row + sliders
+            total_h = self.btn_vq_tile.h + 6
+            for _, w in ipairs(self.visual_sliders) do total_h = total_h + w.h end
+            total_h = total_h + self.btn_vq_apply.h + 8
+        elseif i == 11 then
             -- Actions: randomize + generate + view grid (2-col ×2 + 2-col regions/districts) + scope row + place cities + build highways + gen city
             total_h = self.btn_randomize.h + self.btn_generate.h
                     + self.btn_view_height.h + self.btn_view_suit.h   -- two 2-col rows
@@ -212,9 +230,9 @@ function WorldSandboxSidebarManager:_doLayout()
         end
     end
 
-    -- Position widgets inside open accordions
+    -- Position widgets inside open accordions (indices 1-9 use standard slider layout)
     for i, acc in ipairs(self.accordions) do
-        if i == 10 then break end
+        if i >= 10 then break end
         local panel = self.panel_widgets[i]
         local wy    = acc.y + acc.header_h
         for _, w in ipairs(panel) do
@@ -223,6 +241,21 @@ function WorldSandboxSidebarManager:_doLayout()
             w.w = ww
             wy  = wy + w.h
         end
+    end
+
+    -- Visual Quality accordion (index 10): mode buttons + sliders
+    do
+        local va     = self.visual_acc
+        local vy     = va.y + va.header_h + 6
+        local half_w = math.floor((ww - 4) / 2)
+        self.btn_vq_tile.x  = pad;              self.btn_vq_tile.y  = vy; self.btn_vq_tile.w  = half_w
+        self.btn_vq_hires.x = pad + half_w + 4; self.btn_vq_hires.y = vy; self.btn_vq_hires.w = half_w
+        vy = vy + self.btn_vq_tile.h + 6
+        for _, w in ipairs(self.visual_sliders) do
+            w.x = pad; w.y = vy; w.w = ww
+            vy  = vy + w.h
+        end
+        self.btn_vq_apply.x = pad; self.btn_vq_apply.y = vy + 2; self.btn_vq_apply.w = ww
     end
 
     -- Actions accordion buttons
@@ -306,6 +339,13 @@ function WorldSandboxSidebarManager:draw()
         acc:beginDraw()
         if acc.is_open then
             if i == 10 then
+                -- Visual Quality accordion
+                local vq = self.wsc.params.vq_mode or "tile"
+                draw_button(self.btn_vq_tile,  "Tile",   vq == "tile",  game)
+                draw_button(self.btn_vq_hires, "Hi-Res", vq == "hires", game)
+                for _, w in ipairs(self.visual_sliders) do w:draw() end
+                draw_button(self.btn_vq_apply, "Apply Visual Mode", false, game)
+            elseif i == 11 then
                 draw_button(self.btn_randomize,      "Randomize Seed",  false, game)
                 draw_button(self.btn_generate,       "Generate",        true,  game)
                 draw_button(self.btn_view_height,    "Height",      self.wsc.view_mode == "height",      game)
@@ -364,7 +404,33 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
         if acc.is_open and acc:handle_mouse_down(x, y, button) then return true end
     end
 
-    -- 3. Actions buttons (accordion index 10)
+    -- 3. Visual Quality buttons (accordion index 10)
+    if self.visual_acc.is_open and button == 1 then
+        local sy = y + self.visual_acc.scroll_y
+        if point_in_rect(x, sy, self.btn_vq_tile) then
+            self.wsc.params.vq_mode = "tile"
+            if self.wsc.colormap then self.wsc:_buildImage() end
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_vq_hires) then
+            self.wsc.params.vq_mode = "hires"
+            if self.wsc.colormap then self.wsc:_buildImage() end
+            return true
+        end
+        if point_in_rect(x, sy, self.btn_vq_apply) then
+            if self.wsc.colormap then self.wsc:_buildImage() end
+            return true
+        end
+        -- Pass through to sliders
+        for _, w in ipairs(self.visual_sliders) do
+            local wy_top = w.y
+            if sy >= wy_top and sy < wy_top + w.h then
+                if w:handle_mouse_down(x, sy, button) then return true end
+            end
+        end
+    end
+
+    -- 4. Actions buttons (accordion index 11)
     if self.actions_acc.is_open and button == 1 then
         local sy = y + self.actions_acc.scroll_y
         if point_in_rect(x, sy, self.btn_randomize) then
@@ -442,9 +508,9 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
         end
     end
 
-    -- 4. Widgets in open accordions
+    -- 5. Widgets in open accordions (indices 1-9 only; 10=visual handled above, 11=actions handled above)
     for i, acc in ipairs(self.accordions) do
-        if i == 10 then break end
+        if i >= 10 then break end
         if acc.is_open then
             local content_top    = acc.y + acc.header_h
             local content_bottom = content_top + acc.content_h
@@ -471,6 +537,9 @@ function WorldSandboxSidebarManager:handle_mouse_up(x, y, button)
             if w.handle_mouse_up then w:handle_mouse_up(x, y, button) end
         end
     end
+    for _, w in ipairs(self.visual_sliders) do
+        if w.handle_mouse_up then w:handle_mouse_up(x, y, button) end
+    end
 end
 
 function WorldSandboxSidebarManager:handle_mouse_moved(x, y, dx, dy)
@@ -479,6 +548,9 @@ function WorldSandboxSidebarManager:handle_mouse_moved(x, y, dx, dy)
         for _, w in ipairs(self.panel_widgets[i]) do
             if w.handle_mouse_moved then w:handle_mouse_moved(x, my, dx, dy) end
         end
+    end
+    for _, w in ipairs(self.visual_sliders) do
+        if w.handle_mouse_moved then w:handle_mouse_moved(x, my, dx, dy) end
     end
 end
 

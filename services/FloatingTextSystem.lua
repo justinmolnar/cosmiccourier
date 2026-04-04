@@ -5,8 +5,10 @@
 local FloatingTextSystem = {}
 
 local _texts = {}
+local MAX_TEXTS = 50
 
 function FloatingTextSystem.emit(text, x, y, C)
+    if #_texts >= MAX_TEXTS then table.remove(_texts, 1) end
     table.insert(_texts, {
         text  = text,
         x     = x,

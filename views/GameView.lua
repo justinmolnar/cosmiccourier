@@ -169,7 +169,8 @@ local function _buildWorldHighwayPaths(Game, ts)
         end
     end
 
-    local paths = {}
+    local paths  = {}
+    local bounds = {}
     for _, chain in ipairs(raw) do
         if #chain >= 2 then
             local pts = {}
@@ -179,10 +180,21 @@ local function _buildWorldHighwayPaths(Game, ts)
             end
             pts = PathUtils.simplify(pts, ts * 2.0)
             pts = PathUtils.chaikin(pts, 3)
-            if #pts >= 4 then paths[#paths+1] = pts end
+            if #pts >= 4 then
+                local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
+                for i = 1, #pts, 2 do
+                    local px, py = pts[i], pts[i+1]
+                    if px < x0 then x0 = px end
+                    if py < y0 then y0 = py end
+                    if px > x1 then x1 = px end
+                    if py > y1 then y1 = py end
+                end
+                paths[#paths+1]  = pts
+                bounds[#bounds+1] = {x0, y0, x1, y1}
+            end
         end
     end
-    return paths
+    return paths, bounds
 end
 
 -- Shared drawing routine: renders all overlay layers in city-local coordinates.
@@ -290,15 +302,27 @@ local function _drawCityOverlayVectors(m, Game, RS, m_ox, m_oy)
     love.graphics.pop()
 end
 
--- Low-zoom path: pre-render overlay into a Canvas (built once, reused every frame).
+-- Zoom tier for canvas resolution: higher tier = more canvas pixels per world pixel.
+-- We upgrade (rebuild at higher S) when the camera zooms in past a threshold.
+-- We never downgrade — a high-res canvas still looks fine at lower zoom levels and
+-- avoids a rebuild spike when the player zooms back out.
+local function _canvasTier(cs)
+    if cs < 2 then return 0 end
+    if cs < 5 then return 1 end
+    return 2
+end
+
+-- Pre-render overlay into a Canvas (built once per tier, reused every frame).
 local function _cityCanvasStale(m, Game)
     if not m._overlay_canvas then return true end
     local f = m._overlay_canvas_flags
-    return not f
-        or (f.roads      ~= (Game.debug_smooth_roads      or false))
-        or (f.roads_like ~= (Game.debug_smooth_roads_like or false))
-        -- Rebuild if highway data arrived after the canvas was first built
-        or (f.had_highways ~= (Game.world_highway_paths ~= nil and #Game.world_highway_paths > 0))
+    if not f then return true end
+    if f.roads      ~= (Game.debug_smooth_roads      or false) then return true end
+    if f.roads_like ~= (Game.debug_smooth_roads_like or false) then return true end
+    if f.had_highways ~= (Game.world_highway_paths ~= nil and #Game.world_highway_paths > 0) then return true end
+    -- Upgrade if zoomed in further than when canvas was baked; never downgrade.
+    if _canvasTier(Game.camera.scale) > (f.zoom_tier or 0) then return true end
+    return false
 end
 
 local function _buildCityOverlayCanvas(m, Game, RS)
@@ -309,9 +333,12 @@ local function _buildCityOverlayCanvas(m, Game, RS)
 
     if m._overlay_canvas then m._overlay_canvas:release() end
 
-    local m_tps = m.tile_pixel_size or ts
-    -- S: canvas pixels per world pixel, sized so line widths are clearly visible.
-    local S     = math.max(1, math.floor(12.0 / m_tps + 0.5))
+    local m_tps  = m.tile_pixel_size or ts
+    local base_S = math.max(1, math.floor(12.0 / m_tps + 0.5))
+    local tier   = _canvasTier(Game.camera.scale)
+    -- Tier 0: base res; Tier 1: 2× (city overview); Tier 2: 4× (city detail zoom)
+    local tier_S = (tier == 2) and 4 or (tier == 1) and 2 or 1
+    local S      = math.max(base_S, tier_S)
 
     local canvas = love.graphics.newCanvas(cw * S, ch * S)
     canvas:setFilter("linear", "linear")
@@ -340,6 +367,7 @@ local function _buildCityOverlayCanvas(m, Game, RS)
         roads        = Game.debug_smooth_roads      or false,
         roads_like   = Game.debug_smooth_roads_like or false,
         had_highways = Game.world_highway_paths ~= nil and #Game.world_highway_paths > 0,
+        zoom_tier    = tier,
     }
 end
 
@@ -557,21 +585,28 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     -- bounding-box-vs-actual-road gap that clipping approaches suffer from.
     if Game.world_highway_map and next(Game.world_highway_map) and not Game.overlay_only_mode then
         if not Game._world_highway_smooth then
-            Game._world_highway_smooth = _buildWorldHighwayPaths(Game, ts)
+            Game._world_highway_smooth, Game._world_highway_bounds = _buildWorldHighwayPaths(Game, ts)
             Game._trip_preview_cache   = nil
             if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
         end
-        local hpaths = Game._world_highway_smooth
+        local hpaths  = Game._world_highway_smooth
+        local hbounds = Game._world_highway_bounds or {}
         if hpaths and #hpaths > 0 then
             love.graphics.setColor(0.22, 0.21, 0.20, 1.0)
             love.graphics.setLineWidth(ts * 0.85)
             love.graphics.setLineJoin("bevel")
             love.graphics.setLineStyle("smooth")
             for i = tile_i0, tile_i1 do
+                local xoff = i * mpw
                 love.graphics.push()
-                love.graphics.translate(i * mpw, 0)
-                for _, pts in ipairs(hpaths) do
-                    if #pts >= 4 then love.graphics.line(pts) end
+                love.graphics.translate(xoff, 0)
+                for idx, pts in ipairs(hpaths) do
+                    local b = hbounds[idx]
+                    if b and (b[3]+xoff < vp_left or b[1]+xoff > vp_right or b[4] < vp_top or b[2] > vp_bot) then
+                        -- entirely outside viewport, skip
+                    elseif #pts >= 4 then
+                        love.graphics.line(pts)
+                    end
                 end
                 love.graphics.pop()
             end
@@ -612,23 +647,35 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     end
 
     -- LAYER: City road/river overlays
-    -- High zoom (cs >= OVERLAY_VECTOR_THRESHOLD): draw vectors directly — crisp at any zoom,
-    --   fast because only ~1 city is visible at this scale.
-    -- Low zoom (cs < OVERLAY_VECTOR_THRESHOLD): draw a cached canvas — multiple cities may be
-    --   on screen simultaneously so the per-frame vector cost would be too high.
+    -- High-zoom (≤2 cities visible, cs ≥ OVERLAY_VECTOR_THRESHOLD): draw vectors directly
+    -- for crisp Chaikin-curved roads at any zoom.  ~60 draw calls for 1–2 on-screen cities
+    -- is fine at high zoom.  Low-zoom (>2 cities visible or below threshold): use cached
+    -- canvas — 1 draw call each; slight blur is invisible when cities are small on screen.
     if cs >= Z.CITY_IMAGE_THRESHOLD then
         local RS = require("utils.RoadSmoother")
+
+        -- Count distinct cities currently in view to pick render mode.
+        local cities_in_view = 0
+        for _, m in ipairs(Game.maps.all_cities or {}) do
+            for i = tile_i0, tile_i1 do
+                if cityInView(m, i * mpw) then
+                    cities_in_view = cities_in_view + 1
+                    break
+                end
+            end
+        end
+        local use_vectors = cs >= OVERLAY_VECTOR_THRESHOLD and cities_in_view <= 2
+
         love.graphics.setColor(1, 1, 1)
         for i = tile_i0, tile_i1 do
             for _, m in ipairs(Game.maps.all_cities or {}) do
                 if not cityInView(m, i * mpw) then goto continue_overlay end
                 local m_ox = (m.world_mn_x - 1) * ts
                 local m_oy = (m.world_mn_y - 1) * ts
-                if cs >= OVERLAY_VECTOR_THRESHOLD then
-                    -- High zoom: draw vectors directly; _road_alpha read inside via Game._road_alpha
+                if use_vectors then
+                    -- Vectors: always crisp, road_alpha applied inside via Game._road_alpha
                     _drawCityOverlayVectors(m, Game, RS, i * mpw + m_ox, m_oy)
                 else
-                    -- Low zoom: draw cached canvas; apply road_alpha at draw time (canvas baked at 1.0)
                     if _cityCanvasStale(m, Game) then
                         _buildCityOverlayCanvas(m, Game, RS)
                     end
@@ -1514,10 +1561,66 @@ function GameView:_drawF3Overlay()
     love.graphics.setColor(1, 1, 1, 1)
 end
 
+function GameView:prewarm()
+    local Game = self.Game
+    if not Game.maps or not Game.maps.all_cities then return end
+    local RS  = require("utils.RoadSmoother")
+    local ts  = Game.C.MAP.TILE_SIZE
+
+    -- Highway smooth paths (pure data, no GPU)
+    if not Game._world_highway_smooth and Game.world_highway_map and next(Game.world_highway_map) then
+        Game._world_highway_smooth, Game._world_highway_bounds = _buildWorldHighwayPaths(Game, ts)
+        Game._trip_preview_cache   = nil
+        if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
+    end
+
+    -- Per-city smooth paths (pure data, no GPU)
+    for _, m in ipairs(Game.maps.all_cities) do
+        local m_tps = m.tile_pixel_size or ts
+        if not m._river_smooth_paths_v1 then
+            m._river_smooth_paths_v1 = RS.buildRiverPaths(m.grid, m_tps)
+        end
+        if Game.debug_smooth_roads_like and not m._street_smooth_paths_like_v5 then
+            m._street_smooth_paths_like_v5 = RS.buildStreetPathsLike(
+                m.zone_seg_v, m.zone_seg_h, m.zone_grid, m_tps, m.grid)
+            if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
+        end
+        if Game.debug_smooth_roads and not m._road_smooth_paths_v8 then
+            if m.road_centerlines and #m.road_centerlines > 0 then
+                m._road_smooth_paths_v8 = RS.buildPathsFromCenterlines(m.road_centerlines, m_tps)
+            else
+                m._road_smooth_paths_v8 = RS.buildPaths(m.grid, m_tps)
+            end
+            if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
+        end
+    end
+
+    -- Snap lookup (pure data, depends on smooth paths above)
+    if Game.maps.unified and not Game.maps.unified._snap_lookup then
+        require("services.PathSmoothingService").buildSnapLookup(Game)
+        Game._trip_preview_cache = nil
+    end
+
+    -- Overlay canvases + tile canvases (GPU — must be called from draw context)
+    for _, m in ipairs(Game.maps.all_cities) do
+        if _cityCanvasStale(m, Game) then
+            _buildCityOverlayCanvas(m, Game, RS)
+        end
+        if not m._tile_canvas then
+            m:buildTileCanvas()
+        end
+    end
+end
+
 function GameView:draw()
     local Game = self.Game
     local active_map = Game.maps[Game.active_map_key]
     if not active_map then return end
+
+    if Game._prewarm_pending then
+        Game._prewarm_pending = nil
+        self:prewarm()
+    end
     local sidebar_w  = Game.C.UI.SIDEBAR_WIDTH
     local screen_w, screen_h = love.graphics.getDimensions()
     local S          = Game.C.MAP.SCALES

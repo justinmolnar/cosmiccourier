@@ -5,7 +5,7 @@
 
 local PathCacheService = {}
 
-local MAX_ENTRIES = 3000
+local MAX_ENTRIES = 750
 
 -- Doubly-linked list node pool for O(1) LRU tracking.
 -- Sentinel head (most-recent) and tail (least-recent).

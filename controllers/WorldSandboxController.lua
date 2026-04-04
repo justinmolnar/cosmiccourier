@@ -2,6 +2,23 @@
 
 local ffi = require("ffi")
 local _ffi_cdef_done = false  -- guard: ffi.cdef must only run once per Lua state
+local Biomes = require("data.biomes")
+
+-- Bilinear interpolation of a 2-D array map[y][x] at fractional position (fy, fx).
+local function bilinear2d(map, fy, fx, W, H)
+    local x0 = math.max(1, math.floor(fx))
+    local y0 = math.max(1, math.floor(fy))
+    local x1 = math.min(W, x0 + 1)
+    local y1 = math.min(H, y0 + 1)
+    local tx = fx - x0
+    local ty = fy - y0
+    local v00 = map[y0][x0] or 0
+    local v10 = map[y0][x1] or 0
+    local v01 = map[y1][x0] or 0
+    local v11 = map[y1][x1] or 0
+    return (v00*(1-tx) + v10*tx) * (1-ty)
+         + (v01*(1-tx) + v11*tx) * ty
+end
 
 -- Integer tile type encoding for the FFI unified grid.
 -- Must stay in sync with C.TILE in constants.lua and _TILE_NAMES in PathfindingService.
@@ -57,7 +74,12 @@ function WorldSandboxController:new(game)
     inst.city_img_min_x        = 0
     inst.city_img_min_y        = 0
     inst.city_img_K            = 1
+    inst.moisture_map          = nil
+    inst.painted_set           = nil
+    inst.lake_set              = nil
+    inst.river_paths           = nil
     inst.world_image           = nil
+    inst.world_image_scale     = 1
     inst.world_w        = 0
     inst.world_h        = 0
     inst.view_mode      = "height"   -- "height" | "biome" | "suitability" | "continents" | "regions" | "districts"
@@ -134,6 +156,10 @@ function WorldSandboxController:new(game)
         downtown_min_cells = 11,   -- slider 1-50: hard minimum sub-cells for downtown regardless of % result
         -- Edge margin: outer X% of map is forced to deep ocean (0 = disabled)
         edge_margin = 0.14,
+        -- Visual Quality (F8 opt-in)
+        vq_mode            = "tile",  -- "tile" | "hires"
+        vq_hires_scale     = 3,       -- 1-8: resolution multiplier for hi-res mode
+        vq_color_variation = 0.0,     -- 0-0.3: intra-biome noise variation
         -- Biome thresholds on the normalized [0,1] height.
         -- coast_max is effectively "sea level" — raise it for more ocean, lower for more land.
         deep_ocean_max = 0.42,
@@ -1672,6 +1698,44 @@ function WorldSandboxController:sendToGame()
     end)
     if not ok then print("WorldSandbox sendToGame: setScale failed: " .. tostring(err)) end
 
+    -- Free all generation-time scratch data. These fields are no longer needed once
+    -- the game world is built. Game and map objects hold the only live references.
+    self.heightmap            = nil
+    self.colormap             = nil
+    self.biome_colormap       = nil
+    self.biome_data           = nil  -- maps keep their own ref via map.world_biome_data
+    self.suitability_colormap = nil
+    self.suitability_scores   = nil
+    self.continent_colormap   = nil
+    self.continent_map        = nil
+    self.continents           = nil
+    self.region_colormap      = nil
+    self.region_map           = nil
+    self.regions_list         = nil
+    self.moisture_map         = nil
+    self.painted_set          = nil
+    self.lake_set             = nil
+    self.river_paths          = nil
+    self.city_district_maps   = nil
+    self.city_district_colors = nil
+    self.city_district_types  = nil
+    self.city_arterial_maps   = nil
+    self.city_street_maps     = nil
+    self.city_zone_grids      = nil
+    self.city_zone_offsets    = nil
+    self.city_bounds_list     = nil
+    self.city_pois_list       = nil
+    self.city_image           = nil  -- transferred to map.city_image above
+    self.world_image          = nil  -- transferred to game.world_gen_* above
+    self.city_locations       = nil  -- transferred to game.world_city_locations above
+    self.highway_map          = nil  -- transferred to game.world_highway_map above
+    self.highway_paths        = nil  -- transferred to game.world_highway_paths above
+    collectgarbage("collect")
+
+    -- Signal GameView to pre-warm all lazy render caches on the next draw frame,
+    -- so the player doesn't hit spikes when first panning or zooming.
+    game._prewarm_pending = true
+
     self:close()
 end
 
@@ -1690,8 +1754,28 @@ function WorldSandboxController:generate()
     if ok then
         self.heightmap            = result.heightmap
         self.colormap             = result.colormap
+        self.moisture_map         = result.moisture_map
         self.biome_colormap       = result.biome_colormap
         self.biome_data           = result.biome_data
+        -- Build lake_set (for hi-res water mask) and painted_set from biome_data.
+        -- River cells are excluded from lake_set; they're drawn as vector lines instead.
+        do
+            local bdata = result.biome_data
+            local lset, pset = {}, {}
+            for y = 1, h do
+                for x = 1, w do
+                    local i  = (y-1)*w + x
+                    local bd = bdata[i]
+                    if bd then
+                        if bd.is_lake                    then lset[i] = true end
+                        if bd.is_river or bd.is_lake     then pset[i] = true end
+                    end
+                end
+            end
+            self.lake_set    = lset
+            self.painted_set = pset
+        end
+        self.river_paths = result.river_paths or {}
         self.suitability_colormap = result.suitability_colormap
         self.suitability_scores   = result.suitability_scores
         self.continent_colormap   = result.continent_colormap
@@ -1726,6 +1810,11 @@ function WorldSandboxController:generate()
 end
 
 function WorldSandboxController:_buildImage()
+    if self.params.vq_mode == "hires" and self.heightmap and self.moisture_map then
+        self:_buildImageHiRes(self.params.vq_hires_scale or 3)
+        return
+    end
+    self.world_image_scale = 1
     local active = (self.view_mode == "biome"        and self.biome_colormap)
                or  (self.view_mode == "suitability"  and self.suitability_colormap)
                or  (self.view_mode == "continents"   and self.continent_colormap)
@@ -1775,6 +1864,109 @@ function WorldSandboxController:_buildImage()
     end
     self.world_image = love.graphics.newImage(imgdata)
     self.world_image:setFilter("nearest", "nearest")
+end
+
+-- Hi-res terrain render: bilinear elevation + analytic temp + bilinear moisture.
+-- Lakes get a smooth water-mask overlay.  Rivers are NOT drawn here — they are
+-- rendered as smooth vector lines in WorldSandboxView on top of this image.
+function WorldSandboxController:_buildImageHiRes(scale)
+    if not self.heightmap or not self.moisture_map then
+        self:_buildImage()
+        return
+    end
+    local W, H   = self.world_w, self.world_h
+    local s      = math.max(1, math.min(8, math.floor(scale)))
+    local iW, iH = W * s, H * s
+    local imgdata = love.image.newImageData(iW, iH)
+    local p       = self.params
+    local hmap    = self.heightmap
+    local mmap    = self.moisture_map
+    local lset    = self.lake_set or {}
+    local cmap    = self.biome_colormap or self.colormap
+    local cv      = p.vq_color_variation or 0
+    local sx      = p.seed_x or 0
+    local sy_off  = p.seed_y or 0
+    local lat_str = p.latitude_strength or 0.7
+
+    -- Lake water-mask: bilinear → smooth lake edges.
+    -- Rivers are excluded here and drawn as vector lines instead.
+    local lake_mask  = {}
+    local lake_color = {}
+    local LAKE_C     = { 0.07, 0.20, 0.55 }
+    for y = 1, H do
+        lake_mask[y]  = {}
+        lake_color[y] = {}
+        for x = 1, W do
+            local i = (y-1)*W + x
+            if lset[i] then
+                lake_mask[y][x]  = 1.0
+                lake_color[y][x] = (cmap and cmap[y][x]) or LAKE_C
+            else
+                lake_mask[y][x]  = 0.0
+                lake_color[y][x] = nil
+            end
+        end
+    end
+
+    for py = 0, iH - 1 do
+        for px = 0, iW - 1 do
+            local fx = (px + 0.5) / s   -- fractional world-space x (1..W)
+            local fy = (py + 0.5) / s   -- fractional world-space y (1..H)
+
+            -- Elevation: bilinear — drives smooth coastlines and terrain contours
+            local elev = bilinear2d(hmap, fy, fx, W, H)
+
+            -- Temperature: computed analytically (lat + elevation cool-down).
+            -- Avoids inheriting river cells' bogus temp=0 from biome_data.
+            local lat_factor = (fy - 1.0) / math.max(1.0, H - 1.0)
+            local temp_base  = lat_factor * lat_str + 0.5 * (1.0 - lat_str)
+            local elev_t     = elev > p.coast_max
+                               and (elev - p.coast_max) / (1.0 - p.coast_max) or 0.0
+            local temp       = math.max(0.0, math.min(1.0, temp_base - elev_t * 0.4))
+
+            -- Wetness: bilinear raw moisture (smooth FBM — no river BFS spikes).
+            -- Scaled to approximate the far-from-river component of the original formula.
+            local moist = bilinear2d(mmap, fy, fx, W, H)
+            local wet   = moist * 0.3 + 0.35   -- range ≈ 0.35-0.65; balanced across biomes
+
+            local lc      = Biomes.getColor(elev, temp, wet, p)
+            local r, g, b = lc[1], lc[2], lc[3]
+
+            -- Optional intra-biome brightness variation (multiplicative — stays in-hue)
+            if cv > 0 then
+                local noise  = love.math.noise(fx * 0.12 + sx * 0.001,
+                                               fy * 0.12 + sy_off * 0.001)
+                local factor = 1.0 + (noise - 0.5) * cv
+                r = math.max(0, math.min(1, r * factor))
+                g = math.max(0, math.min(1, g * factor))
+                b = math.max(0, math.min(1, b * factor))
+            end
+
+            -- Lake overlay: bilinear water-mask → smooth lake edges
+            local lf = bilinear2d(lake_mask, fy, fx, W, H)
+            if lf > 0.001 then
+                local nx = math.max(1, math.min(W, math.floor(fx + 0.5)))
+                local ny = math.max(1, math.min(H, math.floor(fy + 0.5)))
+                local wc = lake_color[ny][nx]
+                if not wc then
+                    local x0 = math.max(1,math.floor(fx)); local x1=math.min(W,x0+1)
+                    local y0 = math.max(1,math.floor(fy)); local y1=math.min(H,y0+1)
+                    wc = lake_color[y0][x0] or lake_color[y0][x1]
+                      or lake_color[y1][x0] or lake_color[y1][x1] or LAKE_C
+                end
+                local alpha = math.min(1.0, lf * 2.0)
+                r = r*(1-alpha) + wc[1]*alpha
+                g = g*(1-alpha) + wc[2]*alpha
+                b = b*(1-alpha) + wc[3]*alpha
+            end
+
+            imgdata:setPixel(px, py, r, g, b, 1.0)
+        end
+    end
+
+    self.world_image       = love.graphics.newImage(imgdata)
+    self.world_image:setFilter("nearest", "nearest")
+    self.world_image_scale = s
 end
 
 function WorldSandboxController:set_view(mode)

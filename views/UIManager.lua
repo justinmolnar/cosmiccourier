@@ -27,6 +27,8 @@ function UIManager:new(C, game)
         vehicles = "",
         clients = ""
     }
+    instance._layout_key = nil
+    instance._stats_key  = nil
 
     return instance
 end
@@ -65,16 +67,25 @@ function UIManager:update(dt, game)
     local mx, my = love.mouse.getPosition()
     
     self:_calculatePerSecondStats(game)
-    self:_calculateAccordionStats(game)
+
+    local skey = self:_buildStatsKey(game)
+    if skey ~= self._stats_key then
+        self:_calculateAccordionStats(game)
+        self._stats_key = skey
+    end
 
     local upgrades_content_height = self:_calculateUpgradesLayoutHeight(game.state.Upgrades.categories)
-    
-    self.trips_accordion:update(#game.entities.trips.pending * 50, my) 
+
+    self.trips_accordion:update(#game.entities.trips.pending * 50, my)
     self.upgrades_accordion:update(upgrades_content_height, my)
     self.vehicles_accordion:update((#game.entities.vehicles * 30) + 80, my)
     self.clients_accordion:update((#game.entities.clients * 20) + 40, my)
 
-    self:_doLayout(game)
+    local lkey = self:_buildLayoutKey(game)
+    if lkey ~= self._layout_key then
+        self:_doLayout(game)
+        self._layout_key = lkey
+    end
     
     self.hovered_trip_index = nil
     if mx < C.UI.SIDEBAR_WIDTH then
@@ -141,6 +152,24 @@ function UIManager:_calculateAccordionStats(game)
         end
     end
     self.accordion_stats.clients = string.format("%d (%.2f t/s)", client_count, self.trips_per_second)
+end
+
+function UIManager:_buildLayoutKey(game)
+    local C = game.C
+    return (#game.entities.trips.pending)
+        .. "|" .. (#game.entities.vehicles)
+        .. "|" .. (#game.entities.clients)
+        .. "|" .. (self.trips_accordion.is_open    and "1" or "0")
+        .. "|" .. (self.upgrades_accordion.is_open and "1" or "0")
+        .. "|" .. (self.vehicles_accordion.is_open and "1" or "0")
+        .. "|" .. (self.clients_accordion.is_open  and "1" or "0")
+        .. "|" .. C.UI.SIDEBAR_WIDTH
+end
+
+function UIManager:_buildStatsKey(game)
+    local is_dt = (game.camera.scale >= game.C.ZOOM.FOG_THRESHOLD) and "1" or "0"
+    return (#game.entities.trips.pending) .. "|" .. (#game.entities.vehicles)
+        .. "|" .. (#game.entities.clients) .. "|" .. is_dt
 end
 
 function UIManager:_doLayout(game)

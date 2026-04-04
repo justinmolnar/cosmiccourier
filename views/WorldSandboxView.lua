@@ -6,6 +6,23 @@ WorldSandboxView.__index = WorldSandboxView
 
 local Biomes = require("data.biomes")
 
+-- Chaikin corner-cutting: smooth a flat {x,y,x,y,...} point list.
+local function chaikin(pts, passes)
+    for _ = 1, (passes or 2) do
+        local n = {}
+        n[1] = pts[1]; n[2] = pts[2]
+        for i = 1, #pts - 2, 2 do
+            local x0, y0 = pts[i],   pts[i+1]
+            local x1, y1 = pts[i+2], pts[i+3]
+            n[#n+1] = x0*0.75 + x1*0.25;  n[#n+1] = y0*0.75 + y1*0.25
+            n[#n+1] = x0*0.25 + x1*0.75;  n[#n+1] = y0*0.25 + y1*0.75
+        end
+        n[#n+1] = pts[#pts-1]; n[#n+1] = pts[#pts]
+        pts = n
+    end
+    return pts
+end
+
 function WorldSandboxView:new(game)
     local inst = setmetatable({}, WorldSandboxView)
     inst.game = game
@@ -45,10 +62,31 @@ function WorldSandboxView:draw()
             local half = vw * 0.5 / wsc.camera.scale
             local i0   = math.floor((wsc.camera.x - half) / mpw)
             local i1   = math.ceil( (wsc.camera.x + half) / mpw)
+            local img_s = ts / (wsc.world_image_scale or 1)
             for i = i0, i1 do
-                love.graphics.draw(wsc.world_image, i * mpw, 0, 0, ts, ts)
+                love.graphics.draw(wsc.world_image, i * mpw, 0, 0, img_s, img_s)
             end
         end
+        -- Hi-res river overlay: draw river paths as smooth vector lines
+        if wsc.params.vq_mode == "hires" and wsc.river_paths and #wsc.river_paths > 0 then
+            love.graphics.setColor(0.22, 0.52, 0.88)
+            love.graphics.setLineWidth(ts * 0.55)
+            for _, path in ipairs(wsc.river_paths) do
+                if #path >= 2 then
+                    local pts = {}
+                    for _, cell in ipairs(path) do
+                        pts[#pts+1] = (cell.x - 0.5) * ts
+                        pts[#pts+1] = (cell.y - 0.5) * ts
+                    end
+                    pts = chaikin(pts, 3)
+                    if #pts >= 4 then
+                        love.graphics.line(pts)
+                    end
+                end
+            end
+            love.graphics.setLineWidth(1)
+        end
+
         love.graphics.pop()
     else
         love.graphics.setColor(0.4, 0.4, 0.5)
