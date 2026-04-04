@@ -4,6 +4,41 @@ local Bike = require("models.vehicles.Bike")
 local Truck = require("models.vehicles.Truck")
 local FloatingTextSystem = require("services.FloatingTextSystem")
 
+-- Shader: desaturate + alpha the city zone image at draw time.
+-- `saturation` 1.0 = full colour, 0.0 = greyscale.  `alpha` controls overall opacity.
+local _zone_shader = love.graphics.newShader([[
+    extern float saturation;
+    vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+        vec4 c = Texel(tex, tc) * color;
+        float gray = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+        c.rgb = mix(vec3(gray), c.rgb, saturation);
+        return c;
+    }
+]])
+
+-- Zoom-driven overlay appearance.
+-- Each channel linearly ramps from its _min (at cs_start) to its _max (at cs_full),
+-- then clamps.  cs_full is the zoom level where that channel hits its ceiling —
+-- set it lower to make the channel "fill in" earlier as you zoom in.
+local CITY_OVERLAY = {
+    cs_start = 1.5,   -- CITY_IMAGE_THRESHOLD — where cities first appear
+
+    road_alpha_min = 0.50,  road_alpha_max = 1.00,  road_cs_full =   6.0,  -- solid well before mid-zoom
+    zone_alpha_min = 0.30,  zone_alpha_max = 1.00,  zone_cs_full =  30.0,  -- full before high zoom
+    zone_sat_min   = 0.30,  zone_sat_max   = 0.60,  sat_cs_full  = 400.0,  -- slowest, only 60% at max zoom
+}
+
+local function _cityOverlayParams(cs)
+    local C = CITY_OVERLAY
+    local function ramp(cs_full, v_min, v_max)
+        local t = (math.log(cs) - math.log(C.cs_start)) / (math.log(cs_full) - math.log(C.cs_start))
+        return v_min + (v_max - v_min) * math.max(0, math.min(1, t))
+    end
+    return
+        ramp(C.road_cs_full, C.road_alpha_min, C.road_alpha_max),
+        ramp(C.zone_cs_full, C.zone_alpha_min, C.zone_alpha_max),
+        ramp(C.sat_cs_full,  C.zone_sat_min,   C.zone_sat_max)
+end
 
 -- Zoom threshold: above this scale draw vectors directly (crisp quality, ~1 city visible);
 -- below this scale use a cached canvas (performance when multiple cities are on screen).
@@ -135,11 +170,12 @@ end
 -- Shared drawing routine: renders all overlay layers in city-local coordinates.
 -- The caller is responsible for setting up any transform so that (0,0) maps to the
 -- city's top-left corner in the destination space (canvas or world).
-local function _renderCityOverlayContent(m, Game, RS, m_tps)
+local function _renderCityOverlayContent(m, Game, RS, m_tps, road_alpha)
+    road_alpha = road_alpha or 1.0
     -- Bridges
     if m.bridge_cells then
         love.graphics.setLineStyle("rough")
-        love.graphics.setColor(0.72, 0.60, 0.38, 0.95)
+        love.graphics.setColor(0.72, 0.60, 0.38, 0.95 * road_alpha)
         love.graphics.setLineWidth(m_tps * 0.45)
         for gy, row in pairs(m.bridge_cells) do
             for gx, entry in pairs(row) do
@@ -158,7 +194,7 @@ local function _renderCityOverlayContent(m, Game, RS, m_tps)
     end
     if m._river_smooth_paths_v1 and #m._river_smooth_paths_v1 > 0 then
         local cap_r = m_tps * 0.4
-        love.graphics.setColor(0.20, 0.45, 0.75, 0.92)
+        love.graphics.setColor(0.20, 0.45, 0.75, 0.92 * road_alpha)
         love.graphics.setLineWidth(m_tps * 0.75)
         love.graphics.setLineJoin("bevel")
         for _, pts in ipairs(m._river_smooth_paths_v1) do
@@ -180,7 +216,7 @@ local function _renderCityOverlayContent(m, Game, RS, m_tps)
             if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
         end
         if m._street_smooth_paths_like_v5 and #m._street_smooth_paths_like_v5 > 0 then
-            love.graphics.setColor(0.30, 0.29, 0.28, 1.0)
+            love.graphics.setColor(0.30, 0.29, 0.28, road_alpha)
             love.graphics.setLineWidth(m_tps * 0.35)
             love.graphics.setLineStyle("smooth")
             love.graphics.setLineJoin("miter")
@@ -205,7 +241,7 @@ local function _renderCityOverlayContent(m, Game, RS, m_tps)
         end
         if m._road_smooth_paths_v8 and #m._road_smooth_paths_v8 > 0 then
             local cap_r = m_tps * 0.35
-            love.graphics.setColor(0.22, 0.21, 0.20, 1.0)
+            love.graphics.setColor(0.22, 0.21, 0.20, road_alpha)
             love.graphics.setLineWidth(m_tps * 0.7)
             love.graphics.setLineJoin("bevel")
             for _, pts in ipairs(m._road_smooth_paths_v8) do
@@ -232,7 +268,7 @@ local function _drawCityOverlayVectors(m, Game, RS, m_ox, m_oy)
     local m_tps = m.tile_pixel_size or Game.C.MAP.TILE_SIZE
     love.graphics.push()
     love.graphics.translate(m_ox, m_oy)
-    _renderCityOverlayContent(m, Game, RS, m_tps)
+    _renderCityOverlayContent(m, Game, RS, m_tps, Game._road_alpha or 1.0)
     love.graphics.pop()
 end
 
@@ -273,7 +309,7 @@ local function _buildCityOverlayCanvas(m, Game, RS)
     love.graphics.clear(0, 0, 0, 0)
     love.graphics.setBlendMode("alpha")
 
-    _renderCityOverlayContent(m, Game, RS, m_tps)
+    _renderCityOverlayContent(m, Game, RS, m_tps, 1.0)  -- canvas baked at full alpha; alpha applied at draw time
 
     love.graphics.setBlendMode("alpha")
     love.graphics.pop()
@@ -496,34 +532,6 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         end
     end
 
-    -- LAYER: City circles on world map (tiled)
-    if cs < Z.ZONE_THRESHOLD and Game.world_city_locations then
-        local cities  = Game.world_city_locations
-        local min_s, max_s = math.huge, -math.huge
-        for _, city in ipairs(cities) do
-            if city.s < min_s then min_s = city.s end
-            if city.s > max_s then max_s = city.s end
-        end
-        local s_range = math.max(max_s - min_s, 0.001)
-        local r_scale = 1 / cs
-        for i = tile_i0, tile_i1 do
-            for _, city in ipairs(cities) do
-                local t   = (city.s - min_s) / s_range
-                local rad = (3.5 + t * 8.5) * r_scale
-                local wpx = i * mpw + (city.x - 0.5) * ts
-                local wpy = (city.y - 0.5) * ts
-                love.graphics.setColor(0, 0, 0, 0.6)
-                love.graphics.circle("fill", wpx + r_scale, wpy + r_scale, rad + 1.5 * r_scale)
-                love.graphics.setColor(0.10, 0.08, 0.04)
-                love.graphics.circle("fill", wpx, wpy, rad + 1.5 * r_scale)
-                love.graphics.setColor(1.0, 0.85, 0.15)
-                love.graphics.circle("fill", wpx, wpy, rad)
-                love.graphics.setColor(0.15, 0.10, 0.02)
-                love.graphics.circle("fill", wpx, wpy, math.max(1.5 * r_scale, rad * 0.35))
-            end
-        end
-        love.graphics.setColor(1, 1, 1)
-    end
 
     -- LAYER: Inter-city highways (full city-to-city, drawn before city images)
     -- Paths are NOT clipped — the opaque city background image covers the in-city portion,
@@ -556,10 +564,16 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         end
     end
 
+    -- Compute zoom-driven overlay params once for this frame
+    local _road_alpha, _zone_alpha, _zone_sat = _cityOverlayParams(cs)
+    Game._road_alpha = _road_alpha  -- stored so _drawCityOverlayVectors can read it
+
     -- LAYER: City background images (tiled, culled)
     -- Drawn after highways so the opaque image hides the in-city highway portion.
     if cs >= Z.CITY_IMAGE_THRESHOLD and not Game.overlay_only_mode then
-        love.graphics.setColor(1, 1, 1)
+        _zone_shader:send("saturation", _zone_sat)
+        love.graphics.setShader(_zone_shader)
+        love.graphics.setColor(1, 1, 1, _zone_alpha)
         for i = tile_i0, tile_i1 do
             for _, m in ipairs(Game.maps.all_cities or {}) do
                 if m.city_image and cityInView(m, i * mpw) then
@@ -571,6 +585,8 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                 end
             end
         end
+        love.graphics.setShader()
+        love.graphics.setColor(1, 1, 1)
     end
 
     -- LAYER: City road/river overlays
@@ -587,14 +603,18 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                 local m_ox = (m.world_mn_x - 1) * ts
                 local m_oy = (m.world_mn_y - 1) * ts
                 if cs >= OVERLAY_VECTOR_THRESHOLD then
+                    -- High zoom: draw vectors directly; _road_alpha read inside via Game._road_alpha
                     _drawCityOverlayVectors(m, Game, RS, i * mpw + m_ox, m_oy)
                 else
+                    -- Low zoom: draw cached canvas; apply road_alpha at draw time (canvas baked at 1.0)
                     if _cityCanvasStale(m, Game) then
                         _buildCityOverlayCanvas(m, Game, RS)
                     end
                     if m._overlay_canvas then
                         local S = m._overlay_canvas_scale or 1
+                        love.graphics.setColor(1, 1, 1, _road_alpha)
                         love.graphics.draw(m._overlay_canvas, i * mpw + m_ox, m_oy, 0, 1/S, 1/S)
+                        love.graphics.setColor(1, 1, 1)
                     end
                 end
                 ::continue_overlay::
@@ -1269,13 +1289,15 @@ function GameView:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
     love.graphics.scale(cs, cs)
     love.graphics.translate(-Game.camera.x, -Game.camera.y)
 
-    -- Filled tiles: highway (orange), arterial (cyan)
+    -- Filled tiles: all road types
     for uy = uy0, uy1 do
         local base = (uy - 1) * gw
         for ux = ux0, ux1 do
             local ti = fgi[base + ux - 1].type
-            if     ti == 4 then love.graphics.setColor(1.0,  0.55, 0.0,  0.80)  -- highway
-            elseif ti == 3 then love.graphics.setColor(0.0,  1.0,  0.75, 0.80)  -- arterial
+            if     ti == 4 then love.graphics.setColor(1.0,  0.55, 0.0,  0.85)  -- highway    (orange)
+            elseif ti == 3 then love.graphics.setColor(0.0,  1.0,  0.75, 0.85)  -- arterial   (cyan)
+            elseif ti == 2 then love.graphics.setColor(0.9,  0.9,  1.0,  0.70)  -- downtown road (light blue)
+            elseif ti == 1 then love.graphics.setColor(0.75, 0.75, 0.75, 0.60)  -- road        (gray)
             else ti = nil end
             if ti then
                 love.graphics.rectangle("fill", (ux-1)*uts, (uy-1)*uts, uts, uts)
