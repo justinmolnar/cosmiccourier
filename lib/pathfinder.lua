@@ -8,9 +8,14 @@
 
 local Pathfinder = {}
 
--- Unique string key that distinguishes corner nodes from tile-centre nodes.
+-- Integer node key: eliminates string allocation in the A* inner loop.
+-- Corner nodes: x + y * 65536
+-- Tile-centre nodes: same + 2^32 offset (is_tile namespace)
+-- Safe for grids up to 65535 wide/tall (world sub-cell grids are ~2000 max).
+local _TILE_KEY_OFFSET = 2^32
 local function nodeKey(node)
-    return (node.is_tile and "t" or "") .. node.y .. "," .. node.x
+    local base = node.x + node.y * 65536
+    return node.is_tile and (base + _TILE_KEY_OFFSET) or base
 end
 
 -- Integer → string tile name table for FFI grid reads (matches PathfindingService).
@@ -151,13 +156,25 @@ local function getNeighbors(node, grid, grid_width, grid_height, map)
     return neighbors
 end
 
+-- O(n) path reconstruction: append in reverse order then flip once.
+-- The old approach used table.insert(path, 1, node) which is O(n) per step → O(n²) total.
 local function reconstructPath(cameFrom, current)
-    local totalPath = {current}
-    while cameFrom[nodeKey(current)] do
-        current = cameFrom[nodeKey(current)]
-        table.insert(totalPath, 1, current)
+    local path = {}
+    local k = nodeKey(current)
+    path[1] = current
+    local parent = cameFrom[k]
+    while parent do
+        current = parent
+        path[#path + 1] = current
+        k = nodeKey(current)
+        parent = cameFrom[k]
     end
-    return totalPath
+    -- Reverse in-place: path is [end … start], need [start … end]
+    local n = #path
+    for i = 1, math.floor(n / 2) do
+        path[i], path[n - i + 1] = path[n - i + 1], path[i]
+    end
+    return path
 end
 
 local function heuristic(a, b)

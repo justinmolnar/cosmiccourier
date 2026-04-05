@@ -1,5 +1,6 @@
 -- models/Client.lua
 local Trip = require("models.Trip")
+local TripGenerator = require("services.TripGenerator")
 
 local Client = {}
 Client.__index = Client
@@ -18,8 +19,6 @@ function Client:new(plot, game)
 end
 
 function Client:update(dt, game)
-    local TripGenerator = require("services.TripGenerator")
-    
     self.trip_timer = self.trip_timer - dt
     if self.trip_timer <= 0 then
         self.trip_timer = TripGenerator.calculateNextTripTime(game)

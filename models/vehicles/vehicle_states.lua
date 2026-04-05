@@ -3,7 +3,10 @@
 
 local States = {}
 
-local buildSmoothPath = require("services.PathSmoothingService").buildSmoothPath
+-- Cache service references at module load to avoid per-call require() overhead.
+local PathScheduler     = require("services.PathScheduler")
+local PathfindingService = require("services.PathfindingService")
+local buildSmoothPath   = require("services.PathSmoothingService").buildSmoothPath
 
 
 --------------------------------------------------------------------------------
@@ -18,7 +21,7 @@ function moveAlongPath(dt, vehicle, game)
     local base_speed = vehicle:getSpeed()
     local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / tps
     local normalized_speed = base_speed / speed_normalization_factor
-    local vcfg = game.C.VEHICLES[vehicle.type:upper()]
+    local vcfg = game.C.VEHICLES[vehicle.type_upper]
     if vcfg and vcfg.needs_downtown_speed_scale then
         local city_map = game.maps and game.maps.city
         local dw = city_map and city_map.downtown_grid_width or game.C.MAP.DOWNTOWN_GRID_WIDTH
@@ -125,9 +128,7 @@ end
 States.ReturningToDepot = State:new()
 States.ReturningToDepot.name = "Returning"
 function States.ReturningToDepot:enter(vehicle, game)
-    local PathScheduler = require("services.PathScheduler")
     PathScheduler.request(vehicle, function()
-        local PathfindingService = require("services.PathfindingService")
         vehicle._path_pending = false
         vehicle.path = PathfindingService.findPathToDepot(vehicle, game)
         vehicle.path_i = 1
@@ -167,9 +168,7 @@ function States.GoToPickup:enter(vehicle, game)
         vehicle:changeState(States.Stuck, game)
         return
     end
-    local PathScheduler = require("services.PathScheduler")
     PathScheduler.request(vehicle, function()
-        local PathfindingService = require("services.PathfindingService")
         vehicle._path_pending = false
         vehicle.path = PathfindingService.findPathToPickup(vehicle, trip_to_get, game)
         vehicle.path_i = 1
@@ -234,18 +233,8 @@ end
 States.GoToDropoff = State:new()
 States.GoToDropoff.name = "To Dropoff"
 function States.GoToDropoff:enter(vehicle, game)
-    local PathScheduler = require("services.PathScheduler")
     PathScheduler.request(vehicle, function()
-        local PathfindingService = require("services.PathfindingService")
         vehicle._path_pending = false
-        local leg = vehicle.cargo[1] and vehicle.cargo[1].legs[vehicle.cargo[1].current_leg]
-        if leg then
-            print(string.format("DEBUG dropoff: %s %d anchor=(%d,%d) dest=(%d,%d) map=%s",
-                vehicle.type, vehicle.id,
-                vehicle.grid_anchor.x, vehicle.grid_anchor.y,
-                leg.end_plot.x, leg.end_plot.y,
-                vehicle.operational_map_key))
-        end
         vehicle.path = PathfindingService.findPathToDropoff(vehicle, game)
         vehicle.path_i = 1
         if not vehicle.path then

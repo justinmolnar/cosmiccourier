@@ -39,6 +39,8 @@ function InputController:keypressed(key)
 
     -- Debug overlay toggles
     local DEBUG_TOGGLES = {
+        h = { field = "debug_hide_vehicles",       label = "vehicle + payout text draw" },
+        c = { field = "debug_dot_vehicles",        label = "dot vehicle rendering (circles instead of emoji)" },
         b = { field = "debug_building_plots",      label = "building plots overlay" },
         p = { field = "debug_pickup_locations",    label = "pickup/client overlay" },
         g = { field = "debug_road_segments",       label = "road segments overlay" },

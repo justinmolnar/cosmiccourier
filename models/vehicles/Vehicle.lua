@@ -2,17 +2,23 @@
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
+-- Cache hot dependencies at module load to avoid per-call require() overhead.
+local _States           -- lazy: loaded on first Vehicle:new() to avoid circular require
+local PathfindingService = require("services.PathfindingService")
+
 function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_map_key)
-    local States = require("models.vehicles.vehicle_states")
+    if not _States then _States = require("models.vehicles.vehicle_states") end
+    local States = _States
     
     local instance = setmetatable({}, Vehicle)
     
     instance.id = id
     instance.type = vehicleType or "vehicle"
+    instance.type_upper = (vehicleType or ""):upper()   -- cached to avoid per-frame string alloc
     instance.properties = properties or {}
     instance.icon = (properties or {}).icon or "❓"
     instance.depot_plot = depot_plot
-    
+
     instance.trip_queue = {}
     instance.cargo = {}
     instance.path = {}
@@ -20,7 +26,7 @@ function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_
     instance.pathfinding_bounds = nil  -- nil = no restriction; set for bounded vehicles (future)
 
     -- Speed modifier accumulates upgrade multipliers; base speed stays constant.
-    local vt = (vehicleType or ""):upper()
+    local vt = instance.type_upper
     if vt == "BIKE" then
         instance.speed_modifier = game.state.upgrades.bike_speed or 1.0
     elseif vt == "TRUCK" then
@@ -84,7 +90,7 @@ end
 function Vehicle:shouldDrawAtCameraScale(game)
     local s    = game.camera.scale
     local Z    = game.C.ZOOM
-    local vcfg = game.C.VEHICLES[self.type:upper()]
+    local vcfg = game.C.VEHICLES[self.type_upper]
     if not vcfg then return true end
     if vcfg.downtown_only_sim then   -- bikes
         return s >= Z.BIKE_THRESHOLD
@@ -110,7 +116,7 @@ function Vehicle:assignTrip(trip, game)
 end
 
 function Vehicle:_resolveOffScreenState(game)
-    local States = require("models.vehicles.vehicle_states")
+    local States = _States
 
     -- States that require travel time — resolution stops when one is reached.
     local TRAVEL_STATES = {
@@ -135,33 +141,14 @@ function Vehicle:_resolveOffScreenState(game)
         -- Picking Up / Dropping Off / Deciding: changeState already ran enter(); no-op here.
     }
 
-    local max_iterations = 10
-    for i = 1, max_iterations do
-        local name = self.state.name
-        print(string.format("Vehicle %d resolving off-screen state: %s (iteration %d)", self.id, name, i))
-
+    for _ = 1, 10 do
+        local name    = self.state.name
         local handler = STATE_RESOLUTION[name]
-        if handler then
-            local prev = name
-            handler(self, game)
-            if self.state.name == prev then
-                print(string.format("WARNING: Vehicle %d state didn't change from %s", self.id, prev))
-                break
-            end
-        else
-            -- Travel state or unknown — stop resolving.
-            print(string.format("Vehicle %d in travel/final state: %s", self.id, name))
-            break
-        end
-
-        if TRAVEL_STATES[self.state.name] then
-            print(string.format("Vehicle %d reached travel state: %s", self.id, self.state.name))
-            break
-        end
-
-        if i == max_iterations then
-            print(string.format("ERROR: Vehicle %d hit max iterations in state resolution!", self.id))
-        end
+        if not handler then break end
+        local prev = name
+        handler(self, game)
+        if self.state.name == prev then break end
+        if TRAVEL_STATES[self.state.name] then break end
     end
 end
 
@@ -198,14 +185,11 @@ function Vehicle:updateAbstracted(dt, game)
                               self.state.name == "Deciding") then
                 self:_resolveOffScreenState(game)
                 if self.path and (self.path_i or 1) <= #self.path then
-                    local PathfindingService = require("services.PathfindingService")
                     self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
                 end
             elseif self.state and self.state.name == "Idle" and #self.trip_queue > 0 then
-                local States = require("models.vehicles.vehicle_states")
-                self:changeState(States.GoToPickup, game)
+                self:changeState(_States.GoToPickup, game)
                 if self.path and (self.path_i or 1) <= #self.path then
-                    local PathfindingService = require("services.PathfindingService")
                     self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
                 end
             end
@@ -215,10 +199,9 @@ function Vehicle:updateAbstracted(dt, game)
 
     if self.current_path_eta and self.current_path_eta > 0 then
         if self.state and self.state.name == "Returning" and #self.trip_queue > 0 then
-            local States = require("models.vehicles.vehicle_states")
-            self:changeState(States.GoToPickup, game)
+            self:changeState(_States.GoToPickup, game)
             if self.path and (self.path_i or 1) <= #self.path then
-                local PathfindingService = require("services.PathfindingService")
+                -- PathfindingService cached at module top
                 self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
             end
             return
@@ -238,7 +221,6 @@ function Vehicle:updateAbstracted(dt, game)
         self:_resolveOffScreenState(game)
 
         if self.path and (self.path_i or 1) <= #self.path then
-            local PathfindingService = require("services.PathfindingService")
             self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
         else
             self.current_path_eta = nil
@@ -252,14 +234,29 @@ function Vehicle:isAvailable(game)
 end
 
 function Vehicle:shouldUseAbstractedSimulation(game)
-    -- Always animate when there is an active path or smooth path to follow.
+    local cs   = game.camera.scale
+    local Z    = game.C.ZOOM
+    local vcfg = game.C.VEHICLES[self.type_upper]
+
+    -- Off-screen: always abstract regardless of zoom.
+    -- Uses the viewport bounds cached by EntityManager each frame.
+    local vp = game._vp
+    if vp then
+        if self.px < vp.left or self.px > vp.right
+        or self.py < vp.top  or self.py > vp.bot then
+            return true
+        end
+    end
+
+    -- On-screen but zoomed past this type's render threshold: also abstract.
+    if vcfg then
+        local threshold = vcfg.downtown_only_sim and Z.BIKE_THRESHOLD or Z.ENTITY_THRESHOLD
+        if cs < threshold then return true end
+    end
+
+    -- On-screen and visible: only run detailed if there is a path to follow.
     if self.path and (self.path_i or 1) <= #self.path then return false end
     if self.smooth_path and self.smooth_path_i and self.smooth_path_i <= #self.smooth_path then return false end
-
-    local vcfg = game.C.VEHICLES[self.type:upper()]
-    if vcfg and vcfg.downtown_only_sim and game.camera.scale < game.C.ZOOM.BIKE_THRESHOLD then
-        return true
-    end
 
     return false
 end

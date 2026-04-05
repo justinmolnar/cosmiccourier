@@ -1,32 +1,25 @@
 -- models/EntityManager.lua
-local Client = require("models.Client")
+local Client        = require("models.Client")
+local PathScheduler = require("services.PathScheduler")
 
 local Entities = {}
 Entities.__index = Entities
 
 function Entities:new()
     local instance = setmetatable({}, Entities)
-    instance.depot_plot = nil 
-    
-    instance.vehicles = {}
-    instance.clients = {}
-    instance.trips = { pending = {} }
+    instance.depot_plot     = nil
+    instance.vehicles       = {}
+    instance.clients        = {}
+    instance.trips          = { pending = {} }
     instance.selected_vehicle = nil
 
     instance.event_bus_listener_setup = function(game)
         game.EventBus:subscribe("map_scale_changed", function()
-            print("Map scale changed! Recalculating all entity positions...")
-            
-            print(string.format("DEBUG: Found %d vehicles to recalculate", #game.entities.vehicles))
-            for i, vehicle in ipairs(game.entities.vehicles) do
-                print(string.format("DEBUG: Recalculating vehicle %d (type: %s)", vehicle.id, vehicle.type))
+            for _, vehicle in ipairs(game.entities.vehicles) do
                 if vehicle.recalculatePixelPosition then
                     vehicle:recalculatePixelPosition(game)
-                else
-                    print(string.format("ERROR: Vehicle %d has no recalculatePixelPosition method!", vehicle.id))
                 end
             end
-
             for _, client in ipairs(game.entities.clients) do
                 if client.recalculatePixelPosition then
                     client:recalculatePixelPosition(game)
@@ -39,7 +32,6 @@ function Entities:new()
 end
 
 function Entities:init(game)
-    -- MODIFIED: Use game.maps.city to find the depot plot
     self.depot_plot = game.maps.city:getRandomDowntownBuildingPlot()
     self:addClient(game)
     self:addVehicle(game, "bike")
@@ -49,7 +41,6 @@ function Entities:addClient(game)
     local cmap = game.maps.city
     local plot_local = cmap:getRandomDowntownBuildingPlot()
     if plot_local then
-        -- Convert city-local sub-cell coords to unified sub-cell coords
         local plot = (cmap.world_mn_x and game.maps.unified) and {
             x = (cmap.world_mn_x - 1) * 3 + plot_local.x,
             y = (cmap.world_mn_y - 1) * 3 + plot_local.y,
@@ -61,17 +52,8 @@ end
 
 function Entities:addVehicle(game, vehicleType)
     local VehicleFactory = require("models.VehicleFactory")
-    
-    if not VehicleFactory.isValidVehicleType(vehicleType) then
-        print("ERROR: Invalid vehicle type: " .. tostring(vehicleType))
-        return
-    end
-
-    if not self.depot_plot then
-        print("ERROR: No depot plot available for vehicle creation")
-        return
-    end
-
+    if not VehicleFactory.isValidVehicleType(vehicleType) then return end
+    if not self.depot_plot then return end
     local new_id = #self.vehicles + 1
     local new_vehicle = VehicleFactory.createVehicle(vehicleType, new_id, self.depot_plot, game)
     table.insert(self.vehicles, new_vehicle)
@@ -79,29 +61,42 @@ end
 
 function Entities:update(dt, game)
     local C_GAMEPLAY = game.C.GAMEPLAY
+    local decay = dt * C_GAMEPLAY.BONUS_DECAY_RATE
 
-    require("services.PathScheduler").flush()
+    PathScheduler.flush()
 
+    -- Decay speed bonuses on pending (non-transit) trips.
     for _, trip in ipairs(self.trips.pending) do
         if not trip.is_in_transit then
-            trip.speed_bonus = math.max(0, trip.speed_bonus - (dt * C_GAMEPLAY.BONUS_DECAY_RATE))
-            trip.last_update_time = love.timer.getTime()
+            local b = trip.speed_bonus - decay
+            trip.speed_bonus = b < 0 and 0 or b
         end
     end
 
     for _, client in ipairs(self.clients) do
         client:update(dt, game)
     end
-    
+
+    -- Cache viewport bounds once per frame so shouldUseAbstractedSimulation can
+    -- cull off-screen vehicles with 4 cheap comparisons instead of per-vehicle camera math.
+    local cs     = game.camera.scale
+    local cx, cy = game.camera.x, game.camera.y
+    local sw     = love.graphics.getWidth()
+    local sh     = love.graphics.getHeight()
+    local sidebar = game.C.UI.SIDEBAR_WIDTH
+    local half_w  = (sw - sidebar) * 0.5 / cs
+    local half_h  = sh * 0.5 / cs
+    if not game._vp then game._vp = {} end
+    local vp = game._vp
+    vp.left  = cx - half_w;  vp.right = cx + half_w
+    vp.top   = cy - half_h;  vp.bot   = cy + half_h
+
     for _, vehicle in ipairs(self.vehicles) do
         vehicle:update(dt, game)
     end
 end
 
--- REMOVED THE DRAW FUNCTION FROM HERE
-
 function Entities:handle_click(x, y, game)
-    -- vehicle.px/py are world pixels (unified map); x/y from camera:screenToWorld are world pixels
     local radius_sq = game.C.UI.VEHICLE_CLICK_RADIUS * game.C.UI.VEHICLE_CLICK_RADIUS
     local candidates = {}
     for _, vehicle in ipairs(self.vehicles) do
@@ -116,8 +111,6 @@ function Entities:handle_click(x, y, game)
         return false
     end
 
-    -- If only one candidate or none is currently selected, pick the first.
-    -- If the current selection is in the candidate list, advance to the next one (cycling).
     local pick = candidates[1]
     for i, v in ipairs(candidates) do
         if v == self.selected_vehicle then
@@ -126,7 +119,6 @@ function Entities:handle_click(x, y, game)
         end
     end
     self.selected_vehicle = pick
-    print("Selected " .. pick.type .. " " .. pick.id)
     return true
 end
 
