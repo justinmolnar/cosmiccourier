@@ -2,100 +2,102 @@
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
--- Cache hot dependencies at module load to avoid per-call require() overhead.
-local _States           -- lazy: loaded on first Vehicle:new() to avoid circular require
+local _States
 local PathfindingService = require("services.PathfindingService")
 
-function Vehicle:new(id, depot_plot, game, vehicleType, properties, operational_map_key)
+function Vehicle:new(id, depot_plot, game, vehicleType)
     if not _States then _States = require("models.vehicles.vehicle_states") end
-    local States = _States
-    
+
     local instance = setmetatable({}, Vehicle)
-    
-    instance.id = id
-    instance.type = vehicleType or "vehicle"
-    instance.type_upper = (vehicleType or ""):upper()   -- cached to avoid per-frame string alloc
-    instance.properties = properties or {}
-    instance.icon = (properties or {}).icon or "❓"
-    instance.depot_plot = depot_plot
 
-    instance.trip_queue = {}
-    instance.cargo = {}
-    instance.path = {}
-    instance.path_i = 1
-    instance.pathfinding_bounds = nil  -- nil = no restriction; set for bounded vehicles (future)
+    instance.id         = id
+    instance.type       = vehicleType or "vehicle"
+    instance.type_upper = (vehicleType or ""):upper()
 
-    -- Speed modifier accumulates upgrade multipliers; base speed stays constant.
-    local vt = instance.type_upper
-    if vt == "BIKE" then
-        instance.speed_modifier = game.state.upgrades.bike_speed or 1.0
-    elseif vt == "TRUCK" then
-        instance.speed_modifier = game.state.upgrades.truck_speed or 1.0
-    else
-        instance.speed_modifier = 1.0
+    local vcfg = game.C.VEHICLES[instance.type_upper]
+    instance.icon              = vcfg and vcfg.icon       or "❓"
+    instance.base_speed        = vcfg and vcfg.base_speed or 80
+    instance.pathfinding_costs = vcfg and vcfg.pathfinding_costs or {}
+
+    -- Speed modifier: accumulates upgrade multipliers on top of base_speed.
+    instance.speed_modifier = game.state.upgrades[instance.type .. "_speed"] or 1.0
+
+    instance.depot_plot         = depot_plot
+    instance.trip_queue         = {}
+    instance.cargo              = {}
+    instance.path               = {}
+    instance.path_i             = 1
+    instance.pathfinding_bounds = nil
+
+    -- Determine starting anchor (trucks snap to nearest road tile).
+    local anchor = depot_plot
+    if vcfg and vcfg.anchor_to_road then
+        local city_map = game.maps and game.maps.city
+        if city_map and city_map.findNearestRoadTile then
+            local road_anchor = city_map:findNearestRoadTile(depot_plot)
+            if road_anchor then anchor = road_anchor end
+        end
     end
 
     local umap = game.maps and game.maps.unified
     if umap then
-        -- Unified map: depot_plot is already in unified sub-cell coords
         instance.operational_map_key = "unified"
         local uts = umap.tile_pixel_size
-        instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
-        instance.px = (depot_plot.x - 0.5) * uts
-        instance.py = (depot_plot.y - 0.5) * uts
+        instance.grid_anchor = { x = anchor.x, y = anchor.y }
+        instance.px = (anchor.x - 0.5) * uts
+        instance.py = (anchor.y - 0.5) * uts
     else
-        -- Fallback: initial game state before world gen (unified map not yet built).
-        -- Use sandbox (1-indexed sub-cell) coords; PathfindingService always runs in
-        -- sandbox mode via the proxy map, so road-node coords are never needed.
-        instance.operational_map_key = operational_map_key or "city"
-        local home_map = game.maps[instance.operational_map_key]
-        instance.grid_anchor = {x = depot_plot.x, y = depot_plot.y}
-        instance.px, instance.py = home_map:getPixelCoords(depot_plot.x, depot_plot.y)
+        instance.operational_map_key = "city"
+        local home_map = game.maps["city"]
+        instance.grid_anchor = { x = anchor.x, y = anchor.y }
+        instance.px, instance.py = home_map:getPixelCoords(anchor.x, anchor.y)
     end
-    
-    instance.state = nil
-    instance:changeState(States.Idle, game)
 
+    instance.state = nil
+    instance:changeState(_States.Idle, game)
     instance.visible = true
 
     return instance
 end
 
 function Vehicle:getSpeed()
-    return self.properties.speed * self.speed_modifier
+    return self.base_speed * self.speed_modifier
 end
 
 function Vehicle:getMovementCostFor(tileType)
-    -- Default behavior: return a high cost for unknown tiles
-    return self.properties.pathfinding_costs[tileType] or 9999
+    return self.pathfinding_costs[tileType] or 9999
 end
 
 function Vehicle:getIcon()
     return self.icon or "❓"
 end
 
-function Vehicle:canTravelTo(destination)
-    -- Default behavior: all vehicles can travel anywhere.
-    -- This could be overridden later for vehicles with range limits, etc.
-    return true
+function Vehicle:getEffectiveCapacity(game)
+    local vcfg = game.C.VEHICLES[self.type_upper]
+    local base = vcfg and vcfg.base_capacity or 1
+    -- Per-vehicle capacity upgrades accumulate in state.upgrades[type.."_capacity"]
+    local upgraded = game.state.upgrades[self.type .. "_capacity"]
+    return upgraded or base
 end
 
 function Vehicle:recalculatePixelPosition(game)
     local map = game.maps[self.operational_map_key]
     if map then
-        self.px, self.py = map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
+        if self.operational_map_key == "unified" then
+            local uts = map.tile_pixel_size
+            self.px = (self.grid_anchor.x - 0.5) * uts
+            self.py = (self.grid_anchor.y - 0.5) * uts
+        else
+            self.px, self.py = map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
+        end
     end
 end
 
 function Vehicle:shouldDrawAtCameraScale(game)
-    local s    = game.camera.scale
-    local Z    = game.C.ZOOM
+    local cs   = game.camera.scale
     local vcfg = game.C.VEHICLES[self.type_upper]
     if not vcfg then return true end
-    if vcfg.downtown_only_sim then   -- bikes
-        return s >= Z.BIKE_THRESHOLD
-    end
-    return s >= Z.ENTITY_THRESHOLD   -- trucks
+    return cs >= vcfg.rendering.render_zoom_threshold
 end
 
 function Vehicle:changeState(newState, game)
@@ -111,34 +113,35 @@ end
 
 function Vehicle:assignTrip(trip, game)
     if not self:isAvailable(game) then return end
-
     table.insert(self.trip_queue, trip)
+end
+
+function Vehicle:isAvailable(game)
+    local total_load = #self.trip_queue + #self.cargo
+    return total_load < game.state.upgrades.vehicle_capacity
 end
 
 function Vehicle:_resolveOffScreenState(game)
     local States = _States
 
-    -- States that require travel time — resolution stops when one is reached.
     local TRAVEL_STATES = {
         ["To Pickup"] = true, ["To Dropoff"] = true, ["Returning"] = true,
         ["To Highway"] = true, ["On Highway"] = true, ["Exiting Highway"] = true,
     }
 
-    -- Dispatch table: instant transitions handled here; nil entry = travel/terminal state.
     local STATE_RESOLUTION = {
-        ["To Pickup"]    = function(v, g) v:changeState(States.DoPickup, g) end,
-        ["To Dropoff"]   = function(v, g) v:changeState(States.DoDropoff, g) end,
-        ["Returning"]    = function(v, g)
+        ["To Pickup"]  = function(v, g) v:changeState(States.DoPickup, g) end,
+        ["To Dropoff"] = function(v, g) v:changeState(States.DoDropoff, g) end,
+        ["Returning"]  = function(v, g)
             if #v.trip_queue > 0 then
                 v:changeState(States.GoToPickup, g)
             else
                 v:changeState(States.Idle, g)
             end
         end,
-        ["Idle"]         = function(v, g)
+        ["Idle"] = function(v, g)
             if #v.trip_queue > 0 then v:changeState(States.GoToPickup, g) end
         end,
-        -- Picking Up / Dropping Off / Deciding: changeState already ran enter(); no-op here.
     }
 
     for _ = 1, 10 do
@@ -152,19 +155,30 @@ function Vehicle:_resolveOffScreenState(game)
     end
 end
 
-function Vehicle:update(dt, game)
-    -- This special check is now obsolete. The logic below handles all states correctly.
-    --[[
-    if self.state and self.state.name == "Traveling (Region)" then
-        self.state:update(dt, self, game)
-        return
-    end
-    ]]
+function Vehicle:shouldUseAbstractedSimulation(game)
+    local cs   = game.camera.scale
+    local vcfg = game.C.VEHICLES[self.type_upper]
 
-    -- Determine if this vehicle should run in detailed or abstracted mode
-    local should_abstract = self:shouldUseAbstractedSimulation(game)
-    
-    if should_abstract then
+    local vp = game._vp
+    if vp then
+        if self.px < vp.left or self.px > vp.right
+        or self.py < vp.top  or self.py > vp.bot then
+            return true
+        end
+    end
+
+    if vcfg then
+        if cs < vcfg.rendering.abstract_zoom_threshold then return true end
+    end
+
+    if self.path and (self.path_i or 1) <= #self.path then return false end
+    if self.smooth_path and self.smooth_path_i and self.smooth_path_i <= #self.smooth_path then return false end
+
+    return false
+end
+
+function Vehicle:update(dt, game)
+    if self:shouldUseAbstractedSimulation(game) then
         self:updateAbstracted(dt, game)
     else
         self:updateDetailed(dt, game)
@@ -201,7 +215,6 @@ function Vehicle:updateAbstracted(dt, game)
         if self.state and self.state.name == "Returning" and #self.trip_queue > 0 then
             self:changeState(_States.GoToPickup, game)
             if self.path and (self.path_i or 1) <= #self.path then
-                -- PathfindingService cached at module top
                 self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
             end
             return
@@ -213,7 +226,7 @@ function Vehicle:updateAbstracted(dt, game)
     if self.current_path_eta <= 0 then
         if self.path and (self.path_i or 1) <= #self.path then
             local final_node = self.path[#self.path]
-            self.grid_anchor = {x = final_node.x, y = final_node.y, is_tile = final_node.is_tile}
+            self.grid_anchor = { x = final_node.x, y = final_node.y, is_tile = final_node.is_tile }
             self:recalculatePixelPosition(game)
             self.path = {}; self.path_i = 1
         end
@@ -228,48 +241,11 @@ function Vehicle:updateAbstracted(dt, game)
     end
 end
 
-function Vehicle:isAvailable(game)
-    local total_load = #self.trip_queue + #self.cargo
-    return total_load < game.state.upgrades.vehicle_capacity
-end
-
-function Vehicle:shouldUseAbstractedSimulation(game)
-    local cs   = game.camera.scale
-    local Z    = game.C.ZOOM
-    local vcfg = game.C.VEHICLES[self.type_upper]
-
-    -- Off-screen: always abstract regardless of zoom.
-    -- Uses the viewport bounds cached by EntityManager each frame.
-    local vp = game._vp
-    if vp then
-        if self.px < vp.left or self.px > vp.right
-        or self.py < vp.top  or self.py > vp.bot then
-            return true
-        end
-    end
-
-    -- On-screen but zoomed past this type's render threshold: also abstract.
-    if vcfg then
-        local threshold = vcfg.downtown_only_sim and Z.BIKE_THRESHOLD or Z.ENTITY_THRESHOLD
-        if cs < threshold then return true end
-    end
-
-    -- On-screen and visible: only run detailed if there is a path to follow.
-    if self.path and (self.path_i or 1) <= #self.path then return false end
-    if self.smooth_path and self.smooth_path_i and self.smooth_path_i <= #self.smooth_path then return false end
-
-    return false
-end
-
 function Vehicle:drawDebug(game)
-    -- This function is called from within the camera's transformed view.
-    -- All coordinates are relative to the vehicle's world pixel position (self.px, self.py).
     local screen_x, screen_y = self.px, self.py
-
-    -- Draw the vehicle's current path (remaining nodes only)
     local _pi = self.path_i or 1
     if self.path and _pi <= #self.path then
-        love.graphics.setColor(0, 0, 1, 0.7) -- Blue for path
+        love.graphics.setColor(0, 0, 1, 0.7)
         love.graphics.setLineWidth(2 / game.camera.scale)
         local pixel_path = {}
         table.insert(pixel_path, self.px)
@@ -295,15 +271,14 @@ function Vehicle:drawDebug(game)
         love.graphics.setLineWidth(1)
     end
 
-    -- THE FIX: All drawing operations for the debug box must be scaled by the camera zoom.
-    local scale = 1 / game.camera.scale
+    local scale  = 1 / game.camera.scale
     local line_h = 15 * scale
     local menu_x = screen_x + (20 * scale)
     local menu_y = screen_y - (20 * scale)
 
-    local state_name = self.state and self.state.name or "N/A"
-    local pi = self.path_i or 1
-    local path_count = self.path and math.max(0, #self.path - pi + 1) or 0
+    local state_name  = self.state and self.state.name or "N/A"
+    local pi          = self.path_i or 1
+    local path_count  = self.path and math.max(0, #self.path - pi + 1) or 0
     local target_text = "None"
     if self.path and pi <= #self.path then
         target_text = string.format("(%d, %d)", self.path[pi].x, self.path[pi].y)
@@ -316,14 +291,13 @@ function Vehicle:drawDebug(game)
         string.format("Cargo: %d | Queue: %d", #self.cargo, #self.trip_queue),
         string.format("Pos: %d, %d", math.floor(self.px), math.floor(self.py))
     }
-    
+
     love.graphics.setColor(0, 0, 0, 0.7)
     love.graphics.rectangle("fill", menu_x - (5*scale), menu_y - (5*scale), (200*scale), #debug_lines * line_h + (10*scale))
-    
+
     local old_font = love.graphics.getFont()
     love.graphics.setFont(game.fonts.ui_small)
     love.graphics.setColor(0, 1, 0)
-
     for i, line in ipairs(debug_lines) do
         love.graphics.push()
         love.graphics.translate(menu_x, menu_y + (i-1) * line_h)
@@ -331,7 +305,6 @@ function Vehicle:drawDebug(game)
         love.graphics.print(line, 0, 0)
         love.graphics.pop()
     end
-    
     love.graphics.setFont(old_font)
     love.graphics.setColor(1, 1, 1)
 end
@@ -350,8 +323,7 @@ function Vehicle:draw(game)
         love.graphics.circle("line", draw_px, draw_py, radius)
         love.graphics.setLineWidth(1)
     end
-    
-    -- Use the new utility function
+
     DrawingUtils.drawWorldIcon(game, self:getIcon(), draw_px, draw_py)
 end
 

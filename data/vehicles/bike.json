@@ -1,0 +1,27 @@
+{
+  "id": "bike",
+  "display_name": "Bicycle",
+  "icon": "🚲",
+  "dot_color": [0.3, 0.88, 0.35],
+  "base_speed": 80,
+  "base_capacity": 1,
+  "base_cost": 150,
+  "cost_multiplier": 1.15,
+  "locked_to_zone": "district",
+  "transport_mode": "road",
+  "anchor_to_road": false,
+  "pathfinding_costs": {
+    "downtown_road": 5,
+    "road": 10,
+    "arterial": 20,
+    "highway": 50,
+    "water": 9999,
+    "mountain": 9999
+  },
+  "rendering": {
+    "render_zoom_key": "BIKE_THRESHOLD",
+    "abstract_zoom_key": "BIKE_THRESHOLD",
+    "needs_speed_scale": true
+  },
+  "upgrades": []
+}

@@ -18,8 +18,8 @@ function TripsPanelView.draw(game, ui_manager)
         love.graphics.setFont(game.fonts.ui_small)
         for leg_idx, leg in ipairs(trip.legs) do
             local leg_y = l.y + 18 + ((leg_idx - 1) * 15)
-            -- This is where we determine the icon based on vehicleType
-            local icon = (leg.vehicleType == "bike") and "🚲" or "🚚"
+            local mode_icons = { road = "🚗", rail = "🚂", water = "⛵", air = "✈️" }
+            local icon = mode_icons[leg.transport_mode] or "📦"
             local status_text
             if leg_idx < trip.current_leg then
                 status_text = "(Done)"

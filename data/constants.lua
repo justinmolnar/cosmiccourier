@@ -108,46 +108,8 @@ local C = {
         DOWNTOWN_IMG_THRESHOLD   = 20.0,
     },
 
-    VEHICLES = {
-        BIKE = {
-            cost = 150,
-            cost_multiplier = 1.15,
-            speed = 80,
-            pathfinding_costs = {
-                downtown_road = 5,  -- bikes prefer downtown streets
-                road = 10,
-                arterial = 20,  -- bikes avoid arterials but can cross them
-                highway = 50,   -- bikes strongly prefer streets; short crossings still viable
-            },
-            -- Scale at which speed is normalized (bikes are sized for the downtown grid).
-            -- vehicle_states.lua applies a DOWNTOWN_GRID_WIDTH/64 correction when true.
-            icon = "🚲",
-            needs_downtown_speed_scale = true,
-            -- Scales at which this vehicle renders. Trucks appear everywhere; bikes
-            -- are too small to be meaningful beyond city scale.
-            visible_at_scales = { downtown = true, city = true },
-            -- When true, the vehicle uses abstracted simulation outside downtown.
-            downtown_only_sim = true,
-            -- Whether this vehicle type can carry long-distance (inter-city) trips.
-            can_long_distance = false,
-        },
-        TRUCK = {
-            cost = 1200,
-            cost_multiplier = 1,
-            speed = 60,
-            pathfinding_costs = {
-                downtown_road = 15,  -- trucks can access downtown (depot) but prefer wider roads
-                road = 10,
-                arterial = 5,
-                highway = 1,
-            },
-            icon = "🚚",
-            needs_downtown_speed_scale = false,
-            visible_at_scales = { downtown = true, city = true, region = true, continent = true, world = true },
-            downtown_only_sim = false,
-            can_long_distance = true,
-        }
-    },
+    -- VEHICLES is populated after C is fully defined (loader below).
+    VEHICLES = {},
 
     MAP_GEN = {
         -- Component Toggles (EXISTING)
@@ -242,5 +204,33 @@ local C = {
         DOWNTOWN_PLOT= 9,
     },
 }
+
+-- Load vehicle definitions from data/vehicles/*.json
+do
+    local json = require("lib.json")
+    local Z    = C.ZOOM
+    local files = love.filesystem.getDirectoryItems("data/vehicles")
+    for _, filename in ipairs(files) do
+        if filename:match("%.json$") then
+            local contents = love.filesystem.read("data/vehicles/" .. filename)
+            if contents then
+                local def = json.decode(contents)
+                local key = def.id:upper()
+                -- Resolve zoom key strings → actual threshold numbers
+                local rk = def.rendering and def.rendering.render_zoom_key
+                local ak = def.rendering and def.rendering.abstract_zoom_key
+                def.rendering.render_zoom_threshold  = (rk and Z[rk]) or Z.ENTITY_THRESHOLD
+                def.rendering.abstract_zoom_threshold = (ak and Z[ak]) or Z.ENTITY_THRESHOLD
+                -- Backward-compat aliases so existing callsites keep working through the refactor
+                def.speed                     = def.base_speed
+                def.cost                      = def.base_cost
+                def.needs_downtown_speed_scale = def.rendering.needs_speed_scale
+                def.downtown_only_sim          = (def.rendering.render_zoom_threshold >= (Z.BIKE_THRESHOLD or 8.0))
+                def.can_long_distance          = (def.max_range == nil)
+                C.VEHICLES[key] = def
+            end
+        end
+    end
+end
 
 return C

@@ -22,20 +22,13 @@ end
 function AutoDispatcher:dispatch(game)
     if #game.entities.trips.pending == 0 then return end
 
-    local by_type = {}
-    for _, vehicle in ipairs(game.entities.vehicles) do
-        local t = vehicle.type
-        if not by_type[t] then by_type[t] = {} end
-        by_type[t][#by_type[t]+1] = vehicle
-    end
-
     for i = #game.entities.trips.pending, 1, -1 do
         local trip = game.entities.trips.pending[i]
         local leg  = trip.legs[trip.current_leg]
         if not leg then goto continue end
 
         local found_vehicle = nil
-        for _, vehicle in ipairs(by_type[leg.vehicleType] or {}) do
+        for _, vehicle in ipairs(game.entities.vehicles) do
             if TripEligibilityService.canAssign(vehicle, trip, game) then
                 found_vehicle = vehicle
                 break

@@ -22,7 +22,7 @@ function moveAlongPath(dt, vehicle, game)
     local speed_normalization_factor = game.C.GAMEPLAY.BASE_TILE_SIZE / tps
     local normalized_speed = base_speed / speed_normalization_factor
     local vcfg = game.C.VEHICLES[vehicle.type_upper]
-    if vcfg and vcfg.needs_downtown_speed_scale then
+    if vcfg and vcfg.rendering and vcfg.rendering.needs_speed_scale then
         local city_map = game.maps and game.maps.city
         local dw = city_map and city_map.downtown_grid_width or game.C.MAP.DOWNTOWN_GRID_WIDTH
         normalized_speed = normalized_speed * (dw / 64)

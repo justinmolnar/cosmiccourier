@@ -78,7 +78,9 @@ function UIManager:update(dt, game)
 
     self.trips_accordion:update(#game.entities.trips.pending * 50, my)
     self.upgrades_accordion:update(upgrades_content_height, my)
-    self.vehicles_accordion:update((#game.entities.vehicles * 30) + 80, my)
+    local num_vehicle_types = 0
+    for _ in pairs(game.C.VEHICLES) do num_vehicle_types = num_vehicle_types + 1 end
+    self.vehicles_accordion:update((#game.entities.vehicles * 30) + (num_vehicle_types * 35) + 15, my)
     self.clients_accordion:update((#game.entities.clients * 20) + 40, my)
 
     local lkey = self:_buildLayoutKey(game)
@@ -133,16 +135,22 @@ function UIManager:_calculateAccordionStats(game)
     self.accordion_stats.trips = string.format("%d (🏢%d 🏙️%d)", #game.entities.trips.pending, core_trips, city_trips)
     self.accordion_stats.upgrades = "" 
 
-    local bike_count, truck_count, idle_count = 0, 0, 0
+    local vehicle_counts = {}
+    local idle_count = 0
     for _, v in ipairs(game.entities.vehicles) do
         local vehicle_is_in_downtown = game.maps.city:isPlotInDowntown(v.grid_anchor)
         if (is_downtown and vehicle_is_in_downtown) or not is_downtown then
-            if v.type == "bike" then bike_count = bike_count + 1 end
-            if v.type == "truck" then truck_count = truck_count + 1 end
+            vehicle_counts[v.type] = (vehicle_counts[v.type] or 0) + 1
             if v.state.name == "Idle" then idle_count = idle_count + 1 end
         end
     end
-    self.accordion_stats.vehicles = string.format("🚲%d 🚚%d 😴%d", bike_count, truck_count, idle_count)
+    local parts = {}
+    for id, vcfg in pairs(game.C.VEHICLES) do
+        local cnt = vehicle_counts[id:lower()] or 0
+        table.insert(parts, string.format("%s%d", vcfg.icon, cnt))
+    end
+    table.insert(parts, string.format("😴%d", idle_count))
+    self.accordion_stats.vehicles = table.concat(parts, " ")
 
     local client_count = 0
     for _, c in ipairs(game.entities.clients) do
@@ -221,9 +229,18 @@ function UIManager:_doLayout(game)
     self.vehicles_accordion.x, self.vehicles_accordion.y, self.vehicles_accordion.w = p, y_cursor, w
     content_y = y_cursor + self.vehicles_accordion.header_h
     if self.vehicles_accordion.is_open then
-        self.layout_cache.buttons.hire_bike = { x = p + 5, y = content_y + 5, w = w - 10, h = 30 }
-        self.layout_cache.buttons.hire_truck = { x = p + 5, y = content_y + 40, w = w - 10, h = 30 }
-        local list_start_y = content_y + 80
+        -- Generate one hire button per vehicle definition, stacked vertically.
+        self.layout_cache.buttons.hire_vehicles = {}
+        local btn_y = content_y + 5
+        for id, vcfg in pairs(game.C.VEHICLES) do
+            local vid = id:lower()
+            self.layout_cache.buttons.hire_vehicles["hire_" .. vid] = {
+                x = p + 5, y = btn_y, w = w - 10, h = 30,
+                vehicle_id = vid,
+            }
+            btn_y = btn_y + 35
+        end
+        local list_start_y = btn_y + 5
         for i, vehicle in ipairs(game.entities.vehicles) do
             self.layout_cache.vehicles[i] = { vehicle = vehicle, x = p, y = list_start_y + ((i-1) * 30), w = w, h = 30 }
         end

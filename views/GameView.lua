@@ -1,7 +1,5 @@
 -- views/GameView.lua
 -- Updated to render edge-based streets between grid cells
-local Bike = require("models.vehicles.Bike")
-local Truck = require("models.vehicles.Truck")
 local FloatingTextSystem = require("services.FloatingTextSystem")
 
 -- Shader: desaturate + alpha the city zone image at draw time.
@@ -62,10 +60,9 @@ end
 -- below this scale use a cached canvas (performance when multiple cities are on screen).
 local OVERLAY_VECTOR_THRESHOLD = 5.0
 
--- Scratch arrays used by the vehicle draw loop to collect visible vehicles per type
+-- Scratch array used by the vehicle draw loop to collect visible vehicles
 -- without allocating new tables each frame.
-local _vis_trucks = {}
-local _vis_bikes  = {}
+local _vis_vehicles = {}
 
 -- Traces the unique world highway road network from the highway cell map,
 -- producing one non-overlapping set of chains.  Multiple A* paths that share
@@ -454,37 +451,31 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
     if not Game.debug_hide_vehicles then
         local fb_cs = Game.camera.scale
         local fb_Z  = Game.C.ZOOM
-        local fb_draw_bikes  = fb_cs >= fb_Z.BIKE_THRESHOLD
-        local fb_draw_trucks = fb_cs >= fb_Z.ENTITY_THRESHOLD
-        if fb_draw_bikes or fb_draw_trucks then
-            local nt, nb = 0, 0
+        if true then  -- draw all vehicles that pass per-type zoom threshold
+            local nv = 0
             for _, v in ipairs(Game.entities.vehicles) do
-                if v.px > fb_vp_left and v.px < fb_vp_right
-                and v.py > fb_vp_top and v.py < fb_vp_bot then
-                    if v.type == "truck" and fb_draw_trucks then
-                        nt = nt + 1; _vis_trucks[nt] = v
-                    elseif v.type == "bike" and fb_draw_bikes then
-                        nb = nb + 1; _vis_bikes[nb] = v
-                    end
+                local vcfg = Game.C.VEHICLES[v.type_upper]
+                local thresh = vcfg and vcfg.rendering.render_zoom_threshold or fb_Z.ENTITY_THRESHOLD
+                if fb_cs >= thresh
+                and v.px > fb_vp_left and v.px < fb_vp_right
+                and v.py > fb_vp_top  and v.py < fb_vp_bot then
+                    nv = nv + 1; _vis_vehicles[nv] = v
                 end
             end
             if Game.debug_dot_vehicles then
                 local fb_r = (active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE) * 0.2
-                if nt > 0 then
-                    love.graphics.setColor(1.0, 0.55, 0.1)
-                    for i = 1, nt do love.graphics.circle("fill", _vis_trucks[i].px, _vis_trucks[i].py, fb_r * 1.4) end
-                end
-                if nb > 0 then
-                    love.graphics.setColor(0.3, 0.88, 0.35)
-                    for i = 1, nb do love.graphics.circle("fill", _vis_bikes[i].px, _vis_bikes[i].py, fb_r) end
+                for i = 1, nv do
+                    local v    = _vis_vehicles[i]
+                    local vcfg = Game.C.VEHICLES[v.type_upper]
+                    local dc   = vcfg and vcfg.dot_color or {1,1,1}
+                    love.graphics.setColor(dc[1], dc[2], dc[3])
+                    love.graphics.circle("fill", v.px, v.py, fb_r)
                 end
                 love.graphics.setColor(1, 1, 1)
             else
-                for i = 1, nt do _vis_trucks[i]:draw(Game) end
-                for i = 1, nb do _vis_bikes[i]:draw(Game) end
+                for i = 1, nv do _vis_vehicles[i]:draw(Game) end
             end
-            for i = 1, nt do _vis_trucks[i] = nil end
-            for i = 1, nb do _vis_bikes[i]  = nil end
+            for i = 1, nv do _vis_vehicles[i] = nil end
         end
     end
     if Game.active_map_key == "city" and ui_manager.hovered_trip_index then
@@ -497,12 +488,16 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
                 return is_rn3 and active_map:findNearestRoadNode(plot)
                                or active_map:findNearestRoadTile(plot)
             end
-            local start_node = (leg.vehicleType == "truck" and trip.current_leg > 1)
-                and nearestNode(Game.entities.depot_plot)
-                or  nearestNode(leg.start_plot)
-            local end_node = nearestNode(leg.end_plot)
+            local start_node = nearestNode(leg.start_plot)
+            local end_node   = nearestNode(leg.end_plot)
             if start_node and end_node and path_grid then
-                local vp = (leg.vehicleType == "bike") and Game.C.VEHICLES.BIKE or Game.C.VEHICLES.TRUCK
+                -- Pick the first vehicle config matching this leg's transport mode for preview pathfinding
+                local leg_mode = leg.transport_mode or "road"
+                local vp = nil
+                for _, cfg in pairs(Game.C.VEHICLES) do
+                    if cfg.transport_mode == leg_mode then vp = cfg; break end
+                end
+                vp = vp or next(Game.C.VEHICLES) and select(2, next(Game.C.VEHICLES))
                 local cost_function
                 if is_rn3 then
                     cost_function = function(rx, ry)
@@ -832,23 +827,20 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         -- With 10k vehicles spread across the world, only the ~50-200 near the camera
         -- are ever touched; the rest are completely skipped. (H toggles draw.)
         if not Game.debug_hide_vehicles then
-            local draw_bikes  = cs >= Z.BIKE_THRESHOLD
-            local draw_trucks = cs >= Z.ENTITY_THRESHOLD
-            if draw_bikes or draw_trucks then
-                local nt, nb = 0, 0
-                for _, v in ipairs(Game.entities.vehicles) do
-                    if v.px > vp_left and v.px < vp_right
-                    and v.py > vp_top and v.py < vp_bot then
-                        if v.type == "truck" and draw_trucks then
-                            nt = nt + 1; _vis_trucks[nt] = v
-                        elseif v.type == "bike" and draw_bikes then
-                            nb = nb + 1; _vis_bikes[nb] = v
-                        end
-                    end
+            local nv = 0
+            for _, v in ipairs(Game.entities.vehicles) do
+                local vcfg  = Game.C.VEHICLES[v.type_upper]
+                local thresh = vcfg and vcfg.rendering.render_zoom_threshold or Z.ENTITY_THRESHOLD
+                if cs >= thresh
+                and v.px > vp_left and v.px < vp_right
+                and v.py > vp_top  and v.py < vp_bot then
+                    nv = nv + 1; _vis_vehicles[nv] = v
                 end
+            end
 
+            if nv > 0 then
                 if Game.debug_dot_vehicles then
-                    -- Dot mode (C key): two batched circle draw calls regardless of count
+                    -- Dot mode (C key): per-vehicle color from vcfg.dot_color
                     local dot_r = ts * 0.2
                     local sel = Game.entities.selected_vehicle
                     if sel and sel.px > vp_left and sel.px < vp_right
@@ -858,27 +850,20 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                         love.graphics.circle("line", sel.px, sel.py, dot_r * 2.5)
                         love.graphics.setLineWidth(1)
                     end
-                    if nt > 0 then
-                        love.graphics.setColor(1.0, 0.55, 0.1)
-                        for i = 1, nt do
-                            love.graphics.circle("fill", _vis_trucks[i].px, _vis_trucks[i].py, dot_r * 1.4)
-                        end
-                    end
-                    if nb > 0 then
-                        love.graphics.setColor(0.3, 0.88, 0.35)
-                        for i = 1, nb do
-                            love.graphics.circle("fill", _vis_bikes[i].px, _vis_bikes[i].py, dot_r)
-                        end
+                    for i = 1, nv do
+                        local v    = _vis_vehicles[i]
+                        local vcfg = Game.C.VEHICLES[v.type_upper]
+                        local dc   = vcfg and vcfg.dot_color or {1,1,1}
+                        love.graphics.setColor(dc[1], dc[2], dc[3])
+                        love.graphics.circle("fill", v.px, v.py, dot_r)
                     end
                     love.graphics.setColor(1, 1, 1)
                 else
-                    for i = 1, nt do _vis_trucks[i]:draw(Game) end
-                    for i = 1, nb do _vis_bikes[i]:draw(Game) end
+                    for i = 1, nv do _vis_vehicles[i]:draw(Game) end
                 end
 
-                -- Clear scratch lists
-                for i = 1, nt do _vis_trucks[i] = nil end
-                for i = 1, nb do _vis_bikes[i]  = nil end
+                -- Clear scratch list
+                for i = 1, nv do _vis_vehicles[i] = nil end
             end
         end
 
@@ -903,16 +888,21 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
             local cache = Game._trip_preview_cache
             if not cache or cache.trip ~= htrip then
                 Game._trip_preview_cache = nil
-                local vtype = ((leg.vehicleType or "truck"):upper())
-                local vp = Game.C.VEHICLES[vtype] or Game.C.VEHICLES.TRUCK
+                -- Pick the first vehicle config matching this leg's transport mode
+                local leg_mode = leg.transport_mode or "road"
+                local vp = nil
+                for _, cfg in pairs(Game.C.VEHICLES) do
+                    if cfg.transport_mode == leg_mode then vp = cfg; break end
+                end
+                vp = vp or select(2, next(Game.C.VEHICLES))
                 local mock = {
                     operational_map_key = "unified",
                     grid_anchor         = leg.start_plot,
                     pathfinding_bounds  = nil,
-                    type                = leg.vehicleType or "truck",
+                    type                = leg_mode,
                     id                  = 0,
-                    getMovementCostFor  = function(self, t) return vp.pathfinding_costs[t] or 9999 end,
-                    getSpeed            = function(self) return vp.speed end,
+                    getMovementCostFor  = function(self, t) return (vp and vp.pathfinding_costs[t]) or 9999 end,
+                    getSpeed            = function(self) return (vp and (vp.base_speed or vp.speed)) or 60 end,
                 }
                 local PathfindingService = require("services.PathfindingService")
                 local path = PathfindingService.findVehiclePath(mock, leg.start_plot, leg.end_plot, Game)
@@ -1515,11 +1505,11 @@ function GameView:_drawF3Overlay()
     local clients   = entities and entities.clients  or {}
     local pending   = entities and entities.trips and entities.trips.pending or {}
 
-    local n_bikes, n_trucks, n_abstracted = 0, 0, 0
+    local n_abstracted = 0
+    local vehicle_type_counts = {}
     local states_count = {}
     for _, v in ipairs(vehicles) do
-        if v.type == "bike"  then n_bikes  = n_bikes  + 1 end
-        if v.type == "truck" then n_trucks = n_trucks + 1 end
+        vehicle_type_counts[v.type] = (vehicle_type_counts[v.type] or 0) + 1
         if v:shouldUseAbstractedSimulation(Game) then n_abstracted = n_abstracted + 1 end
         local sn = v.state and v.state.name or "?"
         states_count[sn] = (states_count[sn] or 0) + 1
@@ -1593,7 +1583,7 @@ function GameView:_drawF3Overlay()
         string.format("Att. nodes:    %d total", n_att_nodes),
         string.format("City edges:    %d", math.floor(n_city_edges)),
         "",
-        string.format("Vehicles:  %d  (bikes %d  trucks %d  abstracted %d)", #vehicles, n_bikes, n_trucks, n_abstracted),
+        string.format("Vehicles:  %d  (abstracted %d)", #vehicles, n_abstracted),
         string.format("Clients:   %d", #clients),
         string.format("Trips pending: %d", #pending),
         "",

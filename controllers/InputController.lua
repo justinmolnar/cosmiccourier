@@ -118,7 +118,7 @@ function InputController:keypressed(key)
 
         local Trip = require("models.Trip")
         local t = Trip:new(500, 200)
-        t:addLeg(src_plot, dest_plot, "truck")
+        t:addLeg(src_plot, dest_plot, 1, "road")
         table.insert(game.entities.trips.pending, t)
         print(string.format("DEBUG: spawned inter-city trip → city_2 unified (%d,%d)", dest_plot.x, dest_plot.y))
         return
@@ -139,8 +139,9 @@ function InputController:keypressed(key)
         game.state.upgrades.auto_dispatch_unlocked = true
         game.state.upgrades.max_pending_trips  = math.max(game.state.upgrades.max_pending_trips,  200)
 
-        for _ = 1, 50 do game.entities:addVehicle(game, "bike")  end
-        for _ = 1, 50 do game.entities:addVehicle(game, "truck") end
+        for id, _ in pairs(game.C.VEHICLES) do
+            for _ = 1, 50 do game.entities:addVehicle(game, id:lower()) end
+        end
         for _ = 1, 25 do game.entities:addClient(game)           end
 
         local payout = game.C.GAMEPLAY.BASE_TRIP_PAYOUT
@@ -180,7 +181,7 @@ function InputController:keypressed(key)
                 local spl  = cmap:getRandomDowntownBuildingPlot()
                 local src  = spl and toUnified(spl) or game.entities.depot_plot
                 local t = Trip:new(payout * 3, bonus * 2)
-                t:addLeg(src, dest, "truck")
+                t:addLeg(src, dest, 1, "road")
                 table.insert(game.entities.trips.pending, t)
             else
                 local pl = cmap:getRandomDowntownBuildingPlot()

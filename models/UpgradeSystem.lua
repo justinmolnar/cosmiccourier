@@ -167,40 +167,29 @@ function UpgradeSystem:applyDataDrivenEffect(upgrade)
 end
 
 function UpgradeSystem:applyStatToGameValues(stat_name, stat_value)
-    -- This function applies upgrade stats to the actual values used by the game
     local game = self.game
     if not game then
         print("ERROR: Cannot access game instance for upgrade application")
         return
     end
-    
-    if stat_name == "bike_speed" then
-        -- stat_value is the accumulated multiplier; push it to all live bikes.
-        -- New bikes pick it up in Vehicle:new() from state.upgrades.bike_speed.
-        VehicleUpgradeService.applySpeedModifier(game.entities.vehicles, "bike", stat_value)
 
-    elseif stat_name == "truck_speed" then
-        VehicleUpgradeService.applySpeedModifier(game.entities.vehicles, "truck", stat_value)
-        
-    elseif stat_name == "vehicle_capacity" then
-        -- This one is already used correctly by the game
-        -- No additional changes needed
-        
-    elseif stat_name == "max_pending_trips" then
-        -- This one is already used correctly
-        -- No additional changes needed
-        
-    elseif stat_name == "frenzy_duration" then
-        -- This one is already used correctly
-        -- No additional changes needed
-        
-    elseif stat_name == "trip_gen_min_mult" or stat_name == "trip_gen_max_mult" then
-        -- These are already used correctly by TripGenerator
-        -- No additional changes needed
-        
-    else
-        print(string.format("INFO: Stat %s doesn't need special application", stat_name))
+    -- Check if stat_name matches {vehicle_id}_{stat} pattern for any known vehicle.
+    -- e.g. "bike_speed" → push speed_modifier to all live bikes.
+    if game.C and game.C.VEHICLES then
+        for vid, _ in pairs(game.C.VEHICLES) do
+            local prefix = vid:lower() .. "_"
+            if stat_name:sub(1, #prefix) == prefix then
+                local stat_part = stat_name:sub(#prefix + 1)
+                if stat_part == "speed" then
+                    VehicleUpgradeService.applySpeedModifier(game.entities.vehicles, vid:lower(), stat_value)
+                end
+                -- capacity upgrades are read live via getEffectiveCapacity — no push needed
+                return
+            end
+        end
     end
+
+    -- Non-vehicle stats are stored in game.state.upgrades and read live — no push needed.
 end
 
 function UpgradeSystem:applySpecialEffect(upgrade)

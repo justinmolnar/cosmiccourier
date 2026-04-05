@@ -1,0 +1,27 @@
+{
+  "id": "truck",
+  "display_name": "Truck",
+  "icon": "🚚",
+  "dot_color": [1.0, 0.55, 0.1],
+  "base_speed": 60,
+  "base_capacity": 10,
+  "base_cost": 1200,
+  "cost_multiplier": 1.25,
+  "max_range": null,
+  "transport_mode": "road",
+  "anchor_to_road": true,
+  "pathfinding_costs": {
+    "downtown_road": 15,
+    "road": 10,
+    "arterial": 5,
+    "highway": 1,
+    "water": 9999,
+    "mountain": 9999
+  },
+  "rendering": {
+    "render_zoom_key": "ENTITY_THRESHOLD",
+    "abstract_zoom_key": "ENTITY_THRESHOLD",
+    "needs_speed_scale": false
+  },
+  "upgrades": []
+}

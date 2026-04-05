@@ -43,11 +43,12 @@ function Trip:getCurrentBonus()
     end
 end
 
-function Trip:addLeg(start_plot, end_plot, vehicle_type)
+function Trip:addLeg(start_plot, end_plot, cargo_size, transport_mode)
     table.insert(self.legs, {
-        start_plot = start_plot,
-        end_plot = end_plot,
-        vehicleType = vehicle_type
+        start_plot     = start_plot,
+        end_plot       = end_plot,
+        cargo_size     = cargo_size     or 1,
+        transport_mode = transport_mode or "road",
     })
 end
 

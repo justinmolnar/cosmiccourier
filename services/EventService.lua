@@ -76,27 +76,15 @@ function EventService.setupVehicleEvents(state, game)
     game.EventBus:subscribe("ui_buy_vehicle_clicked", function(vehicleType)
         if not vehicleType then return end
 
-        local cost = state.costs[vehicleType]
-        if not cost then return end
+        local vcfg = game.C.VEHICLES[vehicleType:upper()]
+        if not vcfg then return end
 
-        if state.money >= cost then
-            state.money = state.money - cost
-            if vehicleType == "bike" then
-                state.costs.bike = math.floor(state.costs.bike * 1.15)
-            elseif vehicleType == "truck" then
-                state.costs.truck = math.floor(state.costs.truck * 1.25)
-                -- Purge any stale inter-city trips from the pending queue
-                -- (generated before the metro license was unlocked)
-                if not state.metro_license_unlocked then
-                    for i = #game.entities.trips.pending, 1, -1 do
-                        if game.entities.trips.pending[i].is_long_distance then
-                            table.remove(game.entities.trips.pending, i)
-                        end
-                    end
-                end
-            end
-            game.entities:addVehicle(game, vehicleType)
-        end
+        local cost = state.costs[vehicleType]
+        if not cost or state.money < cost then return end
+
+        state.money = state.money - cost
+        state.costs[vehicleType] = math.floor(cost * vcfg.cost_multiplier)
+        game.entities:addVehicle(game, vehicleType)
     end)
 end
 

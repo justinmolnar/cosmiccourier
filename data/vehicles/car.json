@@ -1,0 +1,27 @@
+{
+  "id": "car",
+  "display_name": "Car",
+  "icon": "🚗",
+  "dot_color": [0.4, 0.6, 1.0],
+  "base_speed": 120,
+  "base_capacity": 3,
+  "base_cost": 600,
+  "cost_multiplier": 1.2,
+  "locked_to_zone": "city",
+  "transport_mode": "road",
+  "anchor_to_road": true,
+  "pathfinding_costs": {
+    "downtown_road": 10,
+    "road": 5,
+    "arterial": 2,
+    "highway": 1,
+    "water": 9999,
+    "mountain": 9999
+  },
+  "rendering": {
+    "render_zoom_key": "ENTITY_THRESHOLD",
+    "abstract_zoom_key": "ENTITY_THRESHOLD",
+    "needs_speed_scale": false
+  },
+  "upgrades": []
+}

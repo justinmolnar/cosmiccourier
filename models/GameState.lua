@@ -13,11 +13,11 @@ function State:new(C, game)
     instance.income_history = {}
     instance.trip_creation_history = {}
     
-    instance.costs = {
-        bike = 150,
-        truck = 1200,
-        client = C.COSTS.CLIENT,
-    }
+    -- Initialize vehicle costs from definitions; non-vehicle costs are kept separately.
+    instance.costs = { client = C.COSTS.CLIENT }
+    for id, vcfg in pairs(C.VEHICLES) do
+        instance.costs[id:lower()] = vcfg.base_cost
+    end
 
     instance.upgrades_purchased = {}
     instance.upgrades_discovered = {}

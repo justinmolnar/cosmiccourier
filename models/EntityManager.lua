@@ -34,7 +34,15 @@ end
 function Entities:init(game)
     self.depot_plot = game.maps.city:getRandomDowntownBuildingPlot()
     self:addClient(game)
-    self:addVehicle(game, "bike")
+    -- Start with the cheapest available vehicle type.
+    local starter_id, starter_cost = nil, math.huge
+    for id, vcfg in pairs(game.C.VEHICLES) do
+        if vcfg.base_cost < starter_cost then
+            starter_id   = id:lower()
+            starter_cost = vcfg.base_cost
+        end
+    end
+    if starter_id then self:addVehicle(game, starter_id) end
 end
 
 function Entities:addClient(game)
@@ -52,7 +60,7 @@ end
 
 function Entities:addVehicle(game, vehicleType)
     local VehicleFactory = require("models.VehicleFactory")
-    if not VehicleFactory.isValidVehicleType(vehicleType) then return end
+    if not VehicleFactory.isValidVehicleType(vehicleType, game) then return end
     if not self.depot_plot then return end
     local new_id = #self.vehicles + 1
     local new_vehicle = VehicleFactory.createVehicle(vehicleType, new_id, self.depot_plot, game)

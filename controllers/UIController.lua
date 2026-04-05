@@ -77,16 +77,15 @@ function UIController:handleMouseDown(x, y, button)
         end
     end
 
-    -- Clicks on "hire vehicle" buttons
+    -- Clicks on "hire vehicle" buttons — generic loop over all definitions
     if ui_manager.vehicles_accordion.is_open then
         local vy = y + ui_manager.vehicles_accordion.scroll_y
-        if self:isMouseInButton(x, vy, ui_manager.layout_cache.buttons.hire_bike) then
-            Game.EventBus:publish("ui_buy_vehicle_clicked", "bike")
-            return true
-        end
-        if self:isMouseInButton(x, vy, ui_manager.layout_cache.buttons.hire_truck) then
-            Game.EventBus:publish("ui_buy_vehicle_clicked", "truck")
-            return true
+        local hire_btns = ui_manager.layout_cache.buttons.hire_vehicles or {}
+        for _, btn in pairs(hire_btns) do
+            if self:isMouseInButton(x, vy, btn) then
+                Game.EventBus:publish("ui_buy_vehicle_clicked", btn.vehicle_id)
+                return true
+            end
         end
     end
 

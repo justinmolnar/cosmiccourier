@@ -54,12 +54,17 @@ function TripGenerator.generateTrip(client_plot, game)
     local base_payout = C_GAMEPLAY.BASE_TRIP_PAYOUT
     local speed_bonus = C_GAMEPLAY.INITIAL_SPEED_BONUS
 
-    local trucks_exist = false
+    -- City trips only spawn once a vehicle exists that can leave its district.
+    local city_trips_available = false
     for _, v in ipairs(game.entities.vehicles) do
-        if v.type == "truck" then trucks_exist = true; break end
+        local vcfg = game.C.VEHICLES[v.type_upper]
+        if vcfg and vcfg.locked_to_zone ~= "district" then
+            city_trips_available = true
+            break
+        end
     end
 
-    local available = getAvailableTripTypes(trucks_exist)
+    local available = getAvailableTripTypes(city_trips_available)
     local selected  = weightedRandom(available)
     local creator   = TRIP_CREATORS[selected.type]
     return creator(client_plot, base_payout, speed_bonus, game)
@@ -77,7 +82,8 @@ function TripGenerator._createDowntownTrip(client_plot, base_payout, speed_bonus
     if end_plot.x == client_plot.x and end_plot.y == client_plot.y then return nil end
 
     local new_trip = Trip:new(base_payout, speed_bonus)
-    new_trip:addLeg(client_plot, end_plot, "bike")
+    new_trip:addLeg(client_plot, end_plot, 1, "road")
+
     return new_trip
 end
 
@@ -99,8 +105,9 @@ function TripGenerator._createCityTrip(client_plot, base_payout, speed_bonus, ga
     local dest_plot  = toUnified(dest_plot_local,  cmap)
 
     local new_trip = Trip:new(base_payout, speed_bonus)
-    new_trip:addLeg(start_plot, game.entities.depot_plot, "bike")
-    new_trip:addLeg(game.entities.depot_plot, dest_plot, "truck")
+    -- leg 1: pickup to depot (small cargo, bike-eligible)
+    new_trip:addLeg(start_plot, game.entities.depot_plot, 1, "road")
+    new_trip:addLeg(game.entities.depot_plot, dest_plot, 1, "road")
     return new_trip
 end
 
