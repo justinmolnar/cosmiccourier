@@ -1,7 +1,9 @@
 -- views/Panel.lua
 -- Tab-routed panel container. Knows nothing about game content.
--- Each tab provides a draw(game) function. Panel handles tab bar,
--- per-tab scroll, scrollbar rendering and input.
+-- Each tab provides a build(game) → component list function.
+-- Panel calls ComponentRenderer to draw and handles scroll/scrollbar.
+
+local CR = require("views.ComponentRenderer")
 
 local Panel = {}
 Panel.__index = Panel
@@ -28,11 +30,14 @@ function Panel:new(x, y, w, h)
     -- Per-tab scroll state
     instance.scroll = {}   -- id → { scroll_y, total_h, is_dragging, drag_start_y, scroll_at_drag }
 
+    -- Last built component list for the active tab (set in draw, used by callers for hitTest)
+    instance._last_components = nil
+
     return instance
 end
 
 function Panel:registerTab(def)
-    -- def: { id, label, icon, priority, draw }
+    -- def: { id, label, icon, priority, build }
     self.tabs[def.id] = def
     table.insert(self.tab_order, def)
     table.sort(self.tab_order, function(a, b)
@@ -60,13 +65,9 @@ function Panel:getActiveTab()
     return self.tabs[self.active_tab_id]
 end
 
-function Panel:updateScrollTotalH(tab_id, total_h)
-    local s = self.scroll[tab_id]
-    if not s then return end
-    s.total_h = total_h
-    local max_scroll = math.max(0, total_h - self.content_h)
-    if s.scroll_y > max_scroll then s.scroll_y = max_scroll end
-    if s.scroll_y < 0 then s.scroll_y = 0 end
+-- Returns the last built component list (set during draw, one frame old for input).
+function Panel:getComponents()
+    return self._last_components
 end
 
 function Panel:handleScroll(dy)
@@ -98,7 +99,7 @@ function Panel:handleMouseDown(x, y, button)
         end
     end
 
-    -- Scrollbar interaction
+    -- Scrollbar interaction (within content area)
     if self:isInContentArea(x, y) then
         local s = self.scroll[self.active_tab_id]
         if s and s.total_h > self.content_h then
@@ -198,7 +199,7 @@ function Panel:draw(game)
 
     -- Content area
     local active_tab = self.tabs[self.active_tab_id]
-    if not active_tab or not active_tab.draw then return end
+    if not active_tab or not active_tab.build then return end
 
     local s = self.scroll[self.active_tab_id]
 
@@ -206,7 +207,17 @@ function Panel:draw(game)
     love.graphics.push()
     love.graphics.translate(0, self.content_y - (s and s.scroll_y or 0))
 
-    active_tab.draw(game)
+    local comps = active_tab.build(game)
+    self._last_components = comps
+
+    local total_h = CR.draw(comps, self.x, self.w, game)
+
+    -- Update scroll bounds from this frame's actual content height
+    if s then
+        s.total_h = total_h
+        local max_scroll = math.max(0, total_h - self.content_h)
+        if s.scroll_y > max_scroll then s.scroll_y = max_scroll end
+    end
 
     love.graphics.pop()
     love.graphics.setScissor()
