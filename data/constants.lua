@@ -1,6 +1,6 @@
 local C = {
     UI = {
-        SIDEBAR_WIDTH       = 280,
+        SIDEBAR_WIDTH       = math.floor(love.graphics.getWidth() * 0.33),
         FONT_PATH_MAIN      = "assets/fonts/arial.ttf",
         FONT_PATH_EMOJI     = "assets/fonts/NotoEmoji.ttf",
         FONT_SIZE_UI        = 16,

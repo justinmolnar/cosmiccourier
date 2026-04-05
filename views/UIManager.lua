@@ -2,30 +2,44 @@
 local UIManager = {}
 UIManager.__index = UIManager
 
+local PANEL_Y = 120   -- pixels below top of sidebar where panel begins
+
 function UIManager:new(C, game)
-    -- CORRECTED: The paths now correctly point to the new locations of the components.
-    local Accordion = require("views.components.Accordion")
+    local Panel       = require("views.Panel")
     local ModalManager = require("views.modal_manager")
 
     local instance = setmetatable({}, UIManager)
-    
+
     instance.hovered_trip_index = nil
-    
-    instance.trips_accordion = Accordion:new("Pending Trips", true, 120)
-    instance.upgrades_accordion = Accordion:new("Upgrades", true, 250)
-    instance.vehicles_accordion = Accordion:new("Vehicles", false, 150)
-    instance.clients_accordion = Accordion:new("Clients", false, 150)
-    
+
+    local screen_h = love.graphics.getHeight()
+    instance.panel = Panel:new(0, PANEL_Y, C.UI.SIDEBAR_WIDTH, screen_h - PANEL_Y)
+
+    -- Register the four tabs. draw functions call existing panel views (Phase 1 scaffolding).
+    local TripsPanelView    = require("views.components.TripsPanelView")
+    local UpgradesPanelView = require("views.components.UpgradesPanelView")
+    local VehiclesPanelView = require("views.components.VehiclesPanelView")
+    local ClientsPanelView  = require("views.components.ClientsPanelView")
+
+    instance.panel:registerTab({ id = "trips",    label = "Trips",    icon = "📦", priority = 1,
+        draw = function(g) TripsPanelView.draw(g, instance) end })
+    instance.panel:registerTab({ id = "vehicles", label = "Vehicles", icon = "🚗", priority = 2,
+        draw = function(g) VehiclesPanelView.draw(g, instance) end })
+    instance.panel:registerTab({ id = "upgrades", label = "Upgrades", icon = "⬆️", priority = 3,
+        draw = function(g) UpgradesPanelView.draw(g, instance) end })
+    instance.panel:registerTab({ id = "clients",  label = "Clients",  icon = "🏢", priority = 4,
+        draw = function(g) ClientsPanelView.draw(g, instance) end })
+
     instance.modal_manager = ModalManager:new()
 
     instance.layout_cache = {}
     instance.income_per_second = 0
-    instance.trips_per_second = 0
+    instance.trips_per_second  = 0
     instance.accordion_stats = {
-        trips = "",
+        trips    = "",
         upgrades = "",
         vehicles = "",
-        clients = ""
+        clients  = "",
     }
     instance._layout_key = nil
     instance._stats_key  = nil
@@ -34,38 +48,21 @@ function UIManager:new(C, game)
 end
 
 function UIManager:handle_scroll(dy)
-    local mx, my = love.mouse.getPosition()
-    if self.trips_accordion:handle_scroll(mx, my, dy)    then return end
-    if self.upgrades_accordion:handle_scroll(mx, my, dy) then return end
-    if self.vehicles_accordion:handle_scroll(mx, my, dy) then return end
-    if self.clients_accordion:handle_scroll(mx, my, dy)  then return end
-end
-
-function UIManager:handle_mouse_down(x, y, button, game)
-    if self.modal_manager:handle_mouse_down(x, y, game) then return true end
-    if self.trips_accordion:handle_mouse_down(x, y, button) then return true end
-    if self.upgrades_accordion:handle_mouse_down(x, y, button) then return true end
-    if self.vehicles_accordion:handle_mouse_down(x, y, button) then return true end
-    if self.clients_accordion:handle_mouse_down(x, y, button) then return true end
-    return false
+    self.panel:handleScroll(dy)
 end
 
 function UIManager:handle_mouse_up(x, y, button)
     if self.modal_manager:handle_mouse_up(x, y) then return end
-    self.trips_accordion:handle_mouse_up(x, y, button)
-    self.upgrades_accordion:handle_mouse_up(x, y, button)
-    self.vehicles_accordion:handle_mouse_up(x, y, button)
-    self.clients_accordion:handle_mouse_up(x, y, button)
+    self.panel:handleMouseUp()
 end
 
 function UIManager:update(dt, game)
     self.modal_manager:update(dt, game)
-
     if self.modal_manager:isActive() then return end
 
-    local C = game.C
+    local C  = game.C
     local mx, my = love.mouse.getPosition()
-    
+
     self:_calculatePerSecondStats(game)
 
     local skey = self:_buildStatsKey(game)
@@ -74,41 +71,43 @@ function UIManager:update(dt, game)
         self._stats_key = skey
     end
 
-    local upgrades_content_height = self:_calculateUpgradesLayoutHeight(game.state.Upgrades.categories)
+    -- Update panel scrollbar drag
+    self.panel:update(my)
 
-    self.trips_accordion:update(#game.entities.trips.pending * 50, my)
-    self.upgrades_accordion:update(upgrades_content_height, my)
+    -- Update per-tab content heights
+    local upgrades_h = self:_calculateUpgradesLayoutHeight(game.state.Upgrades.categories)
     local num_vehicle_types = 0
     for _ in pairs(game.C.VEHICLES) do num_vehicle_types = num_vehicle_types + 1 end
-    self.vehicles_accordion:update((#game.entities.vehicles * 30) + (num_vehicle_types * 35) + 15, my)
-    self.clients_accordion:update((#game.entities.clients * 20) + 40, my)
 
+    self.panel:updateScrollTotalH("trips",    #game.entities.trips.pending * 50)
+    self.panel:updateScrollTotalH("upgrades", upgrades_h)
+    self.panel:updateScrollTotalH("vehicles", (num_vehicle_types * 35) + 15 + (#game.entities.vehicles * 30))
+    self.panel:updateScrollTotalH("clients",  (#game.entities.clients * 20) + 40)
+
+    -- Rebuild layout when entity counts or active tab changes
     local lkey = self:_buildLayoutKey(game)
     if lkey ~= self._layout_key then
         self:_doLayout(game)
         self._layout_key = lkey
     end
-    
+
+    -- Hovered trip index (for click-to-assign)
     self.hovered_trip_index = nil
-    if mx < C.UI.SIDEBAR_WIDTH then
-        if self.trips_accordion.is_open and mx > self.trips_accordion.x and mx < self.trips_accordion.x + self.trips_accordion.w and my > self.trips_accordion.y + self.trips_accordion.header_h and my < self.trips_accordion.y + self.trips_accordion.header_h + self.trips_accordion.content_h then
-            local y_in_content = my - (self.trips_accordion.y + self.trips_accordion.header_h) + self.trips_accordion.scroll_y
-            local index = math.floor(y_in_content / 50) + 1
-            if index > 0 and index <= #game.entities.trips.pending then self.hovered_trip_index = index end
+    if self.panel.active_tab_id == "trips" and self.panel:isInContentArea(mx, my) then
+        local y_in_content = self.panel:toContentY(my)
+        local index = math.floor(y_in_content / 50) + 1
+        if index >= 1 and index <= #game.entities.trips.pending then
+            self.hovered_trip_index = index
         end
     end
 end
 
 function UIManager:_calculateUpgradesLayoutHeight(categories)
-    local total_height = 10
-    local category_header_height = 25
-    local icon_row_height = 79  -- icon_size(64) + 15 spacing
-
-    for _, category in ipairs(categories) do
-        total_height = total_height + category_header_height
-        total_height = total_height + icon_row_height
+    local total_h = 10
+    for _ in ipairs(categories) do
+        total_h = total_h + 25 + 79   -- category header + icon row
     end
-    return total_height
+    return total_h
 end
 
 function UIManager:_calculatePerSecondStats(game)
@@ -133,7 +132,7 @@ function UIManager:_calculateAccordionStats(game)
         end
     end
     self.accordion_stats.trips = string.format("%d (🏢%d 🏙️%d)", #game.entities.trips.pending, core_trips, city_trips)
-    self.accordion_stats.upgrades = "" 
+    self.accordion_stats.upgrades = ""
 
     local vehicle_counts = {}
     local idle_count = 0
@@ -167,11 +166,8 @@ function UIManager:_buildLayoutKey(game)
     return (#game.entities.trips.pending)
         .. "|" .. (#game.entities.vehicles)
         .. "|" .. (#game.entities.clients)
-        .. "|" .. (self.trips_accordion.is_open    and "1" or "0")
-        .. "|" .. (self.upgrades_accordion.is_open and "1" or "0")
-        .. "|" .. (self.vehicles_accordion.is_open and "1" or "0")
-        .. "|" .. (self.clients_accordion.is_open  and "1" or "0")
         .. "|" .. C.UI.SIDEBAR_WIDTH
+        .. "|" .. (self.panel.active_tab_id or "")
 end
 
 function UIManager:_buildStatsKey(game)
@@ -180,81 +176,68 @@ function UIManager:_buildStatsKey(game)
         .. "|" .. (#game.entities.clients) .. "|" .. is_dt
 end
 
+-- All layout positions are relative to y=0 (top of panel content area).
+-- Panel:draw applies translate(0, content_y - scroll_y) before calling tab draw.
 function UIManager:_doLayout(game)
     self.layout_cache = { trips = {}, upgrades = { buttons = {} }, vehicles = {}, clients = {}, buttons = {} }
     local C = game.C
     local p = C.UI.PADDING
     local w = C.UI.SIDEBAR_WIDTH - (p * 2)
-    local y_cursor = 120
 
-    self.trips_accordion.x, self.trips_accordion.y, self.trips_accordion.w = p, y_cursor, w
-    local content_y = y_cursor + self.trips_accordion.header_h
-    if self.trips_accordion.is_open then
-        for i, trip in ipairs(game.entities.trips.pending) do
-            self.layout_cache.trips[i] = { trip = trip, x = p, y = content_y + ((i-1) * 50), w = w, h = 50 } 
-        end
+    -- Trips tab (items stacked from y=0)
+    for i, trip in ipairs(game.entities.trips.pending) do
+        self.layout_cache.trips[i] = { trip = trip, x = p, y = (i - 1) * 50, w = w, h = 50 }
     end
-    y_cursor = y_cursor + self.trips_accordion.header_h + (self.trips_accordion.is_open and self.trips_accordion.content_h or 0) + 10
 
-    self.upgrades_accordion.x, self.upgrades_accordion.y, self.upgrades_accordion.w = p, y_cursor, w
-    content_y = y_cursor + self.upgrades_accordion.header_h
-    if self.upgrades_accordion.is_open then
-        local upgrade_y_cursor = content_y + 10
-        local icon_size = 64
-        local icon_padding = 15
-
-        for _, category in ipairs(game.state.Upgrades.categories) do
-            self.layout_cache.upgrades[category.id] = { type = "header", text = category.name, x = p, y = upgrade_y_cursor, w = w }
-            upgrade_y_cursor = upgrade_y_cursor + 25
-            local icon_x_cursor = p + icon_padding
-            for _, sub_type in ipairs(category.sub_types) do
-                table.insert(self.layout_cache.upgrades.buttons, {
-                    id = sub_type.id,
-                    icon = sub_type.icon,
-                    name = sub_type.name,
-                    x = icon_x_cursor,
-                    y = upgrade_y_cursor,
-                    w = icon_size,
-                    h = icon_size,
-                    event = "ui_upgrade_button_clicked",
-                    data = sub_type
-                })
-                icon_x_cursor = icon_x_cursor + icon_size + icon_padding
-            end
-            upgrade_y_cursor = upgrade_y_cursor + icon_size + 15
+    -- Upgrades tab
+    local upgrade_y = 10
+    for _, category in ipairs(game.state.Upgrades.categories) do
+        self.layout_cache.upgrades[category.id] = { type = "header", text = category.name, x = p, y = upgrade_y, w = w }
+        upgrade_y = upgrade_y + 25
+        local icon_x = p + 15
+        for _, sub_type in ipairs(category.sub_types) do
+            table.insert(self.layout_cache.upgrades.buttons, {
+                id    = sub_type.id,
+                icon  = sub_type.icon,
+                name  = sub_type.name,
+                x     = icon_x,
+                y     = upgrade_y,
+                w     = 64,
+                h     = 64,
+                event = "ui_upgrade_button_clicked",
+                data  = sub_type,
+            })
+            icon_x = icon_x + 64 + 15
         end
+        upgrade_y = upgrade_y + 64 + 15
     end
-    y_cursor = y_cursor + self.upgrades_accordion.header_h + (self.upgrades_accordion.is_open and self.upgrades_accordion.content_h or 0) + 10
 
-    self.vehicles_accordion.x, self.vehicles_accordion.y, self.vehicles_accordion.w = p, y_cursor, w
-    content_y = y_cursor + self.vehicles_accordion.header_h
-    if self.vehicles_accordion.is_open then
-        -- Generate one hire button per vehicle definition, stacked vertically.
-        self.layout_cache.buttons.hire_vehicles = {}
-        local btn_y = content_y + 5
-        for id, vcfg in pairs(game.C.VEHICLES) do
-            local vid = id:lower()
-            self.layout_cache.buttons.hire_vehicles["hire_" .. vid] = {
-                x = p + 5, y = btn_y, w = w - 10, h = 30,
-                vehicle_id = vid,
-            }
-            btn_y = btn_y + 35
-        end
-        local list_start_y = btn_y + 5
-        for i, vehicle in ipairs(game.entities.vehicles) do
-            self.layout_cache.vehicles[i] = { vehicle = vehicle, x = p, y = list_start_y + ((i-1) * 30), w = w, h = 30 }
-        end
+    -- Vehicles tab
+    self.layout_cache.buttons.hire_vehicles = {}
+    local btn_y = 5
+    for id, _ in pairs(game.C.VEHICLES) do
+        local vid = id:lower()
+        self.layout_cache.buttons.hire_vehicles["hire_" .. vid] = {
+            x = p + 5, y = btn_y, w = w - 10, h = 30,
+            vehicle_id = vid,
+        }
+        btn_y = btn_y + 35
     end
-    y_cursor = y_cursor + self.vehicles_accordion.header_h + (self.vehicles_accordion.is_open and self.vehicles_accordion.content_h or 0) + 10
+    local vehicle_list_y = btn_y + 5
+    for i, vehicle in ipairs(game.entities.vehicles) do
+        self.layout_cache.vehicles[i] = {
+            vehicle = vehicle,
+            x = p, y = vehicle_list_y + (i - 1) * 30, w = w, h = 30,
+        }
+    end
 
-    self.clients_accordion.x, self.clients_accordion.y, self.clients_accordion.w = p, y_cursor, w
-    content_y = y_cursor + self.clients_accordion.header_h
-    if self.clients_accordion.is_open then
-        self.layout_cache.buttons.buy_client = { x = p + 5, y = content_y + 5, w = w - 10, h = 30 }
-        local list_start_y = content_y + 40
-        for i, client in ipairs(game.entities.clients) do
-            self.layout_cache.clients[i] = { client = client, x = p, y = list_start_y + ((i-1) * 20), w = w, h = 20 }
-        end
+    -- Clients tab
+    self.layout_cache.buttons.buy_client = { x = p + 5, y = 5, w = w - 10, h = 30 }
+    for i, client in ipairs(game.entities.clients) do
+        self.layout_cache.clients[i] = {
+            client = client,
+            x = p, y = 40 + (i - 1) * 20, w = w, h = 20,
+        }
     end
 end
 
