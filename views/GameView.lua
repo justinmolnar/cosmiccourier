@@ -842,13 +842,13 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                 if Game.debug_dot_vehicles then
                     -- Dot mode (C key): per-vehicle color from vcfg.dot_color
                     local dot_r = ts * 0.2
-                    local sel = Game.entities.selected_vehicle
+                    local sel   = Game.entities.selected_vehicle
                     if sel and sel.px > vp_left and sel.px < vp_right
                     and sel.py > vp_top and sel.py < vp_bot then
                         love.graphics.setColor(1, 1, 0, 0.85)
-                        love.graphics.setLineWidth(ts * 0.08)
-                        love.graphics.circle("line", sel.px, sel.py, dot_r * 2.5)
-                        love.graphics.setLineWidth(1)
+                        love.graphics.setLineWidth(2 / Game.camera.scale)
+                        love.graphics.circle("line", sel.px, sel.py, 16 / Game.camera.scale)
+                        love.graphics.setLineWidth(1 / Game.camera.scale)
                     end
                     for i = 1, nv do
                         local v    = _vis_vehicles[i]

@@ -116,6 +116,21 @@ function Vehicle:assignTrip(trip, game)
     table.insert(self.trip_queue, trip)
 end
 
+function Vehicle:unassign(game)
+    if not _States then _States = require("models.vehicles.vehicle_states") end
+    for _, trip in ipairs(self.trip_queue) do
+        table.insert(game.entities.trips.pending, trip)
+    end
+    for _, trip in ipairs(self.cargo) do
+        table.insert(game.entities.trips.pending, trip)
+    end
+    self.trip_queue = {}
+    self.cargo      = {}
+    self.path       = {}
+    self.path_i     = 1
+    self:changeState(_States.Idle, game)
+end
+
 function Vehicle:isAvailable(game)
     local total_load = #self.trip_queue + #self.cargo
     return total_load < game.state.upgrades.vehicle_capacity

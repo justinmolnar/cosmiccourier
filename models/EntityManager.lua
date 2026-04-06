@@ -105,7 +105,8 @@ function Entities:update(dt, game)
 end
 
 function Entities:handle_click(x, y, game)
-    local radius_sq = game.C.UI.VEHICLE_CLICK_RADIUS * game.C.UI.VEHICLE_CLICK_RADIUS
+    local click_r    = game.C.UI.VEHICLE_CLICK_RADIUS / game.camera.scale
+    local radius_sq  = click_r * click_r
     local candidates = {}
     for _, vehicle in ipairs(self.vehicles) do
         local dist_sq = (x - vehicle.px)^2 + (y - vehicle.py)^2

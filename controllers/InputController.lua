@@ -324,7 +324,10 @@ function InputController:handleGameWorldClick(x, y)
     end
 
     if self.game.entities and self.game.entities.handle_click then
-        self.game.entities:handle_click(world_x, world_y, self.game)
+        local hit = self.game.entities:handle_click(world_x, world_y, self.game)
+        if hit and self.game.ui_manager then
+            self.game.ui_manager.panel:setActiveTab("vehicles")
+        end
     end
 end
 

@@ -46,6 +46,13 @@ function UIController:handleMouseDown(x, y, button)
     elseif id == "select_vehicle" then
         Game.entities.selected_vehicle = data.vehicle
 
+    elseif id == "deselect_vehicle" then
+        Game.entities.selected_vehicle = nil
+
+    elseif id == "unassign_vehicle" then
+        local v = data.vehicle
+        if v then v:unassign(Game) end
+
     elseif id == "open_upgrade" then
         local Modal    = require("views.components.Modal")
         local on_close = function() ui_manager.modal_manager:hide() end

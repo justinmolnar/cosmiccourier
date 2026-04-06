@@ -5,6 +5,34 @@ function VehiclesTab.build(game, ui_manager)
     local comps = {}
     local state = game.state
 
+    -- Selected vehicle detail panel
+    local sel = game.entities.selected_vehicle
+    if sel then
+        table.insert(comps, { type = "label", text = "Selected Vehicle", style = "heading", h = 28 })
+        local cap_used = #sel.cargo + #sel.trip_queue
+        local cap_max  = state.upgrades.vehicle_capacity
+        table.insert(comps, {
+            type  = "button",
+            id    = "deselect_vehicle",
+            data  = {},
+            lines = {
+                { text = string.format("%s %s #%d", sel:getIcon(), sel.type, sel.id), style = "body" },
+                { text = string.format("  %s  |  cap %d/%d", sel.state.name, cap_used, cap_max), style = "small" },
+            },
+        })
+        if cap_used > 0 then
+            table.insert(comps, {
+                type  = "button",
+                id    = "unassign_vehicle",
+                data  = { vehicle = sel },
+                lines = {
+                    { text = "Return trip to queue", style = "body" },
+                },
+            })
+        end
+        table.insert(comps, { type = "divider", h = 10 })
+    end
+
     -- Hire section
     table.insert(comps, { type = "label", text = "Hire Vehicles", style = "heading", h = 28 })
 
@@ -44,14 +72,15 @@ function VehiclesTab.build(game, ui_manager)
         for _, v in ipairs(game.entities.vehicles) do
             local cap_used = #v.cargo + #v.trip_queue
             local cap_max  = state.upgrades.vehicle_capacity
-            local sel      = (game.entities.selected_vehicle == v) and "▶ " or ""
+            local is_sel   = (game.entities.selected_vehicle == v)
+            local sel_mark = is_sel and "▶ " or ""
             table.insert(comps, {
                 type    = "button",
                 id      = "select_vehicle",
                 data    = { vehicle = v },
                 hovered = (v.id == hovered_vid),
                 lines   = {
-                    { text = string.format("%s%s %s #%d", sel, v:getIcon(), v.type, v.id), style = "body" },
+                    { text = string.format("%s%s %s #%d", sel_mark, v:getIcon(), v.type, v.id), style = "body" },
                     { text = string.format("  %s  |  cap %d/%d", v.state.name, cap_used, cap_max), style = "small" },
                 },
             })
