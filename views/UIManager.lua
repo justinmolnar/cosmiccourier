@@ -8,7 +8,8 @@ local VehiclesTab  = require("views.tabs.VehiclesTab")
 local UpgradesTab  = require("views.tabs.UpgradesTab")
 local ClientsTab   = require("views.tabs.ClientsTab")
 
-local DepotTab     = require("views.tabs.DepotTab")
+local DepotTab            = require("views.tabs.DepotTab")
+local InfrastructureTab   = require("views.tabs.InfrastructureTab")
 
 local PANEL_Y = 120   -- pixels below top of sidebar where panel begins
 
@@ -36,6 +37,8 @@ function UIManager:new(C, game)
         build = function(g) return ClientsTab.build(g, instance) end })
     instance.panel:registerTab({ id = "depot",    label = "Depot",    icon = "🏗️", priority = 5,
         build = function(g) return DepotTab.build(g, instance) end })
+    instance.panel:registerTab({ id = "infrastructure", label = "Roads", icon = "🛣️", priority = 6,
+        build = function(g) return InfrastructureTab.build(g, instance) end })
 
     instance.modal_manager  = ModalManager:new()
     instance.context_menu   = nil   -- active ContextMenu instance or nil

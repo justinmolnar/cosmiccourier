@@ -51,6 +51,14 @@ function UIController:handleMouseDown(x, y, button)
     elseif id == "toggle_build_depot_mode" then
         Game.entities.build_depot_mode = not Game.entities.build_depot_mode
 
+    elseif id == "toggle_build_highway_mode" then
+        local e = Game.entities
+        e.build_highway_mode = not (e.build_highway_mode or false)
+        if not e.build_highway_mode then
+            e.highway_build_nodes = {}
+            Game._hw_ghost_cache = nil
+        end
+
     elseif id == "market_for_clients" then
         Game.EventBus:publish("ui_market_for_clients_clicked", { depot = data.depot })
 

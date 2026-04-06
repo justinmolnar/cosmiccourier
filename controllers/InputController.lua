@@ -23,6 +23,13 @@ function InputController:keypressed(key)
             self.game.ui_manager:closeContextMenu()
             return
         end
+        -- Cancel highway build mode
+        if self.game.entities.build_highway_mode then
+            self.game.entities.build_highway_mode = false
+            self.game.entities.highway_build_nodes = {}
+            self.game._hw_ghost_cache = nil
+            return
+        end
         -- Cancel depot build mode
         if self.game.entities.build_depot_mode then
             self.game.entities.build_depot_mode = false
@@ -337,6 +344,12 @@ function InputController:handleGameWorldClick(x, y, button)
         world_x = ((world_x % mpw) + mpw) % mpw
     end
 
+    -- build_highway_mode: route click to highway builder
+    if self.game.entities.build_highway_mode then
+        self:_handleHighwayBuildClick(world_x, world_y)
+        return
+    end
+
     -- build_depot_mode: left-click now places depot directly
     if self.game.entities.build_depot_mode then
         self:_tryPlaceDepot(world_x, world_y, x, y)
@@ -360,7 +373,7 @@ end
 function InputController:update(dt)
 end
 
--- ─── Context menu ────────────────────────────────────────────────────────────
+-- ─── Coordinate helpers ──────────────────────────────────────────────────────
 
 -- Returns the unified sub-cell (gx, gy) under world pixel (wx, wy), or nil.
 local function _worldToSubcell(wx, wy, game)
@@ -386,6 +399,73 @@ local function _isValidDepotSite(gx, gy, umap)
     end
     return false
 end
+
+-- ─── Highway build ───────────────────────────────────────────────────────────
+
+-- Handles a left-click during highway build mode.
+-- wx_px, wy_px: world-pixel coordinates of the click.
+function InputController:_handleHighwayBuildClick(wx_px, wy_px)
+    local game = self.game
+    local IS   = require("services.InfrastructureService")
+
+    local gx, gy, umap = _worldToSubcell(wx_px, wy_px, game)
+    if not gx then
+        require("services.FloatingTextSystem").emit("Out of bounds!", wx_px, wy_px, game.C)
+        return
+    end
+
+    local wx = math.ceil(gx / 3)
+    local wy = math.ceil(gy / 3)
+
+    local nodes = game.entities.highway_build_nodes or {}
+
+    if #nodes == 0 then
+        -- First click: must be an existing highway tile
+        if IS.isHighwayCell(wx, wy, game) then
+            game.entities.highway_build_nodes = {{ wx = wx, wy = wy }}
+        else
+            require("services.FloatingTextSystem").emit("Start on a highway!", wx_px, wy_px, game.C)
+        end
+        return
+    end
+
+    -- Subsequent click: highway tile = finish segment, anything else = waypoint
+    if IS.isHighwayCell(wx, wy, game) then
+        -- Finish segment at this highway tile
+        local all_nodes = {}
+        for _, n in ipairs(nodes) do all_nodes[#all_nodes+1] = n end
+        all_nodes[#all_nodes+1] = { wx = wx, wy = wy }
+
+        local new_cells, cost = IS.computeSegment(all_nodes, game)
+        if #new_cells == 0 then
+            -- Route already exists or entirely impassable — just cancel mode
+            game.entities.build_highway_mode = false
+            game.entities.highway_build_nodes = {}
+            game._hw_ghost_cache = nil
+            return
+        end
+        if game.state.money < cost then
+            require("services.FloatingTextSystem").emit(
+                string.format("Need $%d!", cost), wx_px, wy_px, game.C)
+            return
+        end
+        game.state.money = game.state.money - cost
+        IS.applyHighway(new_cells, game)
+        require("services.FloatingTextSystem").emit(
+            string.format("Highway built! -$%d", cost), wx_px, wy_px, game.C)
+        game.entities.build_highway_mode = false
+        game.entities.highway_build_nodes = {}
+        game._hw_ghost_cache = nil
+
+    else
+        -- Add intermediate waypoint — any click is valid; impassable cells are snapped
+        -- to their nearest passable neighbour automatically by findPath.
+        nodes[#nodes+1] = { wx = wx, wy = wy }
+        game.entities.highway_build_nodes = nodes
+    end
+end
+
+-- ─── Context menu ────────────────────────────────────────────────────────────
 
 -- Immediately place a depot at (wx, wy) — used when build_depot_mode is active.
 function InputController:_tryPlaceDepot(wx, wy, sx, sy)
@@ -436,6 +516,16 @@ function InputController:openContextMenu(sx, sy, game)
 
     local items = {}
     local gx, gy, umap = _worldToSubcell(world_x, world_y, game)
+
+    -- ── Hit-test: highway tile ───────────────────────────────────────────────
+    local hit_highway = false
+    local hw_wx, hw_wy
+    if gx then
+        local IS = require("services.InfrastructureService")
+        hw_wx = math.ceil(gx / 3)
+        hw_wy = math.ceil(gy / 3)
+        hit_highway = IS.isHighwayCell(hw_wx, hw_wy, game)
+    end
 
     -- ── Hit-test: depot ──────────────────────────────────────────────────────
     local hit_depot = nil
@@ -524,6 +614,19 @@ function InputController:openContextMenu(sx, sy, game)
             action = function(g)
                 local States = require("models.vehicles.vehicle_states")
                 hit_vehicle:unassign(g)
+            end })
+
+    -- ── Context: highway tile ────────────────────────────────────────────────
+    elseif hit_highway then
+        table.insert(items, { label = "Highway", disabled = true })
+        table.insert(items, { separator = true })
+        table.insert(items, { icon = "🛣️", label = "Extend Highway from here",
+            action = function(g)
+                g.entities.build_highway_mode = true
+                g.entities.highway_build_nodes = {{ wx = hw_wx, wy = hw_wy }}
+                if g.ui_manager and g.ui_manager.panel then
+                    g.ui_manager.panel:setActiveTab("infrastructure")
+                end
             end })
 
     -- ── Context: empty world space ───────────────────────────────────────────

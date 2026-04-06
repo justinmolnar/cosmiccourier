@@ -1823,12 +1823,177 @@ function GameView:draw()
     else
         self:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
     end
+    self:_drawHighwayBuildGhost(sidebar_w, screen_w, screen_h)
     self:_drawLogisticsOverlay(active_map, sidebar_w, screen_w, screen_h)
     if not Game.debug_hide_vehicles then
         self:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
     end
     love.graphics.setScissor()
     if Game.debug_f3 then self:_drawF3Overlay() end
+end
+
+-- Highway build ghost: previews the player's in-progress highway segment.
+-- Uses A* paths (matching what will actually be built) drawn as Chaikin-smoothed
+-- lines, plus a colour-coded highlight on the hover world cell.
+function GameView:_drawHighwayBuildGhost(sidebar_w, screen_w, screen_h)
+    local Game = self.Game
+    if not (Game.entities and Game.entities.build_highway_mode) then return end
+
+    local IS        = require("services.InfrastructureService")
+    local PathUtils = require("lib.path_utils")
+    local nodes     = Game.entities.highway_build_nodes or {}
+    local ts        = Game.C.MAP.TILE_SIZE
+    local cs        = Game.camera.scale
+    local vw        = screen_w - sidebar_w
+    local umap      = Game.maps and Game.maps.unified
+    if not umap then return end
+
+    -- Helper: convert a list of {wx,wy} cells to a flat pixel array (cell centres).
+    local function cellsToPixels(cells)
+        local pts = {}
+        for _, c in ipairs(cells) do
+            pts[#pts + 1] = (c.wx - 0.5) * ts
+            pts[#pts + 1] = (c.wy - 0.5) * ts
+        end
+        return pts
+    end
+
+    -- ── Hover cell detection ─────────────────────────────────────────────────
+    local mx, my = love.mouse.getPosition()
+    local tps    = umap.tile_pixel_size or (ts / 3)
+    local wx_px  = (mx - (sidebar_w + vw / 2)) / cs + Game.camera.x
+    local wy_px  = (my - screen_h / 2)         / cs + Game.camera.y
+    local ugx    = math.floor(wx_px / tps) + 1
+    local ugy    = math.floor(wy_px / tps) + 1
+    local hwx, hwy  -- hover world cell (may be nil if out of bounds)
+    if ugx >= 1 and ugx <= umap._w and ugy >= 1 and ugy <= umap._h then
+        hwx = math.ceil(ugx / 3)
+        hwy = math.ceil(ugy / 3)
+    end
+
+    -- ── Path cache (avoid A* every frame; recompute only when cells change) ──
+    -- Cache key: serialise nodes + hover cell
+    local last_node = nodes[#nodes]
+    local nodes_key = #nodes > 0 and (last_node.wx .. "," .. last_node.wy) or ""
+    local hover_key = hwx and (hwx .. "," .. hwy) or ""
+    local cache_key = nodes_key .. "|" .. hover_key
+
+    local ghost_cache = Game._hw_ghost_cache
+    if not ghost_cache or ghost_cache.key ~= cache_key then
+        -- Rebuild confirmed path pixels
+        local confirmed_pts = {}
+        if #nodes >= 2 then
+            for i = 1, #nodes - 1 do
+                local cells = IS.findPath(nodes[i].wx, nodes[i].wy,
+                                          nodes[i+1].wx, nodes[i+1].wy, Game)
+                if cells then
+                    for _, c in ipairs(cells) do
+                        confirmed_pts[#confirmed_pts + 1] = (c.wx - 0.5) * ts
+                        confirmed_pts[#confirmed_pts + 1] = (c.wy - 0.5) * ts
+                    end
+                else
+                    -- No path found — draw straight line in red between the two nodes
+                    confirmed_pts[#confirmed_pts + 1] = (nodes[i].wx   - 0.5) * ts
+                    confirmed_pts[#confirmed_pts + 1] = (nodes[i].wy   - 0.5) * ts
+                    confirmed_pts[#confirmed_pts + 1] = (nodes[i+1].wx - 0.5) * ts
+                    confirmed_pts[#confirmed_pts + 1] = (nodes[i+1].wy - 0.5) * ts
+                end
+            end
+        end
+
+        -- Rebuild preview path pixels (last node → hover cell)
+        local preview_pts   = {}
+        local preview_no_path = false
+        if hwx and #nodes >= 1 then
+            local cells = IS.findPath(last_node.wx, last_node.wy, hwx, hwy, Game)
+            if cells then
+                preview_pts = cellsToPixels(cells)
+            else
+                -- No path — straight red line as fallback
+                preview_pts = {
+                    (last_node.wx - 0.5) * ts, (last_node.wy - 0.5) * ts,
+                    (hwx          - 0.5) * ts, (hwy          - 0.5) * ts,
+                }
+                preview_no_path = true
+            end
+        end
+
+        ghost_cache = {
+            key             = cache_key,
+            confirmed_pts   = confirmed_pts,
+            preview_pts     = preview_pts,
+            preview_no_path = preview_no_path,
+        }
+        Game._hw_ghost_cache = ghost_cache
+    end
+
+    -- ── Draw ─────────────────────────────────────────────────────────────────
+    love.graphics.push()
+    love.graphics.translate(sidebar_w + vw / 2, screen_h / 2)
+    love.graphics.scale(cs, cs)
+    love.graphics.translate(-Game.camera.x, -Game.camera.y)
+
+    local lw = math.max(ts * 0.6, 2 / cs)
+    love.graphics.setLineJoin("bevel")
+    love.graphics.setLineStyle("smooth")
+
+    -- Confirmed path legs — solid orange
+    if #ghost_cache.confirmed_pts >= 4 then
+        local smooth = PathUtils.chaikin(ghost_cache.confirmed_pts, 3)
+        love.graphics.setColor(1.0, 0.55, 0.1, 0.85)
+        love.graphics.setLineWidth(lw)
+        love.graphics.line(smooth)
+    end
+
+    -- Preview leg — semi-transparent orange (or red dashes if no path found)
+    if #ghost_cache.preview_pts >= 4 then
+        if ghost_cache.preview_no_path then
+            love.graphics.setColor(1.0, 0.2, 0.2, 0.5)
+            love.graphics.setLineWidth(lw * 0.5)
+            love.graphics.setLineStyle("rough")
+            love.graphics.line(ghost_cache.preview_pts)
+            love.graphics.setLineStyle("smooth")
+        else
+            local smooth = PathUtils.chaikin(ghost_cache.preview_pts, 3)
+            love.graphics.setColor(1.0, 0.55, 0.1, 0.35)
+            love.graphics.setLineWidth(lw)
+            love.graphics.line(smooth)
+        end
+    end
+
+    love.graphics.setLineWidth(1)
+    love.graphics.setLineStyle("rough")
+    love.graphics.setLineJoin("miter")
+
+    -- Node markers — yellow circles
+    love.graphics.setColor(1, 1, 0, 0.9)
+    for _, n in ipairs(nodes) do
+        love.graphics.circle("fill", (n.wx - 0.5) * ts, (n.wy - 0.5) * ts, ts * 0.3)
+    end
+
+    -- Hover cell highlight — colour-coded by terrain cost
+    if hwx then
+        if IS.isHighwayCell(hwx, hwy, Game) then
+            love.graphics.setColor(0.2, 1.0, 0.2, 0.65)   -- green: valid endpoint
+        else
+            local cost = IS.getTerrainCost(hwx, hwy, Game)
+            if cost >= math.huge then
+                love.graphics.setColor(1.0, 0.15, 0.15, 0.55)  -- red: impassable
+            elseif cost >= 6 then
+                love.graphics.setColor(1.0, 0.40, 0.05, 0.60)  -- dark orange: very expensive
+            elseif cost >= 3 then
+                love.graphics.setColor(1.0, 0.65, 0.10, 0.60)  -- orange: expensive
+            elseif cost >= 1.5 then
+                love.graphics.setColor(1.0, 0.90, 0.20, 0.55)  -- yellow: moderate
+            else
+                love.graphics.setColor(0.55, 1.0, 0.30, 0.50)  -- light green: cheap
+            end
+        end
+        love.graphics.rectangle("fill", (hwx - 1) * ts, (hwy - 1) * ts, ts, ts)
+    end
+
+    love.graphics.pop()
+    love.graphics.setColor(1, 1, 1)
 end
 
 return GameView

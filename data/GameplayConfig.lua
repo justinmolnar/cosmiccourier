@@ -11,6 +11,9 @@ local GameplayConfig = {
     -- Road islands smaller than this are discarded. Lower = more fragmented plots accepted;
     -- much lower risks placing depots on disconnected 1-2 tile stubs.
     MIN_NETWORK_SIZE = 10,
+
+    -- InfrastructureService: cost per world cell when player builds a highway segment.
+    HIGHWAY_COST_PER_CELL = 200,
 }
 
 return GameplayConfig
