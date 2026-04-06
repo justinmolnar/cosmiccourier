@@ -75,6 +75,21 @@ function UIController:handleMouseDown(x, y, button)
         local v = data.vehicle
         if v then v:unassign(Game) end
 
+    elseif id == "toggle_pause_trip_gen" then
+        local e = Game.entities
+        e.pause_trip_generation = not (e.pause_trip_generation or false)
+
+    elseif id == "debug_spawn_trip" then
+        local DebugTripFactory = require("services.DebugTripFactory")
+        local depot = Game.entities.selected_depot
+        if depot then
+            local t = DebugTripFactory.create(data.scope, depot, Game)
+            if t then
+                table.insert(Game.entities.trips.pending, t)
+                Game.EventBus:publish("trip_created")
+            end
+        end
+
     elseif id == "open_upgrade" then
         local Modal    = require("views.components.Modal")
         local on_close = function() ui_manager.modal_manager:hide() end

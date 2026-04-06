@@ -483,9 +483,10 @@ function InputController:_tryPlaceDepot(wx, wy, sx, sy)
     local Depot = require("models.Depot")
     local candidate = Depot:new("_candidate", {x=gx, y=gy}, game)
     local new_district = candidate:getDistrict(game)
+    local new_city     = candidate:getCity(game)
     if new_district then
         for _, existing in ipairs(game.entities.depots) do
-            if existing:getDistrict(game) == new_district then
+            if existing:getCity(game) == new_city and existing:getDistrict(game) == new_district then
                 require("services.FloatingTextSystem").emit("District already has a depot!", wx, wy, game.C)
                 return
             end
@@ -640,9 +641,10 @@ function InputController:openContextMenu(sx, sy, game)
             local Depot_cls = require("models.Depot")
             local cand = Depot_cls:new("_cand", {x=gx, y=gy}, game)
             local cand_district = cand:getDistrict(game)
+            local cand_city     = cand:getCity(game)
             if cand_district then
                 for _, existing in ipairs(game.entities.depots) do
-                    if existing:getDistrict(game) == cand_district then
+                    if existing:getCity(game) == cand_city and existing:getDistrict(game) == cand_district then
                         district_taken = true
                         depot_district_label = "District already has a depot"
                         break

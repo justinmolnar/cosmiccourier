@@ -1744,6 +1744,42 @@ function WorldSandboxController:sendToGame()
         game._region_borders_n    = n
     end
 
+    -- Build world hierarchy: world → continent → region → city.
+    -- Each city gets its region_id and continent_id; the game gets a nested
+    -- lookup table so gameplay systems can find "all cities in this region" etc.
+    do
+        local ww2         = self.world_w
+        local rmap2       = self.region_map
+        local cmap2       = self.continent_map
+        -- continents[cid] = { id=cid, regions={ [rid]={ id=rid, continent_id=cid, cities={} } } }
+        local continents  = {}
+
+        for _, city in ipairs(game.maps.all_cities or {}) do
+            local half_w = math.floor((city.city_grid_width  or 30) / 6)
+            local half_h = math.floor((city.city_grid_height or 30) / 6)
+            local cwx    = (city.world_mn_x or 1) + half_w
+            local cwy    = (city.world_mn_y or 1) + half_h
+            local ci2    = (cwy - 1) * ww2 + cwx
+
+            local rid = rmap2  and rmap2[ci2]  or 0
+            local cid = cmap2  and cmap2[ci2]  or 0
+
+            city.region_id    = rid
+            city.continent_id = cid
+
+            if not continents[cid] then
+                continents[cid] = { id = cid, regions = {} }
+            end
+            local cont = continents[cid]
+            if not cont.regions[rid] then
+                cont.regions[rid] = { id = rid, continent_id = cid, cities = {} }
+            end
+            table.insert(cont.regions[rid].cities, city)
+        end
+
+        game.world_continents = continents
+    end
+
     -- Free all generation-time scratch data. These fields are no longer needed once
     -- the game world is built. Game and map objects hold the only live references.
     self.heightmap            = nil

@@ -20,6 +20,7 @@ function Client:new(plot, game, city_map)
 end
 
 function Client:update(dt, game)
+    if game.entities.pause_trip_generation then return end
     self.trip_timer = self.trip_timer - dt
     if self.trip_timer <= 0 then
         self.trip_timer = TripGenerator.calculateNextTripTime(game)
