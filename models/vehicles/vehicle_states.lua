@@ -332,6 +332,7 @@ function States.Stuck:enter(vehicle, game)
     -- Use the new constant for the timer
     vehicle.stuck_timer = game.C.GAMEPLAY.VEHICLE_STUCK_TIMER
     print(string.format("WARNING: %s %d is stuck, will retry pathfinding in %ds.", vehicle.type, vehicle.id, vehicle.stuck_timer))
+    game.EventBus:publish("vehicle_stuck", { vehicle = vehicle })
 end
 
 function States.Stuck:update(dt, vehicle, game)

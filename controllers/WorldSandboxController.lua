@@ -1698,6 +1698,34 @@ function WorldSandboxController:sendToGame()
     end)
     if not ok then print("WorldSandbox sendToGame: setScale failed: " .. tostring(err)) end
 
+    -- Pre-build region border segment cache before freeing region_map
+    if self.region_map then
+        local ww     = self.world_w
+        local wh     = self.world_h
+        local ts     = C.MAP.TILE_SIZE   -- 2 pixels per world tile
+        local rmap   = self.region_map
+        local segs   = {}
+        local n      = 0
+        for y = 1, wh do
+            local row_i = (y - 1) * ww
+            for x = 1, ww do
+                local rid = rmap[row_i + x] or 0
+                if x < ww and (rmap[row_i + x + 1] or 0) ~= rid then
+                    n = n + 1
+                    segs[n] = { x1 = x * ts,     y1 = (y-1) * ts,
+                                x2 = x * ts,     y2 = y     * ts }
+                end
+                if y < wh and (rmap[row_i + ww + x] or 0) ~= rid then
+                    n = n + 1
+                    segs[n] = { x1 = (x-1) * ts, y1 = y * ts,
+                                x2 = x     * ts, y2 = y * ts }
+                end
+            end
+        end
+        game._region_borders      = segs
+        game._region_borders_n    = n
+    end
+
     -- Free all generation-time scratch data. These fields are no longer needed once
     -- the game world is built. Game and map objects hold the only live references.
     self.heightmap            = nil

@@ -91,6 +91,34 @@ local function _initSystems(Game)
     Game.ui_manager    = UIManager:new(Game.C, Game)
     Game.zoom_controls = require("views.components.ZoomControls"):new(Game.C)
 
+    -- HUD strip (overlay toggles along right edge of world view)
+    local HUDStrip = require("views.HUDStrip")
+    Game.hud_strip = HUDStrip:new()
+    Game.hud_strip:registerOverlay({
+        id      = "districts",
+        icon    = "🗺️",
+        tooltip = "District overlay",
+        key     = "d",
+        field   = "debug_district_overlay",
+    })
+    Game.hud_strip:registerOverlay({
+        id      = "regions",
+        icon    = "🌍",
+        tooltip = "Region borders",
+        key     = "r",
+        field   = "debug_region_overlay",
+    })
+    Game.hud_strip:registerOverlay({
+        id      = "pickups",
+        icon    = "📍",
+        tooltip = "Client/pickup overlay",
+        key     = "p",
+        field   = "debug_pickup_locations",
+    })
+
+    -- Information feed (event log, bottom-left of world view)
+    Game.info_feed = require("views.InformationFeed"):new(Game)
+
     Game.entities.event_bus_listener_setup(Game)
 
     Game.game_controller = require("controllers.GameController"):new(Game)
@@ -196,6 +224,7 @@ end
 
 function love.update(dt)
     Game.game_controller:update(dt)
+    if Game.info_feed then Game.info_feed:update(dt) end
 
     if Game.auto_save_timer then
         Game.auto_save_timer = Game.auto_save_timer - dt
@@ -219,6 +248,9 @@ function love.draw()
 
     Game.ui_view:draw()
     Game.game_view:draw()
+
+    if Game.hud_strip then Game.hud_strip:draw(Game) end
+    if Game.info_feed then Game.info_feed:draw(Game) end
 
     Game.zoom_controls:draw(Game)
     Game.ui_manager.modal_manager:draw(Game)
