@@ -25,7 +25,7 @@ local SAVE_SCHEMA = {
     }
 }
 
-function SaveService.saveGame(game_state, filename)
+function SaveService.saveGame(game, filename)
     filename = filename or "savegame.json"
     
     local save_data = {
@@ -33,6 +33,8 @@ function SaveService.saveGame(game_state, filename)
         timestamp = os.time(),
         game_data = {}
     }
+    
+    local game_state = game.state
     
     -- Save persistent state data
     for _, key in ipairs(SAVE_SCHEMA.persistent_data) do
@@ -50,6 +52,19 @@ function SaveService.saveGame(game_state, filename)
     
     -- Save vehicle costs (these change as you buy more)
     save_data.game_data.costs = game_state.costs
+    
+    -- Save Depots
+    local saved_depots = {}
+    if game.entities and game.entities.depots then
+        for _, d in ipairs(game.entities.depots) do
+            table.insert(saved_depots, {
+                id = d.id,
+                plot = d.plot,
+                analytics = d.analytics
+            })
+        end
+    end
+    save_data.game_data.depots = saved_depots
     
     -- Convert to JSON
     local json = require("lib.json")
@@ -102,12 +117,13 @@ function SaveService.loadGame(filename)
     return save_data
 end
 
-function SaveService.applySaveData(game_state, save_data)
+function SaveService.applySaveData(game, save_data)
     if not save_data or not save_data.game_data then
         return false
     end
     
     local data = save_data.game_data
+    local game_state = game.state
     
     -- Restore persistent data
     for _, key in ipairs(SAVE_SCHEMA.persistent_data) do
@@ -136,6 +152,19 @@ function SaveService.applySaveData(game_state, save_data)
     if data.costs then
         for vehicle_type, cost in pairs(data.costs) do
             game_state.costs[vehicle_type] = cost
+        end
+    end
+    
+    -- Restore Depots
+    if data.depots and game.entities then
+        game.entities.depots = {}
+        local Depot = require("models.Depot")
+        for _, d_data in ipairs(data.depots) do
+            local new_depot = Depot:new(d_data.id, d_data.plot, game)
+            if d_data.analytics then
+                new_depot.analytics = d_data.analytics
+            end
+            table.insert(game.entities.depots, new_depot)
         end
     end
     

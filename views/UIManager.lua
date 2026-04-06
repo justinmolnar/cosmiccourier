@@ -8,6 +8,8 @@ local VehiclesTab  = require("views.tabs.VehiclesTab")
 local UpgradesTab  = require("views.tabs.UpgradesTab")
 local ClientsTab   = require("views.tabs.ClientsTab")
 
+local DepotTab     = require("views.tabs.DepotTab")
+
 local PANEL_Y = 120   -- pixels below top of sidebar where panel begins
 
 function UIManager:new(C, game)
@@ -32,8 +34,11 @@ function UIManager:new(C, game)
         build = function(g) return UpgradesTab.build(g, instance) end })
     instance.panel:registerTab({ id = "clients",  label = "Clients",  icon = "🏢", priority = 4,
         build = function(g) return ClientsTab.build(g, instance) end })
+    instance.panel:registerTab({ id = "depot",    label = "Depot",    icon = "🏗️", priority = 5,
+        build = function(g) return DepotTab.build(g, instance) end })
 
-    instance.modal_manager = ModalManager:new()
+    instance.modal_manager  = ModalManager:new()
+    instance.context_menu   = nil   -- active ContextMenu instance or nil
 
     return instance
 end
@@ -44,14 +49,39 @@ function UIManager:handle_scroll(dy)
     self.panel:handleScroll(dy)
 end
 
+function UIManager:showContextMenu(sx, sy, items)
+    local ContextMenu = require("views.ContextMenu")
+    self.context_menu = ContextMenu:new(sx, sy, items)
+end
+
+function UIManager:closeContextMenu()
+    self.context_menu = nil
+end
+
+-- Returns true if a context menu click was handled (caller should swallow the event).
+function UIManager:handleContextMenuMouseDown(sx, sy, button, game)
+    if not self.context_menu then return false end
+    local handled, action = self.context_menu:handle_mouse_down(sx, sy, button, game)
+    self.context_menu = nil
+    if action then action(game) end
+    return handled
+end
+
 function UIManager:handle_mouse_up(x, y, button)
     if self.modal_manager:handle_mouse_up(x, y) then return end
     self.panel:handleMouseUp()
 end
 
+function UIManager:drawContextMenu(game)
+    if self.context_menu then
+        self.context_menu:draw(game)
+    end
+end
+
 function UIManager:update(dt, game)
     self.modal_manager:update(dt, game)
     if self.modal_manager:isActive() then return end
+    if self.context_menu then return end  -- freeze hover etc. while menu is open
 
     local mx, my = love.mouse.getPosition()
 

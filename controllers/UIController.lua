@@ -15,7 +15,12 @@ function UIController:handleMouseDown(x, y, button)
     local ui_manager = Game.ui_manager
     local panel      = ui_manager.panel
 
-    -- 1. Modals are always on top.
+    -- 1. Context menu sits above everything else.
+    if ui_manager.context_menu then
+        return ui_manager:handleContextMenuMouseDown(x, y, button, Game)
+    end
+
+    -- 2. Modals are next.
     if ui_manager.modal_manager:handle_mouse_down(x, y, Game) then return true end
 
     -- 2. Panel tab bar and scrollbar.
@@ -39,6 +44,15 @@ function UIController:handleMouseDown(x, y, button)
 
     elseif id == "hire_vehicle" then
         Game.EventBus:publish("ui_buy_vehicle_clicked", data.vehicle_id)
+
+    elseif id == "hire_vehicle_at_depot" then
+        Game.EventBus:publish("ui_buy_vehicle_at_depot_clicked", { vehicle_id = data.vehicle_id, depot = data.depot })
+
+    elseif id == "toggle_build_depot_mode" then
+        Game.entities.build_depot_mode = not Game.entities.build_depot_mode
+
+    elseif id == "market_for_clients" then
+        Game.EventBus:publish("ui_market_for_clients_clicked", { depot = data.depot })
 
     elseif id == "buy_client" then
         Game.EventBus:publish("ui_buy_client_clicked")

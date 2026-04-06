@@ -1655,14 +1655,22 @@ function WorldSandboxController:sendToGame()
         end
         if _snapped then new_depot = _snapped end
     end
-    game.entities.depot_plot = new_depot
+    
+    if new_depot then
+        local Depot = require("models.Depot")
+        game.entities.depots = {}
+        local depot_obj = Depot:new("sandbox_1", new_depot, game)
+        table.insert(game.entities.depots, depot_obj)
+    end
+    
     local uts = game.maps.unified.tile_pixel_size
     require("services.PathScheduler").clear()
     for _, v in ipairs(game.entities.vehicles) do
         v.cargo = {}; v.trip_queue = {}; v.path = {}; v.path_i = 1; v.smooth_path = nil; v.smooth_path_i = nil
         v._path_pending = false
         v.operational_map_key = "unified"
-        if new_depot then
+        if new_depot and game.entities.depots[1] then
+            v.depot       = game.entities.depots[1]
             v.depot_plot  = new_depot
             v.grid_anchor = {x = new_depot.x, y = new_depot.y}
             v.px = (new_depot.x - 0.5) * uts
@@ -1675,8 +1683,10 @@ function WorldSandboxController:sendToGame()
     game.entities.trips.pending = {}
     local num_clients = math.max(1, #game.entities.clients)
     game.entities.clients = {}
-    for _ = 1, num_clients do
-        game.entities:addClient(game)
+    local depots = game.entities.depots
+    for i = 1, num_clients do
+        local depot = depots[((i - 1) % math.max(1, #depots)) + 1]
+        game.entities:addClient(game, depot)
     end
 
     -- Persist city markers and highway network for game-view world map rendering
@@ -1687,9 +1697,17 @@ function WorldSandboxController:sendToGame()
     game.world_highway_map     = self.highway_map  or {}
     game._world_highway_smooth = nil   -- reset cached smooth paths on new world
     -- Reset per-city canvas caches (new map objects have nil canvas already, but be explicit)
+    -- Also pre-build street smooth paths so the snap lookup is ready before the first update tick.
+    local RS = require("utils.RoadSmoother")
     for _, m in ipairs(game.maps and game.maps.all_cities or {}) do
         m._overlay_canvas = nil
         m._tile_canvas    = nil
+        local m_tps = m.tile_pixel_size or C.MAP.TILE_SIZE
+        m._street_smooth_paths_like_v5 = RS.buildStreetPathsLike(
+            m.zone_seg_v, m.zone_seg_h, m.zone_grid, m_tps, m.grid)
+    end
+    if game.maps and game.maps.unified then
+        game.maps.unified._snap_lookup = nil  -- force rebuild now that streets are ready
     end
 
     -- Zoom to downtown and close sandbox

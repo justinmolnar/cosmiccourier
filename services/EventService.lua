@@ -61,8 +61,16 @@ function EventService.setupUIEvents(state, game)
         if state.money >= cost then
             state.money = state.money - cost
             state.costs.client = math.floor(state.costs.client * game.C.COSTS.CLIENT_MULT)
-            game.entities:addClient(game)
+            game.entities:addClient(game, game.entities.depots[1])
         end
+    end)
+
+    game.EventBus:subscribe("ui_market_for_clients_clicked", function(data)
+        if not data or not data.depot then return end
+        local cost = 100
+        if state.money < cost then return end
+        state.money = state.money - cost
+        game.entities:addClient(game, data.depot)
     end)
 end
 
@@ -85,6 +93,27 @@ function EventService.setupVehicleEvents(state, game)
         state.money = state.money - cost
         state.costs[vehicleType] = math.floor(cost * vcfg.cost_multiplier)
         game.entities:addVehicle(game, vehicleType)
+    end)
+
+    game.EventBus:subscribe("ui_buy_vehicle_at_depot_clicked", function(data)
+        if not data or not data.vehicle_id or not data.depot then return end
+        local vehicleType = data.vehicle_id
+
+        local vcfg = game.C.VEHICLES[vehicleType:upper()]
+        if not vcfg then return end
+
+        -- District requirement check (e.g. bikes require a downtown depot)
+        if vcfg.required_depot_district then
+            local depot_district = data.depot:getDistrict(game)
+            if depot_district ~= vcfg.required_depot_district then return end
+        end
+
+        local cost = state.costs[vehicleType]
+        if not cost or state.money < cost then return end
+
+        state.money = state.money - cost
+        state.costs[vehicleType] = math.floor(cost * vcfg.cost_multiplier)
+        game.entities:addVehicle(game, vehicleType, data.depot)
     end)
 end
 

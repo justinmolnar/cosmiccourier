@@ -79,7 +79,7 @@ local function _loadSave(Game)
 
     if save_data then
         Game.error_service.withErrorHandling(function()
-            SaveService.applySaveData(Game.state, save_data)
+            SaveService.applySaveData(Game, save_data)
             Game.error_service.logInfo("Main", "Save game loaded successfully")
         end, "Save Game Loading")
     end
@@ -231,7 +231,7 @@ function love.update(dt)
         if Game.auto_save_timer <= 0 then
             local SaveService = require("services.SaveService")
             Game.error_service.withErrorHandling(function()
-                SaveService.saveGame(Game.state, "autosave.json")
+                SaveService.saveGame(Game, "autosave.json")
             end, "Auto Save")
 
             Game.auto_save_timer = Game.config.get("ui", "auto_save_interval")
@@ -254,6 +254,7 @@ function love.draw()
 
     Game.zoom_controls:draw(Game)
     Game.ui_manager.modal_manager:draw(Game)
+    Game.ui_manager:drawContextMenu(Game)
 end
 
 function love.keypressed(key)          Game.input_dispatcher:dispatch("keypressed", key) end
@@ -268,7 +269,7 @@ function love.quit()
 
     local SaveService = require("services.SaveService")
     Game.error_service.withErrorHandling(function()
-        SaveService.saveGame(Game.state, "lastsave.json")
+        SaveService.saveGame(Game, "lastsave.json")
         Game.error_service.logInfo("Main", "Game state saved on exit")
     end, "Exit Save")
 

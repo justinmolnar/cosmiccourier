@@ -7,11 +7,12 @@ Entities.__index = Entities
 
 function Entities:new()
     local instance = setmetatable({}, Entities)
-    instance.depot_plot     = nil
+    instance.depots         = {}
     instance.vehicles       = {}
     instance.clients        = {}
     instance.trips          = { pending = {} }
     instance.selected_vehicle = nil
+    instance.selected_depot = nil
 
     instance.event_bus_listener_setup = function(game)
         game.EventBus:subscribe("map_scale_changed", function()
@@ -32,8 +33,13 @@ function Entities:new()
 end
 
 function Entities:init(game)
-    self.depot_plot = game.maps.city:getRandomDowntownBuildingPlot()
-    self:addClient(game)
+    local Depot = require("models.Depot")
+    local start_plot = game.maps.city:getRandomDowntownBuildingPlot()
+    if start_plot then
+        local first_depot = Depot:new("downtown_1", start_plot, game)
+        table.insert(self.depots, first_depot)
+    end
+    self:addClient(game, self.depots[1])
     -- Start with the cheapest available vehicle type.
     local starter_id, starter_cost = nil, math.huge
     for id, vcfg in pairs(game.C.VEHICLES) do
@@ -45,26 +51,33 @@ function Entities:init(game)
     if starter_id then self:addVehicle(game, starter_id) end
 end
 
-function Entities:addClient(game)
-    local cmap = game.maps.city
-    local plot_local = cmap:getRandomDowntownBuildingPlot()
+function Entities:addClient(game, depot)
+    local cmap = (depot and depot.getCity) and depot:getCity(game) or game.maps.city
+    if not cmap then return end
+    local depot_district = depot and depot:getDistrict(game)
+    local plot_local = depot_district and cmap:getRandomBuildingPlotForDistrict(depot_district, "can_send")
+                       or cmap:getRandomSendingPlot()
     if plot_local then
         local plot = (cmap.world_mn_x and game.maps.unified) and {
             x = (cmap.world_mn_x - 1) * 3 + plot_local.x,
             y = (cmap.world_mn_y - 1) * 3 + plot_local.y,
         } or plot_local
-        local new_client = Client:new(plot, game)
+        local new_client = Client:new(plot, game, cmap)
         table.insert(self.clients, new_client)
     end
 end
 
-function Entities:addVehicle(game, vehicleType)
+function Entities:addVehicle(game, vehicleType, target_depot)
     local VehicleFactory = require("models.VehicleFactory")
     if not VehicleFactory.isValidVehicleType(vehicleType, game) then return end
-    if not self.depot_plot then return end
+    
+    local depot = target_depot or self.depots[1]
+    if not depot then return end
+    
     local new_id = #self.vehicles + 1
-    local new_vehicle = VehicleFactory.createVehicle(vehicleType, new_id, self.depot_plot, game)
+    local new_vehicle = VehicleFactory.createVehicle(vehicleType, new_id, depot, game)
     table.insert(self.vehicles, new_vehicle)
+    table.insert(depot.assigned_vehicles, new_vehicle)
 end
 
 function Entities:update(dt, game)
@@ -105,6 +118,29 @@ function Entities:update(dt, game)
 end
 
 function Entities:handle_click(x, y, game)
+    local active_map = game.maps[game.active_map_key]
+    local uts = active_map.tile_pixel_size or game.C.MAP.TILE_SIZE
+    
+    -- Check depots first — depot.plot is always in unified sub-cell coords
+    local umap = game.maps.unified
+    local u_uts = umap and umap.tile_pixel_size or game.C.MAP.TILE_SIZE
+    local depot_click_r = 20 / game.camera.scale  -- 20 screen-px hit area
+    for _, depot in ipairs(self.depots) do
+        if depot.plot then
+            local dpx = (depot.plot.x - 0.5) * u_uts
+            local dpy = (depot.plot.y - 0.5) * u_uts
+            if (x - dpx)^2 + (y - dpy)^2 < depot_click_r^2 then
+                self.selected_depot = depot
+                self.selected_vehicle = nil
+                if game.ui_manager and game.ui_manager.panel then
+                    game.ui_manager.panel.depot_view = depot
+                    game.ui_manager.panel:setActiveTab("depot")
+                end
+                return true
+            end
+        end
+    end
+
     local click_r    = game.C.UI.VEHICLE_CLICK_RADIUS / game.camera.scale
     local radius_sq  = click_r * click_r
     local candidates = {}
@@ -117,6 +153,12 @@ function Entities:handle_click(x, y, game)
 
     if #candidates == 0 then
         self.selected_vehicle = nil
+        self.selected_depot = nil
+        if game.ui_manager and game.ui_manager.panel
+        and game.ui_manager.panel.active_tab_id == "depot" then
+            game.ui_manager.panel:setActiveTab("vehicles")
+            game.ui_manager.panel.depot_view = nil
+        end
         return false
     end
 

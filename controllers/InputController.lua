@@ -18,6 +18,16 @@ end
 
 function InputController:keypressed(key)
     if key == "escape" then
+        -- Close context menu first; only quit if nothing to close
+        if self.game.ui_manager and self.game.ui_manager.context_menu then
+            self.game.ui_manager:closeContextMenu()
+            return
+        end
+        -- Cancel depot build mode
+        if self.game.entities.build_depot_mode then
+            self.game.entities.build_depot_mode = false
+            return
+        end
         love.event.quit()
         return
     end
@@ -57,6 +67,7 @@ function InputController:keypressed(key)
         u = { field = "debug_unified_grid",        label = "unified pathfinding grid" },
         t = { field = "debug_trip_hover",          label = "trip hover delivery debug (hover trip in sidebar)" },
         k = { field = "debug_stuck_vehicles",      label = "stuck vehicle delivery debug" },
+        z = { field = "debug_logistics_overlay",   label = "logistics zone overlay (0=dead 1=receive 2=send+receive)" },
     }
     local toggle = DEBUG_TOGGLES[key]
     if toggle then
@@ -113,7 +124,7 @@ function InputController:keypressed(key)
             y = (city2.world_mn_y - 1) * 3 + dest_plot_local.y,
         }
         -- find a client plot in city1 (use depot if no clients)
-        local src_plot = game.entities.depot_plot
+        local src_plot = game.entities.depots[1] and game.entities.depots[1].plot
         if #game.entities.clients > 0 then
             src_plot = game.entities.clients[1].plot
         end
@@ -155,43 +166,28 @@ function InputController:keypressed(key)
                      y = (cmap.world_mn_y - 1) * 3 + plot_local.y }
         end
 
-        -- 50 downtown bike trips
-        for _ = 1, 50 do
-            local pl = cmap:getRandomDowntownBuildingPlot()
+        -- 100 trips from random building plots across the city
+        for _ = 1, 100 do
+            local pl = cmap:getRandomBuildingPlot()
             if pl then
-                local t = TripGenerator._createDowntownTrip(toUnified(pl), payout, bonus, game)
+                local t = TripGenerator.generateTrip(toUnified(pl), game, cmap)
                 if t then table.insert(game.entities.trips.pending, t) end
             end
         end
 
-        -- 25 intra-city truck trips
-        for _ = 1, 25 do
-            local pl = cmap:getRandomDowntownBuildingPlot()
-            if pl then
-                local t = TripGenerator._createCityTrip(toUnified(pl), payout, bonus, game)
-                if t then table.insert(game.entities.trips.pending, t) end
-            end
-        end
-
-        -- 25 inter-city truck trips (city_2 if available, else more intra-city)
+        -- 25 inter-city trips (city_2 if available)
         local city2 = game.maps["city_2"]
         local bp2   = city2 and city2.building_plots
-        for _ = 1, 25 do
-            if bp2 and #bp2 > 0 then
-                local dpl = bp2[love.math.random(#bp2)]
+        if bp2 and #bp2 > 0 then
+            for _ = 1, 25 do
+                local dpl  = bp2[love.math.random(#bp2)]
                 local dest = { x = (city2.world_mn_x - 1) * 3 + dpl.x,
                                y = (city2.world_mn_y - 1) * 3 + dpl.y }
-                local spl  = cmap:getRandomDowntownBuildingPlot()
-                local src  = spl and toUnified(spl) or game.entities.depot_plot
-                local t = Trip:new(payout * 3, bonus * 2)
+                local spl  = cmap:getRandomBuildingPlot()
+                local src  = spl and toUnified(spl) or (game.entities.depots[1] and game.entities.depots[1].plot)
+                local t    = Trip:new(payout * 3, bonus * 2)
                 t:addLeg(src, dest, 1, "road")
                 table.insert(game.entities.trips.pending, t)
-            else
-                local pl = cmap:getRandomDowntownBuildingPlot()
-                if pl then
-                    local t = TripGenerator._createCityTrip(toUnified(pl), payout, bonus, game)
-                    if t then table.insert(game.entities.trips.pending, t) end
-                end
             end
         end
 
@@ -267,6 +263,23 @@ function InputController:mousepressed(x, y, button)
         return
     end
 
+    if button == 2 then
+        -- Close any existing context menu first
+        if Game.ui_manager then Game.ui_manager:closeContextMenu() end
+        local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
+        if x >= sidebar_w then
+            self:openContextMenu(x, y, Game)
+        end
+        return
+    end
+
+    -- Any left-click closes an open context menu (handled before the drag logic)
+    if button == 1 and Game.ui_manager and Game.ui_manager.context_menu then
+        if Game.ui_manager:handleContextMenuMouseDown(x, y, button, Game) then
+            return
+        end
+    end
+
     if button == 1 then
         local sidebar_w = Game.C.UI.SIDEBAR_WIDTH
         if x >= sidebar_w then
@@ -316,12 +329,18 @@ function InputController:mousemoved(x, y, dx, dy)
     end
 end
 
-function InputController:handleGameWorldClick(x, y)
+function InputController:handleGameWorldClick(x, y, button)
     local world_x, world_y = self.game.camera:screenToWorld(x, y, self.game)
     -- Wrap world_x into canonical [0, mpw) range for looping world
     local mpw = (self.game.world_w or 0) * self.game.C.MAP.TILE_SIZE
     if mpw > 0 then
         world_x = ((world_x % mpw) + mpw) % mpw
+    end
+
+    -- build_depot_mode: left-click now places depot directly
+    if self.game.entities.build_depot_mode then
+        self:_tryPlaceDepot(world_x, world_y, x, y)
+        return
     end
 
     if self.game.event_spawner and self.game.event_spawner.handle_click then
@@ -332,13 +351,223 @@ function InputController:handleGameWorldClick(x, y)
 
     if self.game.entities and self.game.entities.handle_click then
         local hit = self.game.entities:handle_click(world_x, world_y, self.game)
-        if hit and self.game.ui_manager then
+        if hit and self.game.ui_manager and self.game.entities.selected_vehicle then
             self.game.ui_manager.panel:setActiveTab("vehicles")
         end
     end
 end
 
 function InputController:update(dt)
+end
+
+-- ─── Context menu ────────────────────────────────────────────────────────────
+
+-- Returns the unified sub-cell (gx, gy) under world pixel (wx, wy), or nil.
+local function _worldToSubcell(wx, wy, game)
+    local umap = game.maps.unified
+    if not umap then return nil end
+    local gx = math.floor(wx / umap.tile_pixel_size) + 1
+    local gy = math.floor(wy / umap.tile_pixel_size) + 1
+    if gx < 1 or gy < 1 or gx > umap._w or gy > umap._h then return nil end
+    return gx, gy, umap
+end
+
+-- Returns true if unified sub-cell (gx, gy) is a valid depot build site.
+local function _isValidDepotSite(gx, gy, umap)
+    if umap.ffi_grid then
+        local ti = umap.ffi_grid[(gy - 1) * umap._w + (gx - 1)].type
+        if ti == 8 or ti == 9 then return true end  -- plot / downtown_plot
+    end
+    local zsv, zsh = umap.zone_seg_v, umap.zone_seg_h
+    if (zsv and zsv[gy] and (zsv[gy][gx] or zsv[gy][gx - 1]))
+    or (zsh and zsh[gy]     and zsh[gy][gx])
+    or (zsh and zsh[gy - 1] and zsh[gy - 1][gx]) then
+        return true
+    end
+    return false
+end
+
+-- Immediately place a depot at (wx, wy) — used when build_depot_mode is active.
+function InputController:_tryPlaceDepot(wx, wy, sx, sy)
+    local game = self.game
+    local gx, gy, umap = _worldToSubcell(wx, wy, game)
+    if not gx then
+        require("services.FloatingTextSystem").emit("Invalid location!", wx, wy, game.C)
+        return
+    end
+    if not _isValidDepotSite(gx, gy, umap) then
+        require("services.FloatingTextSystem").emit("Invalid location!", wx, wy, game.C)
+        return
+    end
+    -- 1-depot-per-district check: compute new depot's district and compare
+    local Depot = require("models.Depot")
+    local candidate = Depot:new("_candidate", {x=gx, y=gy}, game)
+    local new_district = candidate:getDistrict(game)
+    if new_district then
+        for _, existing in ipairs(game.entities.depots) do
+            if existing:getDistrict(game) == new_district then
+                require("services.FloatingTextSystem").emit("District already has a depot!", wx, wy, game.C)
+                return
+            end
+        end
+    end
+
+    local cost = 500
+    if game.state.money < cost then
+        require("services.FloatingTextSystem").emit("Not enough money!", wx, wy, game.C)
+        return
+    end
+    game.state.money = game.state.money - cost
+    local depot    = Depot:new("depot_" .. love.math.random(1000, 9999), {x=gx, y=gy}, game)
+    table.insert(game.entities.depots, depot)
+    game.entities.build_depot_mode = false
+    if game.ui_manager and game.ui_manager.panel then
+        game.ui_manager.panel.depot_view = depot
+        game.ui_manager.panel:setActiveTab("depot")
+    end
+    require("services.FloatingTextSystem").emit("Depot Built! -$" .. cost, wx, wy, game.C)
+end
+
+-- Build and show a context-sensitive right-click menu at screen position (sx, sy).
+function InputController:openContextMenu(sx, sy, game)
+    local world_x, world_y = game.camera:screenToWorld(sx, sy, game)
+    local mpw = (game.world_w or 0) * game.C.MAP.TILE_SIZE
+    if mpw > 0 then world_x = ((world_x % mpw) + mpw) % mpw end
+
+    local items = {}
+    local gx, gy, umap = _worldToSubcell(world_x, world_y, game)
+
+    -- ── Hit-test: depot ──────────────────────────────────────────────────────
+    local hit_depot = nil
+    if umap then
+        local u_uts = umap.tile_pixel_size
+        local hit_r = 20 / game.camera.scale
+        for _, depot in ipairs(game.entities.depots) do
+            if depot.plot then
+                local dpx = (depot.plot.x - 0.5) * u_uts
+                local dpy = (depot.plot.y - 0.5) * u_uts
+                if (world_x - dpx)^2 + (world_y - dpy)^2 < hit_r * hit_r then
+                    hit_depot = depot
+                    break
+                end
+            end
+        end
+    end
+
+    -- ── Hit-test: vehicle ────────────────────────────────────────────────────
+    local hit_vehicle = nil
+    do
+        local click_r = game.C.UI.VEHICLE_CLICK_RADIUS / game.camera.scale
+        local r2 = click_r * click_r
+        for _, v in ipairs(game.entities.vehicles) do
+            if (world_x - v.px)^2 + (world_y - v.py)^2 < r2 then
+                hit_vehicle = v
+                break
+            end
+        end
+    end
+
+    -- ── Context: on a depot ──────────────────────────────────────────────────
+    if hit_depot then
+        table.insert(items, { label = hit_depot.id or "Depot", disabled = true })
+        table.insert(items, { separator = true })
+        table.insert(items, { icon = "📊", label = "View Depot Info",
+            action = function(g)
+                g.ui_manager.panel.depot_view = hit_depot
+                g.ui_manager.panel:setActiveTab("depot")
+            end })
+        -- Hire menu per vehicle type
+        local sorted = {}
+        for id, vcfg in pairs(game.C.VEHICLES) do
+            sorted[#sorted+1] = { id = id, vcfg = vcfg }
+        end
+        table.sort(sorted, function(a, b) return a.vcfg.base_cost < b.vcfg.base_cost end)
+        for _, entry in ipairs(sorted) do
+            local vid  = entry.id:lower()
+            local vcfg = entry.vcfg
+            local cost = game.state.costs[vid] or vcfg.base_cost
+            local can_afford = game.state.money >= cost
+            local district_ok = true
+            if vcfg.required_depot_district then
+                district_ok = (hit_depot:getDistrict(game) == vcfg.required_depot_district)
+            end
+            local suffix = (not district_ok)
+                and (" [needs " .. vcfg.required_depot_district .. "]") or ""
+            table.insert(items, {
+                icon     = vcfg.icon,
+                label    = string.format("Hire %s ($%d)%s", vcfg.display_name, cost, suffix),
+                disabled = not can_afford or not district_ok,
+                action   = function(g)
+                    g.EventBus:publish("ui_buy_vehicle_at_depot_clicked",
+                        { vehicle_id = vid, depot = hit_depot })
+                end,
+            })
+        end
+        table.insert(items, { separator = true })
+        table.insert(items, { icon = "📢", label = "Market for Clients ($100)",
+            disabled = true })  -- placeholder
+
+    -- ── Context: on a vehicle ────────────────────────────────────────────────
+    elseif hit_vehicle then
+        local vcfg = game.C.VEHICLES[hit_vehicle.type_upper]
+        local name = (vcfg and vcfg.display_name or hit_vehicle.type)
+                  .. " #" .. hit_vehicle.id
+        table.insert(items, { label = name, disabled = true })
+        table.insert(items, { separator = true })
+        table.insert(items, { icon = "🚗", label = "Select Vehicle",
+            action = function(g)
+                g.entities.selected_vehicle = hit_vehicle
+                g.entities.selected_depot   = nil
+                g.ui_manager.panel:setActiveTab("vehicles")
+            end })
+        table.insert(items, { icon = "🏠", label = "Recall to Depot",
+            action = function(g)
+                local States = require("models.vehicles.vehicle_states")
+                hit_vehicle:unassign(g)
+            end })
+
+    -- ── Context: empty world space ───────────────────────────────────────────
+    else
+        local valid_site = gx and _isValidDepotSite(gx, gy, umap)
+        local depot_cost = 500
+        -- Check district uniqueness for the context menu disabled state
+        local district_taken = false
+        local depot_district_label = nil
+        if valid_site then
+            local Depot_cls = require("models.Depot")
+            local cand = Depot_cls:new("_cand", {x=gx, y=gy}, game)
+            local cand_district = cand:getDistrict(game)
+            if cand_district then
+                for _, existing in ipairs(game.entities.depots) do
+                    if existing:getDistrict(game) == cand_district then
+                        district_taken = true
+                        depot_district_label = "District already has a depot"
+                        break
+                    end
+                end
+            end
+        end
+        local depot_disabled = not valid_site or game.state.money < depot_cost or district_taken
+        local depot_label = "Build Depot ($" .. depot_cost .. ")"
+        if district_taken then depot_label = "Build Depot — " .. (depot_district_label or "unavailable") end
+        table.insert(items, { icon = "🏢", label = depot_label,
+            disabled = depot_disabled,
+            action   = function(g)
+                g.entities.build_depot_mode = true
+                local ic = g.input_controller
+                if ic then ic:_tryPlaceDepot(world_x, world_y, sx, sy) end
+            end })
+        table.insert(items, { separator = true })
+        table.insert(items, { icon = "📍", label = "Set Camera Here",
+            action = function(g)
+                g.camera.x = world_x
+                g.camera.y = world_y
+            end })
+    end
+
+    if #items > 0 then
+        game.ui_manager:showContextMenu(sx, sy, items)
+    end
 end
 
 return InputController

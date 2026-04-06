@@ -436,9 +436,14 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
         end
     end
     if Game.active_map_key == "city" then
-        if Game.entities.depot_plot then
-            local dpx, dpy = active_map:getPixelCoords(Game.entities.depot_plot.x, Game.entities.depot_plot.y)
-            DrawingUtils.drawWorldIcon(Game, "🏢", dpx, dpy)
+        local umap = Game.maps.unified
+        local uts = umap and umap.tile_pixel_size or Game.C.MAP.TILE_SIZE
+        for _, depot in ipairs(Game.entities.depots) do
+            if depot.plot then
+                DrawingUtils.drawWorldIcon(Game, "🏢",
+                    (depot.plot.x - 0.5) * uts,
+                    (depot.plot.y - 0.5) * uts)
+            end
         end
         for _, client in ipairs(Game.entities.clients) do
             DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
@@ -786,10 +791,12 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         love.graphics.push()
         love.graphics.translate(i * mpw, 0)
 
-        -- Depot
-        if cs >= Z.ZONE_THRESHOLD and Game.entities.depot_plot then
-            local dp = Game.entities.depot_plot
-            DrawingUtils.drawWorldIcon(Game, "🏢", (dp.x - 0.5) * uts, (dp.y - 0.5) * uts)
+        -- Depots
+        if cs >= Z.ZONE_THRESHOLD then
+            for _, depot in ipairs(Game.entities.depots or {}) do
+                local dp = depot.plot
+                DrawingUtils.drawWorldIcon(Game, "🏢", (dp.x - 0.5) * uts, (dp.y - 0.5) * uts)
+            end
         end
 
         -- Clients
@@ -1091,7 +1098,7 @@ function GameView:_drawDeliveryDebug(umap, uts, tile_i0, tile_i1, mpw, cs)
                     origin = leg and leg.start_plot
                     dest   = leg and leg.end_plot
                 elseif sname == "Returning" then
-                    dest = Game.entities.depot_plot
+                    dest = v.depot and v.depot.plot or v.depot_plot
                 end
                 pairs_to_draw[#pairs_to_draw+1] = {origin, dest}
                 -- Red dot on vehicle position
@@ -1291,6 +1298,73 @@ function GameView:_drawDistrictOverlay(active_map, sidebar_w, screen_w, screen_h
         end
     end
 
+    love.graphics.setColor(1, 1, 1)
+end
+
+-- Logistics overlay: 0=no activity (dark), 1=receive-only (amber), 2=send+receive (green)
+function GameView:_drawLogisticsOverlay(active_map, sidebar_w, screen_w, screen_h)
+    local Game = self.Game
+    if not Game.debug_logistics_overlay then return end
+    if Game.camera.scale < Game.C.ZOOM.ZONE_THRESHOLD then return end
+
+    local ZT  = require("data.zones")
+    local ts  = Game.C.MAP.TILE_SIZE
+    local vw  = screen_w - sidebar_w
+
+    -- Colours for each tier
+    local COL = {
+        [0] = {0.15, 0.05, 0.05, 0.55},  -- dead  — dark red
+        [1] = {0.90, 0.65, 0.10, 0.45},  -- receive-only — amber
+        [2] = {0.20, 0.80, 0.30, 0.45},  -- send+receive — green
+    }
+
+    -- Collect maps with a grid
+    local city_maps = {}
+    for _, m in pairs(Game.maps) do
+        if m.grid and m.world_mn_x then city_maps[#city_maps+1] = m end
+    end
+    if #city_maps == 0 and active_map and active_map.grid then
+        city_maps[1] = active_map
+    end
+
+    love.graphics.push()
+    love.graphics.translate(sidebar_w + vw / 2, screen_h / 2)
+    love.graphics.scale(Game.camera.scale, Game.camera.scale)
+    love.graphics.translate(-Game.camera.x, -Game.camera.y)
+
+    for _, m in ipairs(city_maps) do
+        local tps = m.tile_pixel_size or ts
+        local ox  = ((m.world_mn_x or 1) - 1) * ts
+        local oy  = ((m.world_mn_y or 1) - 1) * ts
+
+        local zg = m.zone_grid
+        if not zg then goto next_logistics_map end
+        for gy_i = 1, #zg do
+            local row = zg[gy_i]
+            if row then
+                for gx_i = 1, #row do
+                    local zone = row[gx_i]
+                    if zone and zone ~= "none" then
+                        local tier
+                        if ZT.CAN_SEND[zone] then
+                            tier = 2
+                        elseif ZT.CAN_RECEIVE[zone] then
+                            tier = 1
+                        else
+                            tier = 0
+                        end
+                        local c = COL[tier]
+                        love.graphics.setColor(c[1], c[2], c[3], c[4])
+                        love.graphics.rectangle("fill",
+                            ox + (gx_i-1) * tps, oy + (gy_i-1) * tps, tps, tps)
+                    end
+                end
+            end
+        end
+        ::next_logistics_map::
+    end
+
+    love.graphics.pop()
     love.graphics.setColor(1, 1, 1)
 end
 
@@ -1749,6 +1823,7 @@ function GameView:draw()
     else
         self:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
     end
+    self:_drawLogisticsOverlay(active_map, sidebar_w, screen_w, screen_h)
     if not Game.debug_hide_vehicles then
         self:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
     end

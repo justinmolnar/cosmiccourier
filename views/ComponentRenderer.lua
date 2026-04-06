@@ -82,15 +82,20 @@ function CR._label(comp, px, pw, p, y, game)
 end
 
 function CR._button(comp, px, pw, p, y, game)
-    local h = buttonH(comp)
+    local h        = buttonH(comp)
+    local disabled = comp.disabled
 
-    -- Hover highlight
-    if comp.hovered then
+    -- Disabled overlay
+    if disabled then
+        love.graphics.setColor(0.15, 0.15, 0.15, 0.6)
+        love.graphics.rectangle("fill", px + p, y, pw - p * 2, h)
+    -- Hover highlight (only when not disabled)
+    elseif comp.hovered then
         love.graphics.setColor(1, 1, 0, 0.15)
         love.graphics.rectangle("fill", px + p, y, pw - p * 2, h)
     end
 
-    love.graphics.setColor(0.8, 0.8, 0.8, 0.4)
+    love.graphics.setColor(disabled and 0.35 or 0.8, disabled and 0.35 or 0.8, disabled and 0.35 or 0.8, 0.4)
     love.graphics.rectangle("line", px + p, y + 1, pw - p * 2, h - 2)
 
     -- Draw each line
@@ -99,7 +104,10 @@ function CR._button(comp, px, pw, p, y, game)
         local style = line.style or "body"
         local lh    = LINE_H[style] or 20
 
-        if style == "small" then
+        if disabled then
+            love.graphics.setFont(style == "small" and game.fonts.ui_small or game.fonts.ui)
+            love.graphics.setColor(0.4, 0.4, 0.4)
+        elseif style == "small" then
             love.graphics.setFont(game.fonts.ui_small)
             love.graphics.setColor(0.8, 0.8, 0.5)
         elseif style == "muted" then
@@ -159,7 +167,8 @@ function CR.hitTest(components, panel_x, panel_w, cx, cy)
 
         if comp.type == "button" then
             h = buttonH(comp)
-            if cy >= cursor_y and cy < cursor_y + h
+            if not comp.disabled
+            and cy >= cursor_y and cy < cursor_y + h
             and cx >= panel_x + p and cx < panel_x + panel_w - p then
                 return comp
             end

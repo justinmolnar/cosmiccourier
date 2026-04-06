@@ -41,7 +41,7 @@ function ConstantsValidator._validateUI(constants, errors)
         return
     end
     
-    ConstantsValidator._validateNumber(ui, "SIDEBAR_WIDTH", errors, 100, 500)
+    ConstantsValidator._validateNumber(ui, "SIDEBAR_WIDTH", errors, 100)
     ConstantsValidator._validateString(ui, "FONT_PATH_MAIN", errors)
     ConstantsValidator._validateString(ui, "FONT_PATH_EMOJI", errors)
     ConstantsValidator._validateNumber(ui, "FONT_SIZE_UI", errors, 8, 32)
@@ -157,8 +157,8 @@ function ConstantsValidator._validateEffects(constants, errors)
 end
 
 -- Helper validation functions
-function ConstantsValidator._validateNumber(table, key, errors, min_val, max_val)
-    local value = table[key]
+function ConstantsValidator._validateNumber(tbl, key, errors, min_val, max_val)
+    local value = tbl[key]
     if value == nil then
         table.insert(errors, "Missing required number: " .. key)
     elseif type(value) ~= "number" then
@@ -170,8 +170,8 @@ function ConstantsValidator._validateNumber(table, key, errors, min_val, max_val
     end
 end
 
-function ConstantsValidator._validateString(table, key, errors)
-    local value = table[key]
+function ConstantsValidator._validateString(tbl, key, errors)
+    local value = tbl[key]
     if value == nil then
         table.insert(errors, "Missing required string: " .. key)
     elseif type(value) ~= "string" then
@@ -181,8 +181,8 @@ function ConstantsValidator._validateString(table, key, errors)
     end
 end
 
-function ConstantsValidator._validateTable(table, key, errors)
-    local value = table[key]
+function ConstantsValidator._validateTable(tbl, key, errors)
+    local value = tbl[key]
     if value == nil then
         table.insert(errors, "Missing required table: " .. key)
     elseif type(value) ~= "table" then

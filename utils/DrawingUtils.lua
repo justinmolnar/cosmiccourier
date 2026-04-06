@@ -11,22 +11,19 @@ function DrawingUtils.withFont(font, func, ...)
 end
 
 function DrawingUtils.drawWorldIcon(game, icon, px, py)
-    local g = love.graphics
-
-    -- Scale icon so it's roughly proportional to tile size on screen,
-    -- clamped so it's always legible (min 14px) but never huge (max 24px).
-    local screen_tile = game.C.MAP.TILE_SIZE * game.camera.scale
-    local icon_px = math.max(14, math.min(24, math.floor(screen_tile * 1.2)))
-    local half = math.floor(icon_px / 2)
+    local g    = love.graphics
+    local font = game.fonts.emoji
 
     g.push()
     g.translate(px, py)
     g.scale(1 / game.camera.scale, 1 / game.camera.scale)
-    g.setFont(game.fonts.emoji)
+    g.setFont(font)
+    local hw = math.floor(font:getWidth(icon) / 2)
+    local hh = math.floor(font:getHeight()    / 2)
     g.setColor(0, 0, 0, 0.6)
-    g.print(icon, -(half - 1), -(half - 1))
+    g.print(icon, -(hw - 1), -(hh - 1))
     g.setColor(1, 1, 1)
-    g.print(icon, -half, -half)
+    g.print(icon, -hw, -hh)
     g.pop()
 end
 

@@ -5,7 +5,7 @@ Vehicle.__index = Vehicle
 local _States
 local PathfindingService = require("services.PathfindingService")
 
-function Vehicle:new(id, depot_plot, game, vehicleType)
+function Vehicle:new(id, depot, game, vehicleType)
     if not _States then _States = require("models.vehicles.vehicle_states") end
 
     local instance = setmetatable({}, Vehicle)
@@ -22,7 +22,8 @@ function Vehicle:new(id, depot_plot, game, vehicleType)
     -- Speed modifier: accumulates upgrade multipliers on top of base_speed.
     instance.speed_modifier = game.state.upgrades[instance.type .. "_speed"] or 1.0
 
-    instance.depot_plot         = depot_plot
+    instance.depot              = depot
+    instance.depot_plot         = depot.plot
     instance.trip_queue         = {}
     instance.cargo              = {}
     instance.path               = {}
@@ -30,11 +31,11 @@ function Vehicle:new(id, depot_plot, game, vehicleType)
     instance.pathfinding_bounds = nil
 
     -- Determine starting anchor (trucks snap to nearest road tile).
-    local anchor = depot_plot
+    local anchor = depot.plot
     if vcfg and vcfg.anchor_to_road then
         local city_map = game.maps and game.maps.city
         if city_map and city_map.findNearestRoadTile then
-            local road_anchor = city_map:findNearestRoadTile(depot_plot)
+            local road_anchor = city_map:findNearestRoadTile(depot.plot)
             if road_anchor then anchor = road_anchor end
         end
     end

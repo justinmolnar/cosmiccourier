@@ -5,9 +5,10 @@ local TripGenerator = require("services.TripGenerator")
 local Client = {}
 Client.__index = Client
 
-function Client:new(plot, game)
+function Client:new(plot, game, city_map)
     local instance = setmetatable({}, Client)
-    instance.plot = plot  -- unified sub-cell coords
+    instance.plot     = plot  -- unified sub-cell coords
+    instance.city_map = city_map or (game.maps and game.maps.city)
     local umap = game.maps and game.maps.unified
     if umap then
         instance.px, instance.py = umap:getPixelCoords(plot.x, plot.y)
@@ -22,8 +23,8 @@ function Client:update(dt, game)
     self.trip_timer = self.trip_timer - dt
     if self.trip_timer <= 0 then
         self.trip_timer = TripGenerator.calculateNextTripTime(game)
-        
-        local new_trip = TripGenerator.generateTrip(self.plot, game)
+
+        local new_trip = TripGenerator.generateTrip(self.plot, game, self.city_map)
         if new_trip then
             table.insert(game.entities.trips.pending, new_trip)
             game.EventBus:publish("trip_created")

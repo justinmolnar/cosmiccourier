@@ -238,7 +238,7 @@ end
 function GameController:saveGame(filename)
     self.game.error_service.withErrorHandling(function()
         local SaveService = require("services.SaveService")
-        SaveService.saveGame(self.game.state, filename or "quicksave.json")
+        SaveService.saveGame(self.game, filename or "quicksave.json")
         self.game.error_service.logInfo("GameController", "Game saved: " .. (filename or "quicksave.json"))
         
         -- Publish save event

@@ -50,6 +50,18 @@ for _, d in ipairs(raw_districts) do
     end
 end
 
+-- ── Zone logistics flags (from zones.json) ────────────────────────────────────
+-- CAN_SEND[zone_id]    = true  → zone generates outbound commercial shipments
+-- CAN_RECEIVE[zone_id] = true  → zone accepts deliveries
+
+Zones.CAN_SEND    = {}
+Zones.CAN_RECEIVE = {}
+
+for _, z in ipairs(raw_zones) do
+    Zones.CAN_SEND[z.id]    = z.can_send    == true
+    Zones.CAN_RECEIVE[z.id] = z.can_receive == true
+end
+
 -- ── Biome zone multipliers (from biome_zone_mults.json) ──────────────────────
 
 Zones.BIOME_MULTS = json.decode(love.filesystem.read("data/biome_zone_mults.json"))

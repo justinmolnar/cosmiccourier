@@ -408,6 +408,69 @@ function Map:getRandomBuildingPlot()
     return nil
 end
 
+-- Returns a random building plot whose district matches `district_name`.
+-- Falls back to getRandomDowntownBuildingPlot() for "downtown", getRandomBuildingPlot() otherwise.
+-- Pass can_flag = "can_send" or "can_receive" to further filter by zone logistics flags.
+function Map:getRandomBuildingPlotForDistrict(district_name, can_flag)
+    local ZT = require("data.zones")
+    local flag_table = can_flag and ZT[can_flag == "can_send" and "CAN_SEND" or "CAN_RECEIVE"]
+
+    if not self.district_map or not self.district_types or not self.world_mn_x then
+        return district_name == "downtown" and self:getRandomDowntownBuildingPlot()
+               or self:getRandomBuildingPlot()
+    end
+    local sub_w = (self.world_w or 1) * 3
+    local ox    = (self.world_mn_x - 1) * 3
+    local oy    = (self.world_mn_y - 1) * 3
+    local matches = {}
+    for _, plot in ipairs(self.building_plots) do
+        local ux  = plot.x + ox
+        local uy  = plot.y + oy
+        local sci = (uy - 1) * sub_w + ux
+        local poi = self.district_map[sci]
+        if poi and self.district_types[poi] == district_name then
+            local zone = self.zone_grid and self.zone_grid[plot.y] and self.zone_grid[plot.y][plot.x]
+            if not flag_table or (zone and flag_table[zone]) then
+                matches[#matches + 1] = plot
+            end
+        end
+    end
+    if #matches > 0 then
+        return matches[love.math.random(1, #matches)]
+    end
+    -- Fallback (no flag filter)
+    return district_name == "downtown" and self:getRandomDowntownBuildingPlot()
+           or self:getRandomBuildingPlot()
+end
+
+-- Returns a random building plot whose zone has can_send=true.
+function Map:getRandomSendingPlot()
+    local ZT = require("data.zones")
+    local matches = {}
+    for _, plot in ipairs(self.building_plots) do
+        local zone = self.zone_grid and self.zone_grid[plot.y] and self.zone_grid[plot.y][plot.x]
+        if zone and ZT.CAN_SEND[zone] then
+            matches[#matches + 1] = plot
+        end
+    end
+    if #matches > 0 then return matches[love.math.random(1, #matches)] end
+    return self:getRandomBuildingPlot()
+end
+
+-- Returns a random building plot whose zone has can_receive=true.
+function Map:getRandomReceivingPlot()
+    local ZT = require("data.zones")
+    local matches = {}
+    for _, plot in ipairs(self.building_plots) do
+        local zone = self.zone_grid and self.zone_grid[plot.y] and self.zone_grid[plot.y][plot.x]
+        if zone and ZT.CAN_RECEIVE[zone] then
+            matches[#matches + 1] = plot
+        end
+    end
+    if #matches > 0 then return matches[love.math.random(1, #matches)] end
+    return self:getRandomBuildingPlot()
+end
+
 function Map:getPixelCoords(grid_x, grid_y)
     local tps = self.tile_pixel_size or self.C.MAP.TILE_SIZE
     return (grid_x - 0.5) * tps, (grid_y - 0.5) * tps

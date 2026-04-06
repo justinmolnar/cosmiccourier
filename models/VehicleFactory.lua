@@ -2,11 +2,11 @@
 local Vehicle = require("models.vehicles.Vehicle")
 local VehicleFactory = {}
 
-function VehicleFactory.createVehicle(vehicleType, id, depot_plot, game)
+function VehicleFactory.createVehicle(vehicleType, id, depot, game)
     assert(vehicleType, "VehicleFactory: vehicleType required")
     local vcfg = game.C.VEHICLES[vehicleType:upper()]
     assert(vcfg, "VehicleFactory: unknown vehicle type '" .. tostring(vehicleType) .. "'")
-    local vehicle = Vehicle:new(id, depot_plot, game, vehicleType)
+    local vehicle = Vehicle:new(id, depot, game, vehicleType)
     vehicle:recalculatePixelPosition(game)
     return vehicle
 end
