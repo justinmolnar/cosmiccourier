@@ -37,8 +37,11 @@ function State:new(C, game)
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
     instance.metro_license_unlocked = false
     -- Named counters and flags available to dispatch rules (persistent, saved with game)
-    instance.counters = { A = 0, B = 0, C = 0, D = 0, E = 0 }
-    instance.flags    = { X = false, Y = false, Z = false }
+    instance.counters         = { A = 0, B = 0, C = 0, D = 0, E = 0 }
+    instance.flags            = { X = false, Y = false, Z = false }
+    instance.text_vars        = { A = "", B = "", C = "" }
+    instance.broadcast_queue  = {}
+    instance.rule_timers      = {}   -- keyed by rule.id; used by hat_every_n / hat_after_n
 
     -- Default fallback rule: assign any eligible vehicle to any pending trip.
     -- Sits at the bottom of the list; player rules inserted at index 1 take priority.
@@ -73,7 +76,9 @@ end
 
 function State:update(dt, game)
     local C = game.C
-    
+
+    local was_rush_hour = self.rush_hour.active
+
     if self.rush_hour.active then
         self.rush_hour.timer = self.rush_hour.timer - dt
         if self.rush_hour.timer <= 0 then
@@ -82,6 +87,21 @@ function State:update(dt, game)
         end
     end
 
+    -- Fire rush_hour events on state transitions
+    local RE = require("services.DispatchRuleEngine")
+    local rules = self.dispatch_rules or {}
+    if self.rush_hour.active and not was_rush_hour then
+        RE.fireEvent(rules, "rush_hour_start", { game = game })
+    elseif not self.rush_hour.active and was_rush_hour then
+        RE.fireEvent(rules, "rush_hour_end", { game = game })
+    end
+
+    -- Decay screen shake
+    local ss = game.screen_shake
+    if ss and ss.timer then
+        ss.timer = ss.timer - dt
+        if ss.timer <= 0 then game.screen_shake = nil end
+    end
 end
 
 return State

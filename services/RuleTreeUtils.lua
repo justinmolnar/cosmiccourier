@@ -47,6 +47,20 @@ function RuleTreeUtils.newControlNode(def_id, condition, body, else_body)
     }
 end
 
+-- Loop node: C-block that iterates.
+-- slots:     key/value table (e.g. { n=3 } or { vehicle_type="bike" })
+-- body:      array of stack-nodes
+-- condition: bool-node or nil (used by ctrl_repeat_until)
+function RuleTreeUtils.newLoopNode(def_id, slots, body)
+    return {
+        kind      = "loop",
+        def_id    = def_id,
+        slots     = slots or {},
+        body      = body or {},
+        condition = nil,
+    }
+end
+
 -- Leaf bool-node: a condition block that evaluates to true/false.
 function RuleTreeUtils.newBoolLeaf(def_id, slots)
     return { kind = "bool", def_id = def_id, slots = slots or {} }
@@ -310,6 +324,12 @@ function RuleTreeUtils.walkTree(stack, fn, _path)
                 else_path[#else_path+1] = "else_body"
                 RuleTreeUtils.walkTree(node.else_body, fn, else_path)
             end
+        elseif node.kind == "loop" then
+            -- Walk body
+            local body_path = {}
+            for _, k in ipairs(node_path) do body_path[#body_path+1] = k end
+            body_path[#body_path+1] = "body"
+            RuleTreeUtils.walkTree(node.body or {}, fn, body_path)
         end
     end
 end

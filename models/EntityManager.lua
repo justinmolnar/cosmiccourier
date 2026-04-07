@@ -78,6 +78,32 @@ function Entities:addVehicle(game, vehicleType, target_depot)
     local new_vehicle = VehicleFactory.createVehicle(vehicleType, new_id, depot, game)
     table.insert(self.vehicles, new_vehicle)
     table.insert(depot.assigned_vehicles, new_vehicle)
+
+    local RE = require("services.DispatchRuleEngine")
+    RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_hired",
+        { vehicle = new_vehicle, game = game })
+end
+
+function Entities:removeVehicle(vehicle, game)
+    -- Unassign trips back to pending queue
+    if vehicle.unassign then vehicle:unassign(game) end
+
+    -- Remove from depot's assigned list
+    if vehicle.depot then
+        local av = vehicle.depot.assigned_vehicles
+        for i = #av, 1, -1 do
+            if av[i] == vehicle then table.remove(av, i); break end
+        end
+    end
+
+    -- Remove from global vehicle list
+    for i = #self.vehicles, 1, -1 do
+        if self.vehicles[i] == vehicle then table.remove(self.vehicles, i); break end
+    end
+
+    local RE = require("services.DispatchRuleEngine")
+    RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_dismissed",
+        { vehicle = vehicle, game = game })
 end
 
 function Entities:update(dt, game)

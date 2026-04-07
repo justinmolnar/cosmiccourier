@@ -17,8 +17,9 @@ function InputController:new(game)
 end
 
 function InputController:keypressed(key)
-    -- Route to dispatch number-slot input first if a slot is focused.
+    -- Route to dispatch input handlers: search field first, then number slot.
     local DT = require("views.tabs.DispatchTab")
+    if DT.handleSearchKey(key)  then return end
     if DT.handleKeyPressed(key) then return end
 
     if key == "escape" then
@@ -229,6 +230,7 @@ end
 
 function InputController:textinput(text)
     local DT = require("views.tabs.DispatchTab")
+    if DT.handleSearchInput(text) then return end  -- palette search consumes first
     DT.handleTextInput(text)
 end
 

@@ -18,6 +18,7 @@ function UIController:handleMouseDown(x, y, button)
     -- Commit any in-progress number slot text input on any click.
     local DT_early = require("views.tabs.DispatchTab")
     DT_early.commitFocus()
+    DT_early.blurPaletteSearch()  -- defocus search field; re-focused below if click lands on it
 
     -- 1. Context menu sits above everything else.
     if ui_manager.context_menu then
@@ -118,7 +119,10 @@ function UIController:handleMouseDown(x, y, button)
         local DT  = require("views.tabs.DispatchTab")
         local RE  = require("services.DispatchRuleEngine")
         local def = RE.getDefById(data.def_id)
-        local slot_type = (def and def.category == "boolean") and "boolean" or "stack"
+        local cat = def and def.category or "stack"
+        local slot_type = (cat == "boolean") and "boolean"
+                       or (cat == "reporter") and "reporter"
+                       or "stack"
         DT.getState().drag = {
             type      = "palette",
             rule_i    = data.rule_i,
@@ -172,12 +176,20 @@ function UIController:handleMouseDown(x, y, button)
             for _, s in ipairs(def and def.slots or {}) do
                 if s.key == data.slot_key then sd = s; break end
             end
-            local st = DT.getState()
+            -- If slot holds a reporter node, click clears it back to the default value
+            local current = node.slots[data.slot_key]
+            if type(current) == "table" and current.kind == "reporter" then
+                node.slots[data.slot_key] = sd and sd.default
+                return true
+            end
+            local st           = DT.getState()
+            local is_string_sd = sd and sd.type == "string"
+            local fallback     = is_string_sd and "" or "0"
             st.input_focus = {
                 node_ref = node,
                 slot_key = data.slot_key,
-                text     = tostring(node.slots[data.slot_key] or (sd and sd.default) or "0"),
-                original = node.slots[data.slot_key],
+                text     = tostring(current or (sd and sd.default) or fallback),
+                original = current,
                 sd       = sd,
             }
         end
@@ -206,6 +218,21 @@ function UIController:handleMouseDown(x, y, button)
         local on_close = function() ui_manager.modal_manager:hide() end
         local new_modal = Modal:new((data.name or "?") .. " Upgrades", 800, 600, on_close, data)
         ui_manager.modal_manager:show(new_modal)
+
+    elseif id == "dispatch_palette_filter_tag" then
+        local DT = require("views.tabs.DispatchTab")
+        DT.toggleFilterTag(data.tag)
+
+    elseif id == "dispatch_palette_search_focus" then
+        local DT = require("views.tabs.DispatchTab")
+        DT.getState().palette_filter.search_focused = true
+
+    elseif id == "dispatch_palette_clear_filters" then
+        local DT = require("views.tabs.DispatchTab")
+        local f = DT.getState().palette_filter
+        f.active_tags    = {}
+        f.search         = ""
+        f.search_focused = false
 
     elseif id == "_noop" then
         -- swallowed click (e.g. invalid palette block) — do nothing
@@ -286,6 +313,17 @@ function UIController:handleMouseUp(x, y, button, game)
                     for i, r in ipairs(rules) do
                         if r == sel_obj then st.selected_rule = i; break end
                     end
+                end
+            end
+
+        elseif drag.type == "palette" and drag.slot_type == "reporter" and drag.drop_valid then
+            -- Reporter dropped into a number/string slot: assign directly to slot value
+            local drop_rule = rules[drag.drop_rule_i]
+            if drop_rule then
+                local RTU2    = require("services.RuleTreeUtils")
+                local target  = RTU2.getNodeAtPath(drop_rule.stack, drag.drop_parent_path)
+                if target and drag.drop_slot then
+                    target.slots[drag.drop_slot] = { kind = "reporter", node = drag.node }
                 end
             end
 

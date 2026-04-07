@@ -26,17 +26,36 @@ function AutoDispatcher:update(dt, game)
 end
 
 function AutoDispatcher:dispatch(game)
-    if #game.entities.trips.pending == 0 then return end
+    local RE    = require("services.DispatchRuleEngine")
+    local rules = game.state.dispatch_rules or {}
 
-    local RE = require("services.DispatchRuleEngine")
-    local claimed, _, cancelled = RE.evaluate(game.state.dispatch_rules or {}, game)
+    -- Clear broadcast queue before this dispatch cycle
+    game.state.broadcast_queue = {}
 
-    for i = #game.entities.trips.pending, 1, -1 do
-        local trip = game.entities.trips.pending[i]
-        if claimed[trip] or cancelled[trip] then
-            table.remove(game.entities.trips.pending, i)
+    -- Fire polling hats (money/queue/counter/flag thresholds, all-busy/idle)
+    RE.evaluatePoll(rules, game)
+
+    if #game.entities.trips.pending > 0 then
+        local claimed, _, cancelled = RE.evaluate(rules, game)
+
+        for i = #game.entities.trips.pending, 1, -1 do
+            local trip = game.entities.trips.pending[i]
+            if claimed[trip] or cancelled[trip] then
+                table.remove(game.entities.trips.pending, i)
+            end
         end
     end
+
+    -- Fire broadcast-hat rules for each unique message sent this cycle
+    local bq   = game.state.broadcast_queue
+    local seen = {}
+    for _, name in ipairs(bq) do
+        if not seen[name] then
+            seen[name] = true
+            RE.fireEvent(rules, "broadcast", { game = game, broadcast_name = name })
+        end
+    end
+    game.state.broadcast_queue = {}
 end
 
 return AutoDispatcher

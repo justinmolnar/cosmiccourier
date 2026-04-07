@@ -114,8 +114,9 @@ function Validator.getPaletteValidity(context, game)
         if drop_type == "boolean" and def.category ~= "boolean" then
             ok = false; why = "only boolean blocks go here"
         elseif drop_type == "stack"
-               and def.category ~= "stack" and def.category ~= "control" then
-            ok = false; why = "only stack/control blocks go here"
+               and def.category ~= "stack" and def.category ~= "control"
+               and def.category ~= "loop" then
+            ok = false; why = "only stack/control/loop blocks go here"
         end
 
         -- Hat block: only valid if rule has no hat yet

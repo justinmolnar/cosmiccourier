@@ -54,6 +54,9 @@ function Vehicle:new(id, depot, game, vehicleType)
         instance.px, instance.py = home_map:getPixelCoords(anchor.x, anchor.y)
     end
 
+    instance.last_trip_end_time = 0
+    instance.trips_completed    = 0
+
     instance.state = nil
     instance:changeState(_States.Idle, game)
     instance.visible = true
@@ -65,12 +68,19 @@ function Vehicle:getSpeed()
     return self.base_speed * self.speed_modifier
 end
 
+function Vehicle:returnToDepot(game)
+    if not _States then _States = require("models.vehicles.vehicle_states") end
+    if self.state and self.state.name ~= "Idle" and self.state.name ~= "Returning" then
+        self:changeState(_States.ReturningToDepot, game)
+    end
+end
+
 function Vehicle:getMovementCostFor(tileType)
     return self.pathfinding_costs[tileType] or 9999
 end
 
 function Vehicle:getIcon()
-    return self.icon or "❓"
+    return self.icon_override or self.icon or "❓"
 end
 
 function Vehicle:getEffectiveCapacity(game)
@@ -109,6 +119,12 @@ function Vehicle:changeState(newState, game)
     self.state = newState
     if self.state and self.state.enter then
         self.state:enter(self, game)
+    end
+    -- Track when vehicle enters/leaves Idle for hat_vehicle_idle_for
+    if newState and newState.name == "Idle" then
+        self.idle_since = love.timer.getTime()
+    elseif self.idle_since then
+        self.idle_since = nil
     end
 end
 
@@ -194,6 +210,16 @@ function Vehicle:shouldUseAbstractedSimulation(game)
 end
 
 function Vehicle:update(dt, game)
+    -- Decay visual timers
+    if self.speech_bubble and self.speech_bubble.timer > 0 then
+        self.speech_bubble.timer = self.speech_bubble.timer - dt
+        if self.speech_bubble.timer <= 0 then self.speech_bubble = nil end
+    end
+    if self.flash and self.flash.timer > 0 then
+        self.flash.timer = self.flash.timer - dt
+        if self.flash.timer <= 0 then self.flash = nil end
+    end
+
     if self:shouldUseAbstractedSimulation(game) then
         self:updateAbstracted(dt, game)
     else
@@ -335,16 +361,70 @@ function Vehicle:draw(game)
 
     local draw_px, draw_py = self.px, self.py
     local DrawingUtils = require("utils.DrawingUtils")
+    local g = love.graphics
 
+    -- Selection ring
     if self == game.entities.selected_vehicle then
-        love.graphics.setColor(1, 1, 0, 0.8)
+        g.setColor(1, 1, 0, 0.8)
         local radius = 16 / game.camera.scale
-        love.graphics.setLineWidth(2 / game.camera.scale)
-        love.graphics.circle("line", draw_px, draw_py, radius)
-        love.graphics.setLineWidth(1)
+        g.setLineWidth(2 / game.camera.scale)
+        g.circle("line", draw_px, draw_py, radius)
+        g.setLineWidth(1)
+    end
+
+    -- Color override disc
+    local co = self.color_override
+    if co then
+        g.setColor(co[1], co[2], co[3], 0.55)
+        g.circle("fill", draw_px, draw_py, 11 / game.camera.scale)
+    end
+
+    -- Flash effect
+    local fl = self.flash
+    if fl and fl.timer > 0 then
+        local t  = fl.timer / fl.max_time
+        local fc = fl.color or { 1, 1, 0 }
+        g.setColor(fc[1], fc[2], fc[3], 0.75 * t)
+        g.circle("fill", draw_px, draw_py, 13 / game.camera.scale)
     end
 
     DrawingUtils.drawWorldIcon(game, self:getIcon(), draw_px, draw_py)
+
+    -- Speech bubble (fades in last second)
+    local sb = self.speech_bubble
+    if sb and sb.timer > 0 then
+        local alpha = math.min(1, sb.timer)
+        g.push()
+        g.translate(draw_px, draw_py)
+        g.scale(1 / game.camera.scale, 1 / game.camera.scale)
+        local font = game.fonts.ui_small
+        g.setFont(font)
+        local fh   = font:getHeight()
+        local fw   = font:getWidth(sb.text) + 10
+        local bx, by = -fw / 2, -26 - fh
+        g.setColor(0, 0, 0, 0.70 * alpha)
+        g.rectangle("fill", bx, by, fw, fh + 6, 3, 3)
+        g.setColor(1, 1, 1, alpha)
+        g.print(sb.text, bx + 5, by + 3)
+        g.pop()
+    end
+
+    -- Persistent label
+    local lbl = self.show_label
+    if lbl and lbl ~= "" then
+        g.push()
+        g.translate(draw_px, draw_py)
+        g.scale(1 / game.camera.scale, 1 / game.camera.scale)
+        local font = game.fonts.ui_small
+        g.setFont(font)
+        local fh = font:getHeight()
+        local fw = font:getWidth(lbl) + 8
+        g.setColor(0, 0, 0, 0.60)
+        g.rectangle("fill", -fw / 2, -(20 + fh), fw, fh + 4, 2, 2)
+        g.setColor(1, 1, 0.6, 1)
+        g.print(lbl, -fw / 2 + 4, -(20 + fh) + 2)
+        g.pop()
+    end
 end
 
 return Vehicle

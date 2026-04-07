@@ -414,7 +414,14 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
     local fb_vp_bot   = Game.camera.y + fb_half_h
     love.graphics.push()
     local game_world_w = screen_w - sidebar_w
-    love.graphics.translate(sidebar_w + game_world_w / 2, screen_h / 2)
+    local _shake_dx, _shake_dy = 0, 0
+    local _ss = Game.screen_shake
+    if _ss and _ss.timer and _ss.timer > 0 then
+        local _mag = _ss.magnitude * (_ss.timer / _ss.max_time)
+        _shake_dx = (love.math.random() * 2 - 1) * _mag
+        _shake_dy = (love.math.random() * 2 - 1) * _mag
+    end
+    love.graphics.translate(sidebar_w + game_world_w / 2 + _shake_dx, screen_h / 2 + _shake_dy)
     love.graphics.scale(Game.camera.scale, Game.camera.scale)
     love.graphics.translate(-Game.camera.x, -Game.camera.y)
     active_map:draw()

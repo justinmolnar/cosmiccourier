@@ -6,8 +6,12 @@ function Depot:new(id, plot, game)
     instance.id = id
     instance.plot = plot
     
+    instance.name              = id or "Depot"
+    instance.open              = true
+    instance.capacity          = nil  -- nil = unlimited
+
     instance.assigned_vehicles = {}
-    
+
     instance.analytics = {
         trips_completed = 0,
         income_generated = 0,

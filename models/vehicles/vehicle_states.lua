@@ -198,11 +198,19 @@ function States.ReturningToDepot:update(dt, vehicle, game)
         return
     end
     if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
+        local RE = require("services.DispatchRuleEngine")
+        local ctx = { vehicle = vehicle, game = game }
+        RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_returns_depot", ctx)
+        RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_idle", ctx)
         vehicle:changeState(States.Idle, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
     if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
+        local RE = require("services.DispatchRuleEngine")
+        local ctx = { vehicle = vehicle, game = game }
+        RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_returns_depot", ctx)
+        RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_idle", ctx)
         vehicle:changeState(States.Idle, game)
     end
 end
@@ -267,8 +275,13 @@ function States.DoPickup:enter(vehicle, game)
         trip:freeze()
         table.insert(vehicle.cargo, trip)
     end
-    
-    
+
+    if #vehicle.cargo > 0 then
+        local RE = require("services.DispatchRuleEngine")
+        RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_pickup",
+            { vehicle = vehicle, game = game })
+    end
+
     -- After picking up, immediately decide the next state here.
     if #vehicle.cargo > 0 then
         vehicle:changeState(States.GoToDropoff, game)
@@ -326,7 +339,16 @@ function States.DoDropoff:enter(vehicle, game)
 
         if is_final_destination then
             -- FINAL DELIVERY
+            vehicle.last_trip_end_time = love.timer.getTime()
+            vehicle.trips_completed = (vehicle.trips_completed or 0) + 1
+            local RE = require("services.DispatchRuleEngine")
+            RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_trip_complete",
+                { vehicle = vehicle, game = game })
             local final_payout = trip.base_payout + trip.speed_bonus
+            -- Credit earnings back to the source client
+            if trip.source_client then
+                trip.source_client.earnings = (trip.source_client.earnings or 0) + final_payout
+            end
             -- Convert city-local px/py to world-pixel coords so floating text
             -- renders at the right position regardless of which city this vehicle is in.
             local ts   = game.C.MAP.TILE_SIZE
