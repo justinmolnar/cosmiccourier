@@ -1,6 +1,6 @@
 -- services/DispatchRuleEngine.lua
 -- Generic dispatch rule evaluation engine.
--- Knows NOTHING about specific block types or evaluator logic.
+-- Evaluates rule.stack (tree format) recursively.
 -- Block metadata  → data/dispatch_blocks.lua
 -- Evaluator code  → services/DispatchEvaluators.lua
 -- Player rules    → game.state.dispatch_rules
@@ -9,8 +9,8 @@ local RuleEngine = {}
 
 -- ── Block definition registry (loaded once) ───────────────────────────────────
 
-local _defs_by_id  = nil
-local _evaluators  = nil
+local _defs_by_id = nil
+local _evaluators = nil
 
 local function getDefs()
     if not _defs_by_id then
@@ -34,104 +34,77 @@ function RuleEngine.getAllDefs()    return require("data.dispatch_blocks") end
 
 -- ── Rule construction helpers ─────────────────────────────────────────────────
 
-local function makeId()
-    return string.format("rule_%d_%d",
-        math.floor(love.timer.getTime() * 1000), love.math.random(1000, 9999))
-end
-
 function RuleEngine.newRule()
-    return { id = makeId(), enabled = true, blocks = {} }
+    return require("services.RuleTreeUtils").newRule()
 end
 
+-- Creates a new node instance with default slot values.
+-- Returns a node table ready to insert into rule.stack or a bool tree.
 function RuleEngine.newBlockInst(def_id, game)
+    local RTU = require("services.RuleTreeUtils")
     local def = getDefs()[def_id]
     if not def then return nil end
-    local inst = { def_id = def_id, slots = {} }
-    for _, slot_def in ipairs(def.slots or {}) do
-        if slot_def.type == "vehicle_enum" then
-            -- Default to lexicographically first vehicle type
-            local first = nil
-            for id in pairs(game and game.C and game.C.VEHICLES or {}) do
-                local low = id:lower()
-                if not first or low < first then first = low end
-            end
-            inst.slots[slot_def.key] = first or slot_def.default or ""
-        else
-            inst.slots[slot_def.key] = slot_def.default
-        end
+    local slots = RTU.defaultSlots(def, game)
+    local cat   = def.category
+    if cat == "hat" then
+        return RTU.newHatNode(def_id, slots)
+    elseif cat == "boolean" then
+        return RTU.newBoolLeaf(def_id, slots)
+    elseif cat == "control" then
+        return RTU.newControlNode(def_id, nil, {}, nil)
+    else
+        -- "stack" (effect / action)
+        return RTU.newStackNode(def_id, slots)
     end
-    return inst
 end
 
--- ── Rule parsing ──────────────────────────────────────────────────────────────
--- Splits a rule's block list into trigger, flat condition+logic list, and actions.
--- The engine understands four categories (structural, not block-specific):
---   "trigger"   – must have exactly one; a rule without one is inert
---   "condition" – evaluated against the trip; must have an evaluator key
---   "logic"     – has an "op" field ("and"|"or") from the data file
---   "action"    – executed when conditions pass; must have an evaluator key
+-- ── Recursive boolean evaluation ─────────────────────────────────────────────
 
-local function parseRule(rule)
-    local defs    = getDefs()
-    local trigger = nil
-    local conds   = {}
-    local actions = {}
+local function evalBoolNode(node, ctx)
+    if not node then return false end
+    local id = node.def_id
+    if id == "bool_and" then
+        return evalBoolNode(node.left, ctx) and evalBoolNode(node.right, ctx)
+    elseif id == "bool_or" then
+        return evalBoolNode(node.left, ctx) or evalBoolNode(node.right, ctx)
+    elseif id == "bool_not" then
+        return not evalBoolNode(node.operand, ctx)
+    else
+        -- Leaf condition block
+        local def = getDefs()[id]
+        local fn  = def and def.evaluator and getEvaluators()[def.evaluator]
+        return fn and fn(node, ctx) or false
+    end
+end
 
-    for _, block in ipairs(rule.blocks) do
-        local def = defs[block.def_id]
-        if def then
-            local cat = def.category
-            if     cat == "trigger"   then trigger = block
-            elseif cat == "condition" then conds[#conds + 1] = { kind = "cond",   block = block }
-            elseif cat == "effect"    then actions[#actions + 1] = block   -- effects run in action pass
-            elseif cat == "logic" then
-                if def.negate then
-                    conds[#conds + 1] = { kind = "negate" }
-                else
-                    conds[#conds + 1] = { kind = "logic", op = def.op or "and" }
+-- ── Recursive stack evaluation ────────────────────────────────────────────────
+-- Returns "claimed" | "skip" | "cancel" | nil
+-- nil means the stack ran to completion with no terminal result.
+
+local function evalStack(stack, ctx)
+    for _, node in ipairs(stack or {}) do
+        if node.kind == "control" then
+            -- Evaluate condition (nil condition = always true)
+            local cond_ok = (not node.condition) or evalBoolNode(node.condition, ctx)
+            local branch  = cond_ok and node.body or node.else_body
+            local result  = evalStack(branch, ctx)
+            if result then return result end
+
+        elseif node.kind == "stack" then
+            local def = getDefs()[node.def_id]
+            local fn  = def and def.evaluator and getEvaluators()[def.evaluator]
+            if fn then
+                local result = fn(node, ctx)
+                if result == "claimed" or result == "skip" or result == "cancel" then
+                    return result
                 end
-            elseif cat == "action"    then actions[#actions + 1] = block
+                -- false / nil → side-effect block; continue
             end
+
+        -- hat: no-op during evaluation (fires when rule is selected)
         end
     end
-
-    return trigger, conds, actions
-end
-
--- ── Condition evaluation ──────────────────────────────────────────────────────
-
-local function evalConditions(conds, ctx)
-    if #conds == 0 then return true end
-
-    local evals          = getEvaluators()
-    local result         = nil
-    local pending_op     = "and"
-    local pending_negate = false   -- set by logic_not; flips the next condition
-
-    for _, entry in ipairs(conds) do
-        if entry.kind == "negate" then
-            pending_negate = not pending_negate   -- double-not cancels out
-        elseif entry.kind == "logic" then
-            pending_op = entry.op
-        elseif entry.kind == "cond" then
-            local def = getDefs()[entry.block.def_id]
-            local fn  = def and def.evaluator and evals[def.evaluator]
-            local ok  = fn and fn(entry.block, ctx) or false
-
-            if pending_negate then ok = not ok; pending_negate = false end
-
-            if result == nil then
-                result = ok
-            elseif pending_op == "or" then
-                result = result or ok
-            else
-                result = result and ok
-            end
-            pending_op = "and"
-        end
-    end
-
-    return result ~= false
+    return nil
 end
 
 -- ── Main evaluate loop ────────────────────────────────────────────────────────
@@ -144,46 +117,39 @@ function RuleEngine.evaluate(rules, game)
     local pending = game.entities.trips.pending
     if #pending == 0 or not rules or #rules == 0 then return {}, {}, {} end
 
-    local evals = getEvaluators()
-
-    -- Rules are evaluated in array order: index 1 = highest priority.
-    -- Use up/down buttons in the UI to reorder.
     local claimed   = {}
     local skipped   = {}
     local cancelled = {}
 
     for _, trip in ipairs(pending) do
-        local handled = false
         for _, rule in ipairs(rules) do
-            if handled then break end
-            if rule.enabled then
-                local trigger, conds, actions = parseRule(rule)
-                local ctx = { trip = trip, game = game }
-                if trigger and evalConditions(conds, ctx) then
-                    for _, action_block in ipairs(actions) do
-                        local def = getDefs()[action_block.def_id]
-                        local fn  = def and def.evaluator and evals[def.evaluator]
-                        if fn then
-                            local result = fn(action_block, ctx)
-                            if result == "claimed" then
-                                claimed[trip]   = true
-                                handled         = true
-                                break
-                            elseif result == "skip" then
-                                skipped[trip]   = true
-                                handled         = true
-                                break
-                            elseif result == "cancel" then
-                                cancelled[trip] = true
-                                handled         = true
-                                break
-                            end
-                            -- false / nil → side-effect block; continue to next action
-                        end
-                    end
+            if not rule.enabled then goto next_rule end
+
+            local ctx    = { trip = trip, game = game }
+            local result = nil
+
+            if rule.stack then
+                -- Tree format: a hat node is required for the rule to fire.
+                local has_hat = false
+                for _, node in ipairs(rule.stack) do
+                    if node.kind == "hat" then has_hat = true; break end
+                end
+                if has_hat then
+                    result = evalStack(rule.stack, ctx)
                 end
             end
+
+            if result == "claimed" then
+                claimed[trip] = true; goto next_trip
+            elseif result == "skip" then
+                skipped[trip] = true; goto next_trip
+            elseif result == "cancel" then
+                cancelled[trip] = true; goto next_trip
+            end
+
+            ::next_rule::
         end
+        ::next_trip::
     end
 
     return claimed, skipped, cancelled

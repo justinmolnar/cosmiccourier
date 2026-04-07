@@ -1,6 +1,6 @@
 -- services/DispatchValidator.lua
--- Validates dispatch rule blocks against structural and semantic rules.
--- Structural rules come from data/dispatch_blocks.lua (validation fields).
+-- Validates dispatch rule trees against structural and semantic rules.
+-- Structural rules come from slot_accepts / category fields on block defs.
 -- Semantic rules come from the `assertion` and `constraint` fields on block defs.
 -- This module knows NOTHING about the UI — it only returns validity tables.
 
@@ -8,16 +8,17 @@ local Validator = {}
 
 -- ── Named constraint checkers ─────────────────────────────────────────────────
 -- Keyed by the `constraint` field on action block defs.
--- Each receives (action_block, all_blocks, game) and returns a warning string or nil.
+-- Each receives (action_node, rule, game) and returns a warning string or nil.
 
 local SCOPE_ORDER = { district = 1, city = 2, region = 3, continent = 4, world = 5 }
 
 local CONSTRAINTS = {
 
-    vehicle_covers_trip_scope = function(action_block, blocks, game)
+    vehicle_covers_trip_scope = function(action_node, rule, game)
         local RE    = require("services.DispatchRuleEngine")
-        local def   = RE.getDefById(action_block.def_id)
-        local vtype = def and def.vehicle_slot_key and action_block.slots[def.vehicle_slot_key]
+        local RTU   = require("services.RuleTreeUtils")
+        local def   = RE.getDefById(action_node.def_id)
+        local vtype = def and def.vehicle_slot_key and action_node.slots[def.vehicle_slot_key]
         if not vtype then return nil end
 
         local vcfg = game.C.VEHICLES[vtype:upper()]
@@ -25,98 +26,112 @@ local CONSTRAINTS = {
 
         local vmax = SCOPE_ORDER[vcfg.locked_to_zone] or 999
 
-        -- Find any scope "eq" assertions in the rule
-        for _, b in ipairs(blocks) do
-            local bdef = RE.getDefById(b.def_id)
-            if bdef and bdef.assertion
-               and bdef.assertion.subject   == "trip"
-               and bdef.assertion.property  == "scope"
-               and bdef.assertion.op        == "eq" then
-                local scope  = b.slots[bdef.assertion.slot]
-                local srank  = SCOPE_ORDER[scope] or 0
-                if srank > vmax then
-                    return string.format("%s is locked to '%s' — can't handle '%s' trips",
-                        vcfg.display_name or vtype, vcfg.locked_to_zone, scope)
+        -- Walk all bool trees in the rule looking for scope "eq" leaves
+        local function checkBool(bool_node)
+            if not bool_node then return nil end
+            local id = bool_node.def_id
+            if id == "bool_and" or id == "bool_or" then
+                return checkBool(bool_node.left) or checkBool(bool_node.right)
+            elseif id == "bool_not" then
+                return checkBool(bool_node.operand)
+            else
+                local bdef = RE.getDefById(id)
+                if bdef and bdef.assertion
+                   and bdef.assertion.subject  == "trip"
+                   and bdef.assertion.property == "scope"
+                   and (bdef.assertion.op == "eq" or bdef.assertion.op_from_slot) then
+                    local resolved_op = bdef.assertion.op
+                    if bdef.assertion.op_from_slot then
+                        local raw = bool_node.slots[bdef.assertion.op_from_slot]
+                        resolved_op = (raw == "=") and "eq" or nil
+                    end
+                    if resolved_op ~= "eq" then goto skip_scope_check end
+                    local scope = bool_node.slots[bdef.assertion.slot]
+                    local srank = SCOPE_ORDER[scope] or 0
+                    if srank > vmax then
+                        return string.format("%s is locked to '%s' — can't handle '%s' trips",
+                            vcfg.display_name or vtype, vcfg.locked_to_zone, scope)
+                    end
+                    ::skip_scope_check::
                 end
             end
+            return nil
         end
-        return nil
+
+        -- Walk the whole stack tree looking for control nodes
+        local warning = nil
+        RTU.walkTree(rule.stack or {}, function(node, _path)
+            if warning then return end
+            if node.kind == "control" and node.condition then
+                warning = checkBool(node.condition)
+            end
+        end)
+
+        return warning
     end,
 
 }
 
 -- ── Palette validity ──────────────────────────────────────────────────────────
 -- Returns { [def_id] = { valid=bool, reason=string } } for every block def.
+-- context:
+--   dropping_into  = "stack" | "boolean" | nil   — what slot type is the target
+--   rule           = rule table (to check max_per_rule and hat presence)
 
-local function contains(t, v)
-    for _, x in ipairs(t) do if x == v then return true end end
-    return false
-end
-
-local function analyzeBlocks(blocks)
-    local RE = require("services.DispatchRuleEngine")
-    local last_def           = nil
-    local categories_present = {}
-    local count_by_id        = {}
-    local has_terminal       = false
-
-    for _, block in ipairs(blocks) do
-        local def = RE.getDefById(block.def_id)
-        if def then
-            last_def = def
-            categories_present[def.category] = true
-            count_by_id[def.id] = (count_by_id[def.id] or 0) + 1
-            if def.terminal then has_terminal = true end
-        end
-    end
-
-    return {
-        last_def    = last_def,
-        categories  = categories_present,
-        counts      = count_by_id,
-        has_terminal = has_terminal,
-        is_empty    = (#blocks == 0),
-    }
-end
-
-function Validator.getPaletteValidity(blocks, game)
+function Validator.getPaletteValidity(context, game)
     local RE       = require("services.DispatchRuleEngine")
+    local RTU      = require("services.RuleTreeUtils")
     local all_defs = RE.getAllDefs()
-    local ctx      = analyzeBlocks(blocks)
     local result   = {}
+
+    local rule         = context and context.rule
+    local drop_type    = context and context.dropping_into  -- "stack" | "boolean" | nil
+
+    -- Count existing nodes in the rule tree for max_per_rule checks
+    local count_by_id = {}
+    local has_hat     = false
+    if rule and rule.stack then
+        RTU.walkTree(rule.stack, function(node, _path)
+            count_by_id[node.def_id] = (count_by_id[node.def_id] or 0) + 1
+            if node.kind == "hat" then has_hat = true end
+        end)
+        -- Also count bool nodes inside control conditions
+        RTU.walkTree(rule.stack, function(node, _path)
+            if node.kind == "control" and node.condition then
+                RTU.walkBoolTree(node.condition, function(bn, _bp)
+                    count_by_id[bn.def_id] = (count_by_id[bn.def_id] or 0) + 1
+                end, {})
+            end
+        end)
+    end
 
     for _, def in ipairs(all_defs) do
         local ok  = true
         local why = nil
 
-        if ctx.has_terminal then
-            ok = false; why = "nothing follows a terminal block"
+        -- Slot-type context: if we know where this block is being dropped,
+        -- only allow compatible categories.
+        if drop_type == "boolean" and def.category ~= "boolean" then
+            ok = false; why = "only boolean blocks go here"
+        elseif drop_type == "stack"
+               and def.category ~= "stack" and def.category ~= "control" then
+            ok = false; why = "only stack/control blocks go here"
+        end
 
-        elseif def.must_be_first and not ctx.is_empty then
+        -- Hat block: only valid if rule has no hat yet
+        if ok and def.category == "hat" and has_hat then
+            ok = false; why = "rule already has a trigger"
+        end
+
+        -- must_be_first: only valid as first block in a fresh rule / empty stack
+        -- (when palette is opened for an empty stack)
+        if ok and def.must_be_first and has_hat then
             ok = false; why = "must be the first block"
-
-        elseif def.valid_after_categories and ctx.is_empty then
-            ok = false; why = "needs a block before it"
-
-        elseif def.valid_after_categories and ctx.last_def
-               and not contains(def.valid_after_categories, ctx.last_def.category) then
-            ok  = false
-            why = string.format("can't follow '%s'",
-                ctx.last_def.label or ctx.last_def.category)
         end
 
-        if ok and def.requires_category_before then
-            for _, cat in ipairs(def.requires_category_before) do
-                if not ctx.categories[cat] then
-                    ok  = false
-                    why = string.format("needs a %s block first", cat)
-                    break
-                end
-            end
-        end
-
+        -- max_per_rule
         if ok and def.max_per_rule then
-            if (ctx.counts[def.id] or 0) >= def.max_per_rule then
+            if (count_by_id[def.id] or 0) >= def.max_per_rule then
                 ok = false; why = "already in this rule"
             end
         end
@@ -127,68 +142,78 @@ function Validator.getPaletteValidity(blocks, game)
     return result
 end
 
--- ── Block warnings ────────────────────────────────────────────────────────────
--- Three-pass semantic check on blocks already in a rule.
--- Returns { [block_index] = { warning=string } }.
+-- ── Tree warning collection ───────────────────────────────────────────────────
+-- Returns a table keyed by NODE REFERENCE (the node table itself):
+--   { [node] = { warning = "string" } }
 --
--- Pass 1 — record positions of OR blocks
--- Pass 2 — collect `assertion` fields, check contradictions and impossible ranges
---          (two conditions only conflict if no OR block sits between them)
--- Pass 3 — run named `constraint` checks on action blocks
+-- Walks the entire rule.stack tree, collecting assertion-based contradictions
+-- and named constraint warnings.
 
-function Validator.getBlockWarnings(blocks, game)
+function Validator.getTreeWarnings(rule, game)
     local RE       = require("services.DispatchRuleEngine")
-    local warnings = {}
+    local RTU      = require("services.RuleTreeUtils")
+    local warnings = {}  -- keyed by node reference
 
-    -- ── Pass 1: record OR positions ──────────────────────────────────────────
-    -- Used to determine whether two conflicting blocks are in the same AND-chain.
-    local or_positions = {}
-    for i, block in ipairs(blocks) do
-        local def = RE.getDefById(block.def_id)
-        if def and def.category == "logic" and def.op == "or" then
-            or_positions[#or_positions + 1] = i
+    -- ── Bool-tree assertion pass ─────────────────────────────────────────────
+    -- Walk a bool subtree, collecting leaf assertions into by_prop.
+    -- is_or_branch = true means this subtree is inside an OR node —
+    -- so contradictions within it don't get flagged (they may be intentional).
+
+    -- Map operator string (">","<","=") to assertion op name (gt/lt/eq)
+    local function mapOpStr(s)
+        if s == ">" then return "gt"
+        elseif s == "<" then return "lt"
+        else return "eq"
         end
     end
 
-    local function or_between(i, j)
-        local lo, hi = math.min(i, j), math.max(i, j)
-        for _, pos in ipairs(or_positions) do
-            if pos > lo and pos < hi then return true end
-        end
-        return false
-    end
-
-    -- ── Pass 2: assertion-based contradiction / range checks ─────────────────
-    -- Collect assertions grouped by subject.property (+ key_slot value when present).
-    -- key_slot lets vehicle/counter/flag assertions be scoped to a specific key
-    -- (e.g. "fleet.idle.bike" vs "fleet.idle.truck").
-
-    local by_prop = {}
-    for i, block in ipairs(blocks) do
-        local def = RE.getDefById(block.def_id)
-        if def and def.assertion and def.category == "condition" then
-            local a   = def.assertion
-            local key = a.subject .. "." .. a.property
-            if a.key_slot then
-                key = key .. "." .. (block.slots[a.key_slot] or "")
+    local function collectBoolAssertions(node, by_prop, is_or_branch)
+        if not node then return end
+        local id = node.def_id
+        if id == "bool_and" then
+            collectBoolAssertions(node.left,    by_prop, is_or_branch)
+            collectBoolAssertions(node.right,   by_prop, is_or_branch)
+        elseif id == "bool_or" then
+            -- Children of OR are in separate branches — mark as or_branch
+            collectBoolAssertions(node.left,    by_prop, true)
+            collectBoolAssertions(node.right,   by_prop, true)
+        elseif id == "bool_not" then
+            collectBoolAssertions(node.operand, by_prop, is_or_branch)
+        else
+            -- Leaf condition block
+            local def = RE.getDefById(id)
+            if def and def.assertion then
+                local a   = def.assertion
+                local key = a.subject .. "." .. a.property
+                if a.key_slot then
+                    key = key .. "." .. (node.slots[a.key_slot] or "")
+                end
+                -- Resolve op: static or dynamic (op_from_slot)
+                local op = a.op
+                if a.op_from_slot then
+                    op = mapOpStr(node.slots and node.slots[a.op_from_slot] or ">")
+                end
+                by_prop[key] = by_prop[key] or {}
+                table.insert(by_prop[key], {
+                    op        = op,
+                    value     = a.slot and node.slots[a.slot],
+                    node      = node,
+                    or_branch = is_or_branch,
+                })
             end
-            by_prop[key] = by_prop[key] or {}
-            table.insert(by_prop[key], {
-                op      = a.op,
-                value   = a.slot and block.slots[a.slot],
-                block_i = i,
-            })
         end
     end
 
-    -- Unified contradiction check — one loop over all grouped assertion sets.
-    for _, list in pairs(by_prop) do
-        local any_e, none_e       = nil, nil   -- fleet idle: "any" vs "none"
-        local set_e, clear_e      = nil, nil   -- flags: "set" vs "clear"
-        local first_eq            = nil         -- first eq assertion seen
-        local gt_e, lt_e          = nil, nil   -- numeric range
+    -- Run contradiction checks on a by_prop group.
+    -- Entries with or_branch=true are excluded from AND-chain checks.
+    local function checkContradictions(list)
+        local any_e, none_e   = nil, nil
+        local set_e, clear_e  = nil, nil
+        local first_eq        = nil
+        local gt_e, lt_e      = nil, nil
 
         for _, a in ipairs(list) do
+            if a.or_branch then goto skip_entry end
             if     a.op == "any"   then any_e   = a
             elseif a.op == "none"  then none_e  = a
             elseif a.op == "set"   then set_e   = a
@@ -197,77 +222,88 @@ function Validator.getBlockWarnings(blocks, game)
             elseif a.op == "gt"    then gt_e    = a
             elseif a.op == "lt"    then lt_e    = a
             end
+            ::skip_entry::
         end
 
-        -- any idle + no idle (same vehicle type, no OR between) → contradiction
-        if any_e and none_e and not or_between(any_e.block_i, none_e.block_i) then
-            warnings[none_e.block_i] = { warning = "contradicts 'any idle' — can't both be true" }
+        -- any idle + no idle (same vehicle type, same AND-chain)
+        if any_e and none_e then
+            warnings[none_e.node] = { warning = "contradicts 'any idle' — can't both be true" }
         end
 
-        -- flag set + flag clear (same flag, no OR between) → contradiction
-        if set_e and clear_e and not or_between(set_e.block_i, clear_e.block_i) then
-            warnings[clear_e.block_i] = { warning = "flag can't be both set and clear" }
+        -- flag set + flag clear
+        if set_e and clear_e then
+            warnings[clear_e.node] = { warning = "flag can't be both set and clear" }
         end
 
-        -- eq + eq (different values, no OR between) → contradiction
         if first_eq then
             for _, a in ipairs(list) do
-                if a.op == "eq" and a.block_i ~= first_eq.block_i
-                   and a.value ~= first_eq.value
-                   and not or_between(first_eq.block_i, a.block_i) then
-                    warnings[a.block_i] = { warning = string.format(
+                if a.or_branch then goto skip_eq end
+
+                -- eq + eq (different values)
+                if a.op == "eq" and a.node ~= first_eq.node and a.value ~= first_eq.value then
+                    warnings[a.node] = { warning = string.format(
                         "can't equal both '%s' and '%s'",
                         tostring(first_eq.value), tostring(a.value)) }
                 end
-            end
 
-            -- eq + neq (same value, no OR between) → always false
-            for _, a in ipairs(list) do
-                if a.op == "neq" and a.value == first_eq.value
-                   and not or_between(first_eq.block_i, a.block_i) then
-                    warnings[a.block_i] = { warning = string.format(
+                -- eq + neq (same value) → always false
+                if a.op == "neq" and a.value == first_eq.value then
+                    warnings[a.node] = { warning = string.format(
                         "value is '%s' but this excludes it — rule never fires",
                         tostring(first_eq.value)) }
                 end
+
+                ::skip_eq::
             end
 
-            -- eq + gt: eq value <= threshold → can never be > threshold
-            if gt_e and first_eq.value <= gt_e.value
-               and not or_between(first_eq.block_i, gt_e.block_i) then
-                warnings[gt_e.block_i] = { warning = string.format(
-                    "= %s can't also be > %s", tostring(first_eq.value), tostring(gt_e.value)) }
+            -- eq + gt: eq value ≤ threshold → never > threshold
+            if gt_e and first_eq.value <= gt_e.value then
+                warnings[gt_e.node] = { warning = string.format(
+                    "= %s can't also be > %s",
+                    tostring(first_eq.value), tostring(gt_e.value)) }
             end
 
-            -- eq + lt: eq value >= threshold → can never be < threshold
-            if lt_e and first_eq.value >= lt_e.value
-               and not or_between(first_eq.block_i, lt_e.block_i) then
-                warnings[lt_e.block_i] = { warning = string.format(
-                    "= %s can't also be < %s", tostring(first_eq.value), tostring(lt_e.value)) }
+            -- eq + lt: eq value ≥ threshold → never < threshold
+            if lt_e and first_eq.value >= lt_e.value then
+                warnings[lt_e.node] = { warning = string.format(
+                    "= %s can't also be < %s",
+                    tostring(first_eq.value), tostring(lt_e.value)) }
             end
         end
 
-        -- gt X + lt Y where X >= Y (no OR between) → impossible range
-        if gt_e and lt_e and gt_e.value >= lt_e.value
-           and not or_between(gt_e.block_i, lt_e.block_i) then
-            warnings[gt_e.block_i] = { warning = string.format(
+        -- gt X + lt Y where X ≥ Y → impossible range
+        if gt_e and lt_e and gt_e.value >= lt_e.value then
+            warnings[gt_e.node] = { warning = string.format(
                 "impossible range: can't be > %s AND < %s",
                 tostring(gt_e.value), tostring(lt_e.value)) }
         end
     end
 
-    -- ── Pass 3: named constraint checks on action blocks ─────────────────────
-    for i, block in ipairs(blocks) do
-        local def = RE.getDefById(block.def_id)
+    -- Walk all control nodes in the rule tree and check their bool conditions
+    RTU.walkTree(rule.stack or {}, function(node, _path)
+        if node.kind == "control" and node.condition then
+            local by_prop = {}
+            collectBoolAssertions(node.condition, by_prop, false)
+            for _, list in pairs(by_prop) do
+                checkContradictions(list)
+            end
+        end
+    end)
+
+    -- ── Named constraint checks on action nodes ──────────────────────────────
+    RTU.walkTree(rule.stack or {}, function(node, _path)
+        if node.kind ~= "stack" then return end
+        local def = RE.getDefById(node.def_id)
         if def and def.constraint then
             local fn = CONSTRAINTS[def.constraint]
             if fn then
-                local w = fn(block, blocks, game)
-                if w and not warnings[i] then
-                    warnings[i] = { warning = w }
+                local w = fn(node, rule, game)
+                if w and not warnings[node] then
+                    warnings[node] = { warning = w }
                 end
             end
         end
-    end
+    end)
 
     return warnings
 end

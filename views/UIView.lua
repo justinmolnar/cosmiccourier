@@ -47,6 +47,10 @@ function UIView:draw()
     DT.drawDragGhost(ui_manager.panel, Game)
     love.graphics.setScissor()
 
+    -- Tooltip overlay (drawn above everything, no clip so it can overflow sidebar)
+    love.graphics.setFont(Game.fonts.ui_small)
+    DT.drawTooltip(Game)
+
     -- Modals always on top
     ui_manager.modal_manager:draw(Game)
 end

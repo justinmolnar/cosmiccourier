@@ -15,6 +15,10 @@ function UIController:handleMouseDown(x, y, button)
     local ui_manager = Game.ui_manager
     local panel      = ui_manager.panel
 
+    -- Commit any in-progress number slot text input on any click.
+    local DT_early = require("views.tabs.DispatchTab")
+    DT_early.commitFocus()
+
     -- 1. Context menu sits above everything else.
     if ui_manager.context_menu then
         return ui_manager:handleContextMenuMouseDown(x, y, button, Game)
@@ -23,10 +27,10 @@ function UIController:handleMouseDown(x, y, button)
     -- 2. Modals are next.
     if ui_manager.modal_manager:handle_mouse_down(x, y, Game) then return true end
 
-    -- 2. Panel tab bar and scrollbar.
+    -- 3. Panel tab bar and scrollbar.
     if panel:handleMouseDown(x, y, button) then return true end
 
-    -- 3. Content clicks — only when mouse is in the content area.
+    -- 4. Content clicks — only when mouse is in the content area.
     if not panel:isInContentArea(x, y) then return false end
 
     local comps = panel:getComponents()
@@ -76,9 +80,9 @@ function UIController:handleMouseDown(x, y, button)
         if v then v:unassign(Game) end
 
     elseif id == "dispatch_add_rule" then
-        local RE = require("services.DispatchRuleEngine")
+        local RTU   = require("services.RuleTreeUtils")
         local rules = Game.state.dispatch_rules
-        table.insert(rules, 1, RE.newRule())   -- index 1 = highest priority
+        table.insert(rules, 1, RTU.newRule())  -- index 1 = highest priority
         -- Auto-select the new rule and open its palette
         local DT = require("views.tabs.DispatchTab")
         local st = DT.getState()
@@ -89,15 +93,38 @@ function UIController:handleMouseDown(x, y, button)
         -- Start a drag candidate; toggle fires on mouse-up if no drag occurs
         local DT = require("views.tabs.DispatchTab")
         DT.getState().drag = {
-            type = "rule", rule_i = data.rule_i,
+            type   = "rule",
+            rule_i = data.rule_i,
             sx = x, sy = y, cx = x, cy = y, active = false,
         }
 
-    elseif id == "dispatch_block_press" then
-        -- Start a drag candidate; block remove fires on mouse-up if no drag occurs
-        local DT = require("views.tabs.DispatchTab")
+    elseif id == "dispatch_node_press" then
+        -- Start a drag candidate for a tree node
+        local DT  = require("views.tabs.DispatchTab")
+        local RTU = require("services.RuleTreeUtils")
+        local node = data.node
+        local slot_type = (node and node.kind == "bool") and "boolean" or "stack"
         DT.getState().drag = {
-            type = "block", rule_i = data.rule_i, block_i = data.block_i,
+            type      = "node",
+            rule_i    = data.rule_i,
+            path      = data.path,
+            node      = node and RTU.deepCopy(node) or nil,
+            slot_type = slot_type,
+            sx = x, sy = y, cx = x, cy = y, active = false,
+        }
+
+    elseif id == "dispatch_palette_press" then
+        -- Start a drag candidate from the palette
+        local DT  = require("views.tabs.DispatchTab")
+        local RE  = require("services.DispatchRuleEngine")
+        local def = RE.getDefById(data.def_id)
+        local slot_type = (def and def.category == "boolean") and "boolean" or "stack"
+        DT.getState().drag = {
+            type      = "palette",
+            rule_i    = data.rule_i,
+            def_id    = data.def_id,
+            node      = RE.newBlockInst(data.def_id, Game),
+            slot_type = slot_type,
             sx = x, sy = y, cx = x, cy = y, active = false,
         }
 
@@ -115,6 +142,16 @@ function UIController:handleMouseDown(x, y, button)
             st.selected_rule = nil
         end
 
+    elseif id == "dispatch_toggle_collapse" then
+        local DT   = require("views.tabs.DispatchTab")
+        local rule = Game.state.dispatch_rules[data.rule_i]
+        if rule then
+            local st = DT.getState()
+            st.collapsed_rules = st.collapsed_rules or {}
+            local id = rule.id
+            st.collapsed_rules[id] = not st.collapsed_rules[id]
+        end
+
     elseif id == "dispatch_toggle_palette" then
         local DT = require("views.tabs.DispatchTab")
         local st = DT.getState()
@@ -125,24 +162,29 @@ function UIController:handleMouseDown(x, y, button)
             st.palette_open  = true
         end
 
-    elseif id == "dispatch_add_block" then
-        local rules = Game.state.dispatch_rules
-        local rule  = rules[data.rule_i]
-        if rule then
-            local RE   = require("services.DispatchRuleEngine")
-            local inst = RE.newBlockInst(data.def_id, Game)
-            if inst then table.insert(rule.blocks, inst) end
-        end
-
-    elseif id == "dispatch_remove_block" then
-        local rule = Game.state.dispatch_rules[data.rule_i]
-        if rule and data.block_i then
-            table.remove(rule.blocks, data.block_i)
+    elseif id == "dispatch_focus_slot" then
+        local DT  = require("views.tabs.DispatchTab")
+        local RE  = require("services.DispatchRuleEngine")
+        local node = data.node  -- passed directly from hit_fn
+        if node then
+            local def = RE.getDefById(node.def_id)
+            local sd  = nil
+            for _, s in ipairs(def and def.slots or {}) do
+                if s.key == data.slot_key then sd = s; break end
+            end
+            local st = DT.getState()
+            st.input_focus = {
+                node_ref = node,
+                slot_key = data.slot_key,
+                text     = tostring(node.slots[data.slot_key] or (sd and sd.default) or "0"),
+                original = node.slots[data.slot_key],
+                sd       = sd,
+            }
         end
 
     elseif id == "dispatch_cycle_slot" then
         local DT = require("views.tabs.DispatchTab")
-        DT.cycleSlot(data.rule_i, data.block_i, data.slot_key, Game)
+        DT.cycleSlot(data.rule_i, data.path, data.slot_key, Game)
 
     elseif id == "toggle_pause_trip_gen" then
         local e = Game.entities
@@ -187,71 +229,113 @@ function UIController:handleMouseMoved(x, y)
         local dist = math.abs(x - drag.sx) + math.abs(y - drag.sy)
         if dist > DRAG_THRESHOLD then drag.active = true end
     end
+    if drag.active then
+        DT.updateDropTarget(drag, self.Game)
+    end
 end
 
 function UIController:handleMouseUp(x, y, button, game)
     if button ~= 1 then return end
-    local DT = require("views.tabs.DispatchTab")
-    local st = DT.getState()
+    local DT  = require("views.tabs.DispatchTab")
+    local RTU = require("services.RuleTreeUtils")
+    local RE  = require("services.DispatchRuleEngine")
+    local st  = DT.getState()
     local drag = st.drag
     if not drag then return end
 
     if not drag.active then
-        -- Treat as a click
+        -- Click without drag
         if drag.type == "rule" then
             local rule = game.state.dispatch_rules[drag.rule_i]
             if rule then rule.enabled = not rule.enabled end
-        elseif drag.type == "block" then
+
+        elseif drag.type == "node" then
+            -- Click on a node = remove it
             local rule = game.state.dispatch_rules[drag.rule_i]
-            if rule and drag.block_i then
-                table.remove(rule.blocks, drag.block_i)
+            if rule then
+                local _, new_stack = RTU.removeNodeAtPath(rule.stack, drag.path)
+                rule.stack = new_stack
+            end
+
+        elseif drag.type == "palette" then
+            -- Palette click without drag = append to end of rule stack (stack/hat nodes only)
+            local rule = game.state.dispatch_rules[drag.rule_i]
+            if rule and drag.node and drag.slot_type == "stack" then
+                table.insert(rule.stack, drag.node)
             end
         end
+
     else
-        -- Commit drag reorder
+        -- Active drag — commit to drop target
         local rules = game.state.dispatch_rules
-        local panel = game.ui_manager.panel
 
         if drag.type == "rule" then
-            local content_y  = panel:toContentY(y)
-            local num_rules  = #rules
-            local target_i   = DT.getRuleDropIndex(content_y, num_rules)
-            local from_i     = drag.rule_i
-
-            -- Save the object whose selection we want to preserve
-            local selected_obj = rules[st.selected_rule]
+            local panel     = game.ui_manager.panel
+            local content_y = panel:toContentY(y)
+            local num_rules = #rules
+            local target_i  = DT.getRuleDropIndex(content_y, num_rules)
+            local from_i    = drag.rule_i
+            local sel_obj   = rules[st.selected_rule]
 
             if target_i ~= from_i and target_i ~= from_i + 1 then
-                local rule = table.remove(rules, from_i)
+                local rule     = table.remove(rules, from_i)
                 local insert_i = (target_i > from_i) and (target_i - 1) or target_i
-                insert_i = math.max(1, math.min(#rules + 1, insert_i))
+                insert_i       = math.max(1, math.min(#rules + 1, insert_i))
                 table.insert(rules, insert_i, rule)
-
-                -- Update selection to follow the moved or previously-selected rule
-                if selected_obj then
+                if sel_obj then
                     for i, r in ipairs(rules) do
-                        if r == selected_obj then st.selected_rule = i; break end
+                        if r == sel_obj then st.selected_rule = i; break end
                     end
                 end
             end
 
-        elseif drag.type == "block" then
-            local rule = rules[drag.rule_i]
-            if rule then
-                local content_y = panel:toContentY(y)
-                local target_bi = DT.getBlockDropIndex(drag.rule_i, x, content_y)
-                local from_bi   = drag.block_i
-                if target_bi ~= from_bi and target_bi ~= from_bi + 1 then
-                    local block = table.remove(rule.blocks, from_bi)
-                    local insert_bi = (target_bi > from_bi) and (target_bi - 1) or target_bi
-                    insert_bi = math.max(1, math.min(#rule.blocks + 1, insert_bi))
-                    table.insert(rule.blocks, insert_bi, block)
+        elseif (drag.type == "node" or drag.type == "palette") and drag.drop_valid then
+            local drop_rule = rules[drag.drop_rule_i]
+            if drop_rule then
+                local node = drag.node  -- already a copy
+
+                if drag.type == "node" then
+                    -- Remove from source first
+                    local source_rule = rules[drag.rule_i]
+                    if source_rule then
+                        local _, new_stack = RTU.removeNodeAtPath(source_rule.stack, drag.path)
+                        source_rule.stack = new_stack
+                        -- If same rule, sync the drop_rule reference too
+                        if source_rule == drop_rule then
+                            drop_rule.stack = new_stack
+                        end
+                    end
                 end
+
+                -- Smart condition wrapping: dropping onto an occupied condition slot.
+                if type(drag.drop_slot) == "string" and drag.drop_slot == "condition" then
+                    local parent = RTU.getNodeAtPath(drop_rule.stack, drag.drop_parent_path)
+                    if parent and parent.condition then
+                        local existing = RTU.deepCopy(parent.condition)
+                        local id = node.def_id
+                        if id == "bool_and" or id == "bool_or" then
+                            -- Binary operator dropped: place existing as left child, right stays empty
+                            node.left  = existing
+                            node.right = nil
+                        elseif id == "bool_not" then
+                            -- NOT dropped: wrap existing as operand
+                            node.operand = existing
+                        else
+                            -- Leaf condition dropped: wrap with AND(existing, new)
+                            node = RTU.newBoolBinary("bool_and", existing, node)
+                        end
+                    end
+                end
+
+                drop_rule.stack = RTU.insertNodeAtPath(
+                    drop_rule.stack, drag.drop_parent_path, drag.drop_slot, node)
             end
         end
     end
 
     st.drag = nil
+    -- Clear number input focus after any drag completes
+    DT.clearFocus()
 end
 
 return UIController

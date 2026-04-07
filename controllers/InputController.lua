@@ -17,6 +17,10 @@ function InputController:new(game)
 end
 
 function InputController:keypressed(key)
+    -- Route to dispatch number-slot input first if a slot is focused.
+    local DT = require("views.tabs.DispatchTab")
+    if DT.handleKeyPressed(key) then return end
+
     if key == "escape" then
         -- Close context menu first; only quit if nothing to close
         if self.game.ui_manager and self.game.ui_manager.context_menu then
@@ -224,6 +228,8 @@ function InputController:keypressed(key)
 end
 
 function InputController:textinput(text)
+    local DT = require("views.tabs.DispatchTab")
+    DT.handleTextInput(text)
 end
 
 function InputController:mousewheelmoved(x, y)
@@ -377,6 +383,9 @@ function InputController:handleGameWorldClick(x, y, button)
 end
 
 function InputController:update(dt)
+    local mx, my = love.mouse.getPosition()
+    local DT = require("views.tabs.DispatchTab")
+    DT.updateHover(dt, mx, my, self.game)
 end
 
 -- ─── Coordinate helpers ──────────────────────────────────────────────────────

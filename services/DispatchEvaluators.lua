@@ -1,7 +1,5 @@
 -- services/DispatchEvaluators.lua
 -- All block evaluator functions, keyed by the "evaluator" field in dispatch_blocks.lua.
--- This is the ONLY file that knows about specific block behaviour.
--- The engine (DispatchRuleEngine) calls these generically by key.
 --
 -- Condition evaluator: function(block_inst, ctx) → bool
 -- Effect evaluator:    function(block_inst, ctx) → false   (side-effect; trip not claimed)
@@ -14,14 +12,12 @@ local TripEligibility = require("services.TripEligibilityService")
 local function counters(game) return game.state.counters end
 local function flags(game)    return game.state.flags    end
 
-local function idle_of_type(game, vtype)
-    local list = {}
-    for _, v in ipairs(game.entities.vehicles) do
-        if (v.type or ""):lower() == vtype and v.state and v.state.name == "Idle" then
-            list[#list + 1] = v
-        end
+-- Generic comparison: op is ">", "<", or "="
+local function cmp(a, op, b)
+    if op == ">" then return a > b
+    elseif op == "<" then return a < b
+    else return a == b
     end
-    return list
 end
 
 -- ── Conditions: Trip ─────────────────────────────────────────────────────────
@@ -34,25 +30,12 @@ local function scope_not_equals(block, ctx)
     return ctx.trip.scope ~= (block.slots.scope or "district")
 end
 
-local function payout_gt(block, ctx)
-    return ctx.trip.base_payout > (block.slots.value or 0)
+local function payout_compare(block, ctx)
+    return cmp(ctx.trip.base_payout, block.slots.op or ">", block.slots.value or 0)
 end
 
-local function payout_lt(block, ctx)
-    return ctx.trip.base_payout < (block.slots.value or 0)
-end
-
-local function payout_between(block, ctx)
-    local p = ctx.trip.base_payout
-    return p >= (block.slots.min or 0) and p <= (block.slots.max or math.huge)
-end
-
-local function wait_gt(block, ctx)
-    return (ctx.trip.wait_time or 0) > (block.slots.seconds or 0)
-end
-
-local function wait_lt(block, ctx)
-    return (ctx.trip.wait_time or 0) < (block.slots.seconds or 0)
+local function wait_compare(block, ctx)
+    return cmp(ctx.trip.wait_time or 0, block.slots.op or ">", block.slots.seconds or 0)
 end
 
 local function is_multi_leg(block, ctx)
@@ -83,36 +66,26 @@ local function vehicle_idle_none(block, ctx)
     return true
 end
 
-local function vehicle_idle_count_gt(block, ctx)
-    local want = (block.slots.vehicle_type or ""):lower()
-    local n    = block.slots.n or 0
+local function idle_count_compare(block, ctx)
+    local want  = (block.slots.vehicle_type or ""):lower()
     local count = 0
     for _, v in ipairs(ctx.game.entities.vehicles) do
         if (v.type or ""):lower() == want
            and TripEligibility.canAssign(v, ctx.trip, ctx.game) then
             count = count + 1
-            if count > n then return true end
         end
     end
-    return false
+    return cmp(count, block.slots.op or ">", block.slots.n or 0)
 end
 
 -- ── Conditions: Game state ────────────────────────────────────────────────────
 
-local function queue_gt(block, ctx)
-    return #ctx.game.entities.trips.pending > (block.slots.value or 0)
+local function queue_compare(block, ctx)
+    return cmp(#ctx.game.entities.trips.pending, block.slots.op or ">", block.slots.value or 0)
 end
 
-local function queue_lt(block, ctx)
-    return #ctx.game.entities.trips.pending < (block.slots.value or 0)
-end
-
-local function money_gt(block, ctx)
-    return ctx.game.state.money > (block.slots.value or 0)
-end
-
-local function money_lt(block, ctx)
-    return ctx.game.state.money < (block.slots.value or 0)
+local function money_compare(block, ctx)
+    return cmp(ctx.game.state.money, block.slots.op or ">", block.slots.value or 0)
 end
 
 local function rush_hour_active(block, ctx)
@@ -122,19 +95,9 @@ end
 
 -- ── Conditions: Counters & Flags ──────────────────────────────────────────────
 
-local function counter_gt(block, ctx)
+local function counter_compare(block, ctx)
     local k = block.slots.key or "A"
-    return (counters(ctx.game)[k] or 0) > (block.slots.value or 0)
-end
-
-local function counter_lt(block, ctx)
-    local k = block.slots.key or "A"
-    return (counters(ctx.game)[k] or 0) < (block.slots.value or 0)
-end
-
-local function counter_eq(block, ctx)
-    local k = block.slots.key or "A"
-    return (counters(ctx.game)[k] or 0) == (block.slots.value or 0)
+    return cmp(counters(ctx.game)[k] or 0, block.slots.op or ">", block.slots.value or 0)
 end
 
 local function flag_is_set(block, ctx)
@@ -148,21 +111,17 @@ local function flag_is_clear(block, ctx)
 end
 
 -- ── Effects: Counters & Flags ─────────────────────────────────────────────────
--- These return false so the rule continues to the next block.
 
-local function counter_add(block, ctx)
-    local k = block.slots.key or "A"
-    local n = block.slots.amount or 1
-    local c = counters(ctx.game)
-    c[k] = (c[k] or 0) + n
-    return false
-end
-
-local function counter_sub(block, ctx)
-    local k = block.slots.key or "A"
-    local n = block.slots.amount or 1
-    local c = counters(ctx.game)
-    c[k] = (c[k] or 0) - n
+local function counter_change(block, ctx)
+    local k  = block.slots.key    or "A"
+    local op = block.slots.op     or "+="
+    local n  = block.slots.amount or 1
+    local c  = counters(ctx.game)
+    if op == "+=" then
+        c[k] = (c[k] or 0) + n
+    else
+        c[k] = (c[k] or 0) - n
+    end
     return false
 end
 
@@ -208,7 +167,6 @@ local function assign_any(block, ctx)
     return false
 end
 
--- Assign the eligible vehicle of the given type that is closest to the pickup.
 local function assign_nearest(block, ctx)
     local want = (block.slots.vehicle_type or ""):lower()
     local leg  = ctx.trip.legs[ctx.trip.current_leg]
@@ -249,35 +207,27 @@ return {
     -- Conditions: trip
     scope_equals        = scope_equals,
     scope_not_equals    = scope_not_equals,
-    payout_gt           = payout_gt,
-    payout_lt           = payout_lt,
-    payout_between      = payout_between,
-    wait_gt             = wait_gt,
-    wait_lt             = wait_lt,
+    payout_compare      = payout_compare,
+    wait_compare        = wait_compare,
     is_multi_leg        = is_multi_leg,
 
     -- Conditions: vehicles
-    vehicle_idle_any    = vehicle_idle_any,
-    vehicle_idle_none   = vehicle_idle_none,
-    vehicle_idle_count_gt = vehicle_idle_count_gt,
+    vehicle_idle_any      = vehicle_idle_any,
+    vehicle_idle_none     = vehicle_idle_none,
+    idle_count_compare    = idle_count_compare,
 
     -- Conditions: game state
-    queue_gt            = queue_gt,
-    queue_lt            = queue_lt,
-    money_gt            = money_gt,
-    money_lt            = money_lt,
+    queue_compare       = queue_compare,
+    money_compare       = money_compare,
     rush_hour_active    = rush_hour_active,
 
     -- Conditions: counters & flags
-    counter_gt          = counter_gt,
-    counter_lt          = counter_lt,
-    counter_eq          = counter_eq,
+    counter_compare     = counter_compare,
     flag_is_set         = flag_is_set,
     flag_is_clear       = flag_is_clear,
 
     -- Effects: counters & flags
-    counter_add         = counter_add,
-    counter_sub         = counter_sub,
+    counter_change      = counter_change,
     counter_reset       = counter_reset,
     flag_set            = flag_set,
     flag_clear          = flag_clear,

@@ -46,9 +46,9 @@ function State:new(C, game)
         {
             id      = "rule_default",
             enabled = true,
-            blocks  = {
-                { def_id = "trigger_trip",      slots = {} },
-                { def_id = "action_assign_any", slots = {} },
+            stack   = {
+                { kind = "hat",   def_id = "trigger_trip",      slots = {} },
+                { kind = "stack", def_id = "action_assign_any", slots = {} },
             },
         },
     }
