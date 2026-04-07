@@ -36,10 +36,8 @@ function State:new(C, game)
     instance.rush_hour = { active = false, timer = 0 }
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
     instance.metro_license_unlocked = false
-    -- Named counters and flags available to dispatch rules (persistent, saved with game)
-    instance.counters         = { A = 0, B = 0, C = 0, D = 0, E = 0 }
-    instance.flags            = { X = false, Y = false, Z = false }
-    instance.text_vars        = { A = "", B = "", C = "" }
+    -- Unified name-based variable system available to dispatch rules
+    instance.vars             = {}
     instance.broadcast_queue  = {}
     instance.rule_timers      = {}   -- keyed by rule.id; used by hat_every_n / hat_after_n
 

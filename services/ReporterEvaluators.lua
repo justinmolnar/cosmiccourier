@@ -13,6 +13,11 @@ end
 local function n(v) return tonumber(v) or 0 end
 local function s(v) return tostring(v or "") end
 
+-- Unified variable system access
+local function getVar(game, key)
+    return game.state.vars[key]
+end
+
 -- ── Game / global reporters ───────────────────────────────────────────────────
 
 local function rep_money(node, ctx)
@@ -33,15 +38,15 @@ local function rep_rush_hour_remaining(node, ctx)
 end
 
 local function rep_counter(node, ctx)
-    return ctx.game.state.counters[node.slots.key or "A"] or 0
+    return getVar(ctx.game, node.slots.key or "my_var") or 0
 end
 
 local function rep_flag(node, ctx)
-    return ctx.game.state.flags[node.slots.key or "X"] and 1 or 0
+    return getVar(ctx.game, node.slots.key or "my_var") and 1 or 0
 end
 
 local function rep_text_var(node, ctx)
-    return ctx.game.state.text_vars[node.slots.key or "A"] or ""
+    return s(getVar(ctx.game, node.slots.key or "my_var"))
 end
 
 -- ── Fleet reporters ───────────────────────────────────────────────────────────

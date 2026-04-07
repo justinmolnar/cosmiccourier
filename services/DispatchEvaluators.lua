@@ -9,16 +9,21 @@ local TripEligibility = require("services.TripEligibilityService")
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
-local function counters(game) return game.state.counters end
-local function flags(game)    return game.state.flags    end
-local function text_vars(game) return game.state.text_vars end
-
 -- Resolve a slot value: if it's a reporter node, evaluate it; otherwise return raw.
 local function evalSlot(val, ctx)
     if type(val) == "table" and val.kind == "reporter" then
         return require("services.DispatchRuleEngine").evalReporter(val.node, ctx)
     end
     return val
+end
+
+-- Unified variable system access
+local function getVar(game, key)
+    return game.state.vars[key]
+end
+
+local function setVar(game, key, val)
+    game.state.vars[key] = val
 end
 
 -- Generic comparison: op is ">", "<", or "="
@@ -141,18 +146,18 @@ end
 -- ── Conditions: Counters & Flags ──────────────────────────────────────────────
 
 local function counter_compare(block, ctx)
-    local k = block.slots.key or "A"
-    return cmp(counters(ctx.game)[k] or 0, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
+    local k = block.slots.key or "my_var"
+    return cmp(tonumber(getVar(ctx.game, k)) or 0, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
 end
 
 local function flag_is_set(block, ctx)
-    local k = block.slots.key or "X"
-    return flags(ctx.game)[k] == true
+    local k = block.slots.key or "my_var"
+    return getVar(ctx.game, k) == true
 end
 
 local function flag_is_clear(block, ctx)
-    local k = block.slots.key or "X"
-    return not flags(ctx.game)[k]
+    local k = block.slots.key or "my_var"
+    return not getVar(ctx.game, k)
 end
 
 local function random_chance(block, ctx)
@@ -163,11 +168,11 @@ local function always_true(block, ctx)  return true  end
 local function always_false(block, ctx) return false end
 
 local function counter_mod(block, ctx)
-    local k = block.slots.key or "A"
+    local k = block.slots.key or "my_var"
     local m = tonumber(evalSlot(block.slots.m, ctx)) or 2
     local r = tonumber(evalSlot(block.slots.r, ctx)) or 0
     if m == 0 then return false end
-    return (counters(ctx.game)[k] or 0) % m == r
+    return (tonumber(getVar(ctx.game, k)) or 0) % m == r
 end
 
 -- ── Effects: Trip mutation ────────────────────────────────────────────────────
@@ -229,60 +234,61 @@ end
 -- ── Effects: Counters & Flags ─────────────────────────────────────────────────
 
 local function counter_change(block, ctx)
-    local k  = block.slots.key or "A"
+    local k  = block.slots.key or "my_var"
     local op = block.slots.op  or "+="
     local nv = tonumber(evalSlot(block.slots.amount, ctx)) or 1
-    local c  = counters(ctx.game)
+    local old = tonumber(getVar(ctx.game, k)) or 0
     if op == "+=" then
-        c[k] = (c[k] or 0) + nv
+        setVar(ctx.game, k, old + nv)
     else
-        c[k] = (c[k] or 0) - nv
+        setVar(ctx.game, k, old - nv)
     end
     return false
 end
 
 local function counter_reset(block, ctx)
-    local k = block.slots.key or "A"
-    counters(ctx.game)[k] = 0
+    local k = block.slots.key or "my_var"
+    setVar(ctx.game, k, 0)
     return false
 end
 
 local function flag_set(block, ctx)
-    local k = block.slots.key or "X"
-    flags(ctx.game)[k] = true
+    local k = block.slots.key or "my_var"
+    setVar(ctx.game, k, true)
     return false
 end
 
 local function flag_clear(block, ctx)
-    local k = block.slots.key or "X"
-    flags(ctx.game)[k] = false
+    local k = block.slots.key or "my_var"
+    setVar(ctx.game, k, false)
     return false
 end
 
 local function set_counter(block, ctx)
-    local k = block.slots.key or "A"
-    counters(ctx.game)[k] = tonumber(evalSlot(block.slots.value, ctx)) or 0
+    local k = block.slots.key or "my_var"
+    setVar(ctx.game, k, tonumber(evalSlot(block.slots.value, ctx)) or 0)
     return false
 end
 
 local function reset_all_counters(block, ctx)
-    local c = counters(ctx.game)
-    for k in pairs(c) do c[k] = 0 end
+    ctx.game.state.vars = {}
     return false
 end
 
 local function toggle_flag(block, ctx)
-    local k = block.slots.key or "X"
-    local f = flags(ctx.game)
-    f[k] = not (f[k] or false)
+    local k = block.slots.key or "my_var"
+    local old = getVar(ctx.game, k)
+    setVar(ctx.game, k, not old)
     return false
 end
 
 local function swap_counters(block, ctx)
-    local a = block.slots.a or "A"
-    local b = block.slots.b or "B"
-    local c = counters(ctx.game)
-    c[a], c[b] = c[b] or 0, c[a] or 0
+    local a = block.slots.a or "my_var_a"
+    local b = block.slots.b or "my_var_b"
+    local val_a = getVar(ctx.game, a)
+    local val_b = getVar(ctx.game, b)
+    setVar(ctx.game, a, val_b)
+    setVar(ctx.game, b, val_a)
     return false
 end
 
@@ -467,40 +473,36 @@ local function reporter_compare(block, ctx)
     return cmp(lv, block.slots.op or ">", rv)
 end
 
--- ── Text variable helpers ─────────────────────────────────────────────────────
-
-local function text_vars(game) return game.state.text_vars end
-
 -- ── Conditions: text variables ────────────────────────────────────────────────
 
 local function text_var_eq(block, ctx)
-    local k = block.slots.key or "A"
-    return (text_vars(ctx.game)[k] or "") == (block.slots.value or "")
+    local k = block.slots.key or "my_var"
+    return tostring(getVar(ctx.game, k) or "") == tostring(evalSlot(block.slots.value, ctx) or "")
 end
 
 local function text_var_contains(block, ctx)
-    local k   = block.slots.key or "A"
-    local hay = text_vars(ctx.game)[k] or ""
-    local ndl = block.slots.value or ""
+    local k   = block.slots.key or "my_var"
+    local hay = tostring(getVar(ctx.game, k) or "")
+    local ndl = tostring(evalSlot(block.slots.value, ctx) or "")
     return ndl == "" or hay:find(ndl, 1, true) ~= nil
 end
 
 -- ── Effects: text variables ───────────────────────────────────────────────────
 
 local function set_text_var(block, ctx)
-    text_vars(ctx.game)[block.slots.key or "A"] = tostring(block.slots.value or "")
+    setVar(ctx.game, block.slots.key or "my_var", tostring(evalSlot(block.slots.value, ctx) or ""))
     return false
 end
 
 local function append_text_var(block, ctx)
-    local k  = block.slots.key or "A"
-    local tv = text_vars(ctx.game)
-    tv[k] = (tv[k] or "") .. tostring(block.slots.value or "")
+    local k  = block.slots.key or "my_var"
+    local old = tostring(getVar(ctx.game, k) or "")
+    setVar(ctx.game, k, old .. tostring(evalSlot(block.slots.value, ctx) or ""))
     return false
 end
 
 local function clear_text_var(block, ctx)
-    text_vars(ctx.game)[block.slots.key or "A"] = ""
+    setVar(ctx.game, block.slots.key or "my_var", "")
     return false
 end
 
@@ -555,21 +557,23 @@ local function hat_all_idle(hat, ctx)
 end
 
 local function hat_counter_reaches(hat, ctx)
-    local k = hat.slots.key or "A"
-    return (counters(ctx.game)[k] or 0) >= (hat.slots.value or 0)
+    local k = hat.slots.key or "my_var"
+    return (tonumber(getVar(ctx.game, k)) or 0) >= (hat.slots.value or 0)
 end
 
 local function hat_counter_drops(hat, ctx)
-    local k = hat.slots.key or "A"
-    return (counters(ctx.game)[k] or 0) < (hat.slots.value or 0)
+    local k = hat.slots.key or "my_var"
+    return (tonumber(getVar(ctx.game, k)) or 0) < (hat.slots.value or 0)
 end
 
 local function hat_flag_set_poll(hat, ctx)
-    return flags(ctx.game)[hat.slots.key or "X"] == true
+    local k = hat.slots.key or "my_var"
+    return getVar(ctx.game, k) == true
 end
 
 local function hat_flag_cleared_poll(hat, ctx)
-    return not flags(ctx.game)[hat.slots.key or "X"]
+    local k = hat.slots.key or "my_var"
+    return not getVar(ctx.game, k)
 end
 
 -- ── Conditions: per-vehicle context ──────────────────────────────────────────
@@ -611,6 +615,15 @@ local function set_speed_mult(block, ctx)
         ctx.vehicle.speed_modifier = (block.slots.value or 100) / 100
     end
     return false
+end
+
+local function assign_ctx(block, ctx)
+    local v = ctx.vehicle
+    local t = ctx.trip
+    if not v or not t then return false end
+    if not v:isAvailable(ctx.game) then return false end
+    v:assignTrip(t, ctx.game)
+    return "claimed"
 end
 
 local function fire_vehicle(block, ctx)
@@ -1102,6 +1115,9 @@ return {
     this_vehicle_idle    = this_vehicle_idle,
     this_vehicle_speed   = this_vehicle_speed,
     this_vehicle_trips   = this_vehicle_trips,
+
+    -- Actions: find + assign
+    assign_ctx           = assign_ctx,
 
     -- Actions: per-vehicle
     unassign_vehicle     = unassign_vehicle,

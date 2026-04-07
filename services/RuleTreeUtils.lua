@@ -47,6 +47,21 @@ function RuleTreeUtils.newControlNode(def_id, condition, body, else_body)
     }
 end
 
+-- Find node: C-block that queries the world for a matching trip or vehicle,
+-- then runs its body once with that entity in context.
+-- slots:     sort_by, order, vehicle_type (for ctrl_find_vehicle)
+-- condition: bool-node filter (nil = accept first)
+-- body:      array of stack-nodes
+function RuleTreeUtils.newFindNode(def_id, slots, body)
+    return {
+        kind      = "find",
+        def_id    = def_id,
+        slots     = slots or {},
+        condition = nil,
+        body      = body or {},
+    }
+end
+
 -- Loop node: C-block that iterates.
 -- slots:     key/value table (e.g. { n=3 } or { vehicle_type="bike" })
 -- body:      array of stack-nodes
@@ -324,7 +339,7 @@ function RuleTreeUtils.walkTree(stack, fn, _path)
                 else_path[#else_path+1] = "else_body"
                 RuleTreeUtils.walkTree(node.else_body, fn, else_path)
             end
-        elseif node.kind == "loop" then
+        elseif node.kind == "loop" or node.kind == "find" then
             -- Walk body
             local body_path = {}
             for _, k in ipairs(node_path) do body_path[#body_path+1] = k end

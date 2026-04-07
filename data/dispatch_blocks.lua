@@ -31,16 +31,15 @@ local SECONDS_SLOT  = { key = "seconds",      type = "number",       default = 1
 local VEHICLE_SLOT  = { key = "vehicle_type", type = "vehicle_enum", default = "bike" }
 local QUEUE_SLOT    = { key = "value",        type = "number",       default = 5,   step = 1,   min = 0 }
 local MONEY_SLOT    = { key = "value",        type = "number",       default = 500, step = 100, min = 0 }
-local COUNTER_SLOT  = { key = "key",          type = "enum",         options = COUNTER_KEYS, default = "A" }
+local VAR_SLOT      = { key = "key",          type = "string",       default = "my_var" }
 local COUNT_VAL     = { key = "value",        type = "number",       default = 0,   step = 1,   min = 0 }
-local FLAG_SLOT     = { key = "key",          type = "enum",         options = FLAG_KEYS,    default = "X" }
 local AMOUNT_SLOT   = { key = "amount",       type = "number",       default = 1,   step = 1,   min = 1 }
 local N_SLOT        = { key = "n",            type = "number",       default = 1,   step = 1,   min = 1 }
 
 -- Reusable operator slots
 local OP_CMP_SLOT   = { key = "op",  type = "enum", options = { ">", "<", "=" },   default = ">" }
 local OP_DELTA_SLOT = { key = "op",  type = "enum", options = { "+=", "-=" },       default = "+=" }
-local TEXT_VAR_SLOT = { key = "key", type = "text_var_enum", default = "A" }
+local TEXT_VAR_SLOT = { key = "key", type = "string",       default = "my_var" }
 
 -- Reporter input slots (accept literal number or reporter node)
 local REP_A = { key = "a", type = "number", default = 0, step = 1, min = nil }
@@ -54,7 +53,7 @@ return {
 
     { id           = "trigger_trip",
       category     = "hat",
-      tags         = { "trigger" },
+      tags         = { "trigger", "trip" },
       color        = { 0.85, 0.65, 0.10 },
       label        = "when trip pending",
       tooltip      = "Trigger: fires when a new delivery trip enters the pending queue. Every rule must start with this block.",
@@ -112,6 +111,16 @@ return {
       label        = "when vehicle returns to depot",
       tooltip      = "Fires when a vehicle arrives back at its depot after its last delivery.",
       slots        = { VEHICLE_SLOT },
+      must_be_first = true, max_per_rule = 1 },
+
+    { id           = "hat_hotkey",
+      category     = "hat",
+      event_type   = "hotkey",
+      tags         = { "trigger", "logic" },
+      color        = { 0.70, 0.42, 0.18 },
+      label        = "when hotkey pressed",
+      tooltip      = "Fires when the player presses the chosen key. Works regardless of dispatch unlock.",
+      slots        = { { key="key", type="key_enum", default="1" } },
       must_be_first = true, max_per_rule = 1 },
 
     { id           = "hat_vehicle_dismissed",
@@ -234,7 +243,7 @@ return {
       color        = { 0.55, 0.38, 0.80 },
       label        = "while counter at least",
       tooltip      = "Fires each dispatch tick while the named counter is at or above the value.",
-      slots        = { COUNTER_SLOT, COUNT_VAL },
+      slots        = { VAR_SLOT, COUNT_VAL },
       must_be_first = true, max_per_rule = 1 },
 
     { id           = "hat_counter_drops",
@@ -245,7 +254,7 @@ return {
       color        = { 0.55, 0.38, 0.80 },
       label        = "while counter below",
       tooltip      = "Fires each dispatch tick while the named counter is below the value.",
-      slots        = { COUNTER_SLOT, COUNT_VAL },
+      slots        = { VAR_SLOT, COUNT_VAL },
       must_be_first = true, max_per_rule = 1 },
 
     { id           = "hat_flag_set",
@@ -256,7 +265,7 @@ return {
       color        = { 0.55, 0.38, 0.80 },
       label        = "while flag set",
       tooltip      = "Fires each dispatch tick while the named flag is set.",
-      slots        = { FLAG_SLOT },
+      slots        = { VAR_SLOT },
       must_be_first = true, max_per_rule = 1 },
 
     { id           = "hat_flag_cleared",
@@ -267,7 +276,7 @@ return {
       color        = { 0.55, 0.38, 0.80 },
       label        = "while flag clear",
       tooltip      = "Fires each dispatch tick while the named flag is clear.",
-      slots        = { FLAG_SLOT },
+      slots        = { VAR_SLOT },
       must_be_first = true, max_per_rule = 1 },
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -411,7 +420,7 @@ return {
 
     { id           = "cond_vehicle_idle",
       category     = "boolean",
-      tags         = { "vehicle" },
+      tags         = { "vehicle", "game" },
       color        = { 0.28, 0.72, 0.58 },
       label        = "any idle",
       tooltip      = "True when at least one vehicle of the chosen type is idle and eligible for this trip.",
@@ -421,7 +430,7 @@ return {
 
     { id           = "cond_vehicle_none",
       category     = "boolean",
-      tags         = { "vehicle" },
+      tags         = { "vehicle", "game" },
       color        = { 0.28, 0.72, 0.58 },
       label        = "no idle",
       tooltip      = "True when NO vehicles of the chosen type are idle and eligible for this trip.",
@@ -431,7 +440,7 @@ return {
 
     { id           = "cond_idle_count",
       category     = "boolean",
-      tags         = { "vehicle" },
+      tags         = { "vehicle", "game" },
       color        = { 0.28, 0.72, 0.58 },
       label        = "idle count",
       tooltip      = "True when the number of idle eligible vehicles of the chosen type satisfies the comparison against N.",
@@ -454,7 +463,7 @@ return {
 
     { id           = "cond_queue",
       category     = "boolean",
-      tags         = { "game" },
+      tags         = { "game", "trip" },
       color        = { 0.35, 0.65, 0.72 },
       label        = "queue",
       tooltip      = "True when the number of unassigned pending trips satisfies the comparison against the value.",
@@ -532,37 +541,37 @@ return {
       color        = { 0.55, 0.38, 0.80 },
       label        = "counter",
       tooltip      = "True when the named counter (A-E) satisfies the comparison. Counters persist across ticks and rules.",
-      slots        = { COUNTER_SLOT, OP_CMP_SLOT, COUNT_VAL },
+      slots        = { VAR_SLOT, OP_CMP_SLOT, COUNT_VAL },
       evaluator    = "counter_compare",
       assertion    = { subject = "counter", property = "value", op_from_slot = "op", slot = "value", key_slot = "key" } },
 
     { id           = "cond_flag_set",
       category     = "boolean",
-      tags         = { "counter" },
+      tags         = { "counter", "logic" },
       color        = { 0.55, 0.38, 0.80 },
       label        = "flag set",
       tooltip      = "True when the named flag (X, Y, Z) has been set. Flags are persistent boolean markers you control with 'set flag' / 'clear flag'.",
-      slots        = { FLAG_SLOT },
+      slots        = { VAR_SLOT },
       evaluator    = "flag_is_set",
       assertion    = { subject = "flag", property = "state", op = "set",   key_slot = "key" } },
 
     { id           = "cond_flag_clear",
       category     = "boolean",
-      tags         = { "counter" },
+      tags         = { "counter", "logic" },
       color        = { 0.55, 0.38, 0.80 },
       label        = "flag clear",
       tooltip      = "True when the named flag is NOT set.",
-      slots        = { FLAG_SLOT },
+      slots        = { VAR_SLOT },
       evaluator    = "flag_is_clear",
       assertion    = { subject = "flag", property = "state", op = "clear", key_slot = "key" } },
 
     { id           = "cond_counter_mod",
       category     = "boolean",
-      tags         = { "counter" },
+      tags         = { "counter", "logic" },
       color        = { 0.55, 0.38, 0.80 },
       label        = "counter mod",
       tooltip      = "True when counter[A] mod M equals R. Use to trigger every Nth event (e.g. counter A mod 5 = 0 fires every 5 increments).",
-      slots        = { COUNTER_SLOT, { key="m", type="number", default=2, step=1, min=1 }, { key="r", type="number", default=0, step=1, min=0 } },
+      slots        = { VAR_SLOT, { key="m", type="number", default=2, step=1, min=1 }, { key="r", type="number", default=0, step=1, min=0 } },
       evaluator    = "counter_mod" },
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -700,7 +709,7 @@ return {
       color        = { 0.52, 0.28, 0.80 },
       label        = "counter",
       tooltip      = "Side-effect: adds or subtracts a fixed amount from the named counter. Does not claim the trip — execution continues.",
-      slots        = { COUNTER_SLOT, OP_DELTA_SLOT, AMOUNT_SLOT },
+      slots        = { VAR_SLOT, OP_DELTA_SLOT, AMOUNT_SLOT },
       evaluator    = "counter_change" },
 
     { id           = "effect_counter_reset",
@@ -709,7 +718,7 @@ return {
       color        = { 0.52, 0.28, 0.80 },
       label        = "reset counter",
       tooltip      = "Side-effect: sets the named counter back to zero.",
-      slots        = { COUNTER_SLOT },
+      slots        = { VAR_SLOT },
       evaluator    = "counter_reset" },
 
     { id           = "effect_flag_set",
@@ -718,7 +727,7 @@ return {
       color        = { 0.52, 0.28, 0.80 },
       label        = "set flag",
       tooltip      = "Side-effect: marks the named flag as set. Use with 'flag set' conditions in other rules to coordinate behaviour.",
-      slots        = { FLAG_SLOT },
+      slots        = { VAR_SLOT },
       evaluator    = "flag_set" },
 
     { id           = "effect_flag_clear",
@@ -727,7 +736,7 @@ return {
       color        = { 0.52, 0.28, 0.80 },
       label        = "clear flag",
       tooltip      = "Side-effect: clears the named flag (sets it to false).",
-      slots        = { FLAG_SLOT },
+      slots        = { VAR_SLOT },
       evaluator    = "flag_clear" },
 
     { id           = "effect_set_counter",
@@ -736,7 +745,7 @@ return {
       color        = { 0.52, 0.28, 0.80 },
       label        = "set counter",
       tooltip      = "Side-effect: sets a counter to an absolute value (unlike 'counter +=/-=' which adds/subtracts).",
-      slots        = { COUNTER_SLOT, { key="value", type="number", default=0, step=1, min=0 } },
+      slots        = { VAR_SLOT, { key="value", type="number", default=0, step=1, min=0 } },
       evaluator    = "set_counter" },
 
     { id           = "effect_reset_all_counters",
@@ -754,7 +763,7 @@ return {
       color        = { 0.52, 0.28, 0.80 },
       label        = "toggle flag",
       tooltip      = "Side-effect: flips a flag — set becomes clear, clear becomes set.",
-      slots        = { FLAG_SLOT },
+      slots        = { VAR_SLOT },
       evaluator    = "toggle_flag" },
 
     { id           = "effect_swap_counters",
@@ -791,7 +800,7 @@ return {
 
     { id           = "action_sort_queue",
       category     = "stack",
-      tags         = { "trip" },
+      tags         = { "trip", "game" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "sort queue by",
       tooltip      = "Sorts the entire pending trip queue by the chosen field. payout=highest first, wait=longest waiting first, scope=smallest first, cargo=largest first.",
@@ -800,7 +809,7 @@ return {
 
     { id           = "action_cancel_all_scope",
       category     = "stack",
-      tags         = { "trip" },
+      tags         = { "trip", "game" },
       color        = { 0.62, 0.18, 0.18 },
       label        = "cancel all scope",
       tooltip      = "Cancels every pending trip with the matching scope (including this one if it matches). Useful for bulk purge on overload.",
@@ -810,7 +819,7 @@ return {
 
     { id           = "action_cancel_all_wait",
       category     = "stack",
-      tags         = { "trip" },
+      tags         = { "trip", "game" },
       color        = { 0.62, 0.18, 0.18 },
       label        = "cancel all waited",
       tooltip      = "Cancels every pending trip whose wait time satisfies the comparison (e.g. waited > 120s). Clears stale trips automatically.",
@@ -940,7 +949,7 @@ return {
 
     { id           = "action_unassign_vehicle",
       category     = "stack",
-      tags         = { "vehicle" },
+      tags         = { "vehicle", "trip" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "unassign this vehicle",
       tooltip      = "Returns all of this vehicle's queued trips back to the pending queue.",
@@ -1114,7 +1123,7 @@ return {
       color        = { 0.55, 0.38, 0.80 },
       label        = "counter",
       tooltip      = "Returns the value of the named counter.",
-      slots        = { COUNTER_SLOT },
+      slots        = { VAR_SLOT },
       evaluator    = "rep_counter" },
 
     { id           = "rep_flag",
@@ -1123,7 +1132,7 @@ return {
       color        = { 0.55, 0.38, 0.80 },
       label        = "flag as number",
       tooltip      = "Returns 1 if the named flag is set, 0 if clear.",
-      slots        = { FLAG_SLOT },
+      slots        = { VAR_SLOT },
       evaluator    = "rep_flag" },
 
     { id           = "rep_text_var",
@@ -1737,5 +1746,39 @@ return {
       event_type   = "poll",
       hat_evaluator = "hat_after_n_seconds",
       slots        = { { key="seconds", type="number", default=10, step=5, min=1 } } },
+
+    -- ── Find + query blocks ───────────────────────────────────────────────────
+
+    { id           = "ctrl_find_trip",
+      category     = "control",
+      node_kind    = "find",
+      tags         = { "trip", "logic" },
+      color        = { 0.25, 0.55, 0.75 },
+      label        = "find trip",
+      tooltip      = "Queries pending trips matching the condition, sorted by the chosen field. Runs the body once with ctx.trip set to the first match.",
+      slots        = { { key="sort_by", type="enum", default="wait",
+                         options={"wait","payout","scope","none"} },
+                       { key="order",   type="enum", default="desc",
+                         options={"desc","asc"} } } },
+
+    { id           = "ctrl_find_vehicle",
+      category     = "control",
+      node_kind    = "find",
+      tags         = { "vehicle", "logic" },
+      color        = { 0.25, 0.55, 0.75 },
+      label        = "find vehicle",
+      tooltip      = "Queries idle vehicles of the chosen type matching the condition. Runs the body once with ctx.vehicle set to the first match.",
+      slots        = { VEHICLE_SLOT,
+                       { key="sort_by", type="enum", default="speed",
+                         options={"speed","capacity","idle_time","none"} } } },
+
+    { id           = "action_assign_ctx",
+      category     = "stack",
+      tags         = { "trip", "vehicle", "logic" },
+      color        = { 0.85, 0.50, 0.15 },
+      label        = "assign trip to vehicle",
+      tooltip      = "Assigns ctx.trip to ctx.vehicle. Use inside nested 'find trip' + 'find vehicle' blocks.",
+      slots        = {},
+      evaluator    = "assign_ctx" },
 
 }

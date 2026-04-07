@@ -6,6 +6,7 @@
 local DispatchTab = {}
 
 local Validator = require("services.DispatchValidator")
+local TextInput = require("views.components.TextInput")
 
 -- ── Visual constants ──────────────────────────────────────────────────────────
 
@@ -61,6 +62,10 @@ local state = {
         search         = "",
         search_focused = false,
     },
+    -- New componentized inputs
+    search_input = nil,
+    slot_input   = nil, -- { node, slot_key, input_component }
+
     -- populated each draw frame:
     node_rects           = {},
     drop_targets         = {},
@@ -77,6 +82,7 @@ local hover = {
     id           = nil,    -- unique string identifying hovered element
     timer        = 0,
     tooltip_text = nil,
+    tooltip_tags = nil,    -- array of tag strings for pill rendering
     mx           = 0,
     my           = 0,
 }
@@ -88,6 +94,20 @@ function DispatchTab.getState() return state end
 local function polyHat(x, y, w, h)
     local nx, nxr = x + NOTCH_X, x + NOTCH_X + NOTCH_W
     return { x, y,  x+w, y,  x+w, y+h,  nxr, y+h,  nxr, y+h+NOTCH_H,  nx, y+h+NOTCH_H,  nx, y+h,  x, y+h }
+end
+
+-- Shadow variants: flat bottom (no bump) so the shadow of block N
+-- doesn't bleed into the top-notch area of block N+1.
+local function polyHatShadow(x, y, w, h)
+    return { x, y,  x+w, y,  x+w, y+h,  x, y+h }
+end
+
+local function polyStackShadow(x, y, w, h)
+    local nx, nxr = x + NOTCH_X, x + NOTCH_X + NOTCH_W
+    return {
+        x, y,   nx, y,   nx, y+NOTCH_H,   nxr, y+NOTCH_H,   nxr, y,   x+w, y,
+        x+w, y+h,   x, y+h
+    }
 end
 
 local function polyStack(x, y, w, h)
@@ -171,7 +191,7 @@ local function measureNode(node)
             h = h + eh + CAP_H
         end
         return h
-    elseif node.kind == "loop" then
+    elseif node.kind == "loop" or node.kind == "find" then
         local bh = math.max(MIN_BODY_H, measureStack(node.body or {}))
         return STACK_H + bh + CAP_H
     end
@@ -182,77 +202,6 @@ measureStack = function(stack)
     local h = 0
     for _, n in ipairs(stack or {}) do h = h + measureNode(n) end
     return h
-end
-
--- ── Bool node width ───────────────────────────────────────────────────────────
-
-local function boolNodeW(node, font)
-    if not node then return 60 end
-    local id  = node.def_id
-    local RE  = require("services.DispatchRuleEngine")
-    local def = RE.getDefById(id)
-    if id == "bool_and" or id == "bool_or" then
-        local lbl_w = font:getWidth(def and def.label or id) + 16
-        return BOOL_ANGLE + boolNodeW(node.left, font) + lbl_w + boolNodeW(node.right, font) + BOOL_ANGLE
-    elseif id == "bool_not" then
-        local lbl_w = font:getWidth("not") + 16
-        return BOOL_ANGLE + lbl_w + boolNodeW(node.operand, font) + BOOL_ANGLE
-    else
-        if not def then return 60 end
-        local w = BOOL_ANGLE * 2 + font:getWidth(def.label or "") + 16
-        for _, sd in ipairs(def.slots or {}) do
-            local raw = node.slots and node.slots[sd.key] or sd.default or ""
-            w = w + font:getWidth(slotStr(raw)) + 18
-        end
-        return math.max(60, w)
-    end
-end
-
-local function stackNaturalW(node, font)
-    local RE  = require("services.DispatchRuleEngine")
-    local def = RE.getDefById(node.def_id)
-    local w   = font:getWidth((def and def.label) or "") + 24
-    for _, sd in ipairs((def and def.slots) or {}) do
-        local raw = (node.slots and node.slots[sd.key]) or sd.default or ""
-        w = w + font:getWidth(slotStr(raw)) + 22
-    end
-    return math.max(160, math.min(STACK_W_MAX, w))
-end
-
-local function controlNaturalW(node, font)
-    local cond_w = node.condition and boolNodeW(node.condition, font) or 80
-    return math.max(220, C_INDENT + 16 + cond_w + 16)
-end
-
-local function loopNaturalW(node, font)
-    local RE  = require("services.DispatchRuleEngine")
-    local def = RE.getDefById(node.def_id)
-    if node.def_id == "ctrl_repeat_until" then
-        local cond_w = node.condition and boolNodeW(node.condition, font) or 70
-        return math.max(200, 8 + font:getWidth("repeat until") + 8 + cond_w + 8)
-    end
-    local lbl_w = def and font:getWidth(def.label or "") or 80
-    local slots_w = 0
-    for _, sd in ipairs(def and def.slots or {}) do
-        local val = (node.slots and node.slots[sd.key]) or sd.default or ""
-        slots_w = slots_w + math.max(28, font:getWidth(tostring(val)) + 10) + 4
-    end
-    return math.max(200, C_INDENT + 10 + lbl_w + 6 + slots_w + 10)
-end
-
--- ── Path helpers ──────────────────────────────────────────────────────────────
-
-local function pathsEqual(a, b)
-    if not a or not b or #a ~= #b then return false end
-    for i = 1, #a do if a[i] ~= b[i] then return false end end
-    return true
-end
-
-local function appendPath(base, key)
-    local p = {}
-    for _, k in ipairs(base or {}) do p[#p+1] = k end
-    p[#p+1] = key
-    return p
 end
 
 -- ── Slot pill helper ──────────────────────────────────────────────────────────
@@ -272,48 +221,36 @@ local function pillDisplay(val, focused)
     if type(val) == "table" and val.kind == "reporter" then
         return slotStr(val)
     end
-    return focused and (state.input_focus and state.input_focus.text or tostring(val)) or tostring(val)
+    if focused and state.slot_input then
+        return state.slot_input.input.text_buffer
+    end
+    return tostring(val)
 end
 
 local function drawSlotPill(val, x, y, block_h, font, alpha, focused)
     local s   = pillDisplay(val, focused)
     local fw  = font:getWidth(s)
-    local pw  = math.max(fw + 14, focused and 36 or (fw + 14))
+    local pw  = math.max(fw + 16, focused and 36 or (fw + 16))
     local fh  = font:getHeight()
     local py  = y + (block_h - 16) / 2
 
     local is_reporter = type(val) == "table" and val.kind == "reporter"
-    if focused then
-        love.graphics.setColor(0.05, 0.06, 0.15, 0.95 * alpha)
-        love.graphics.rectangle("fill", x, py, pw, 16, 3, 3)
-        love.graphics.setColor(0.45, 0.65, 1.0, alpha)
-        love.graphics.setLineWidth(1.5)
-        love.graphics.rectangle("line", x, py, pw, 16, 3, 3)
-        love.graphics.setLineWidth(1)
+    if focused and state.slot_input then
+        state.slot_input.input:draw(x, py, pw, 16)
     elseif is_reporter then
         love.graphics.setColor(0.22, 0.48, 0.55, 0.90 * alpha)
         love.graphics.rectangle("fill", x, py, pw, 16, 3, 3)
         love.graphics.setColor(0.40, 0.85, 0.90, 0.60 * alpha)
         love.graphics.rectangle("line", x, py, pw, 16, 3, 3)
+        love.graphics.setColor(1, 1, 1, alpha)
+        love.graphics.print(s, x + 7, py + (16 - fh) / 2)
     else
         love.graphics.setColor(0, 0, 0, 0.35 * alpha)
         love.graphics.rectangle("fill", x, py, pw, 16, 3, 3)
         love.graphics.setColor(1, 1, 1, 0.18 * alpha)
         love.graphics.rectangle("line", x, py, pw, 16, 3, 3)
-    end
-
-    love.graphics.setColor(1, 1, 1, alpha)
-    love.graphics.print(s, x + 7, py + (16 - fh) / 2)
-
-    -- Blinking cursor
-    if focused then
-        local cux = x + 7 + font:getWidth(s)
-        if math.floor(love.timer.getTime() * 2) % 2 == 0 then
-            love.graphics.setColor(1, 1, 1, alpha)
-            love.graphics.setLineWidth(1)
-            love.graphics.line(cux, py + 2, cux, py + 13)
-            love.graphics.setLineWidth(1)
-        end
+        love.graphics.setColor(1, 1, 1, alpha)
+        love.graphics.print(s, x + 7, py + (16 - fh) / 2)
     end
 
     return pw
@@ -322,7 +259,77 @@ end
 -- Compute pill width without drawing (for layout of right-aligned slots).
 local function pillWidth(val, font, focused)
     local s = pillDisplay(val, focused)
-    return math.max(font:getWidth(s) + 14, focused and 36 or 0)
+    return math.max(font:getWidth(s) + 16, focused and 36 or 0)
+end
+
+-- ── Natural Width measurement ──────────────────────────────────────────────────
+
+local function boolNodeW(node, font)
+    if not node then return 60 end
+    local id  = node.def_id
+    local RE  = require("services.DispatchRuleEngine")
+    local def = RE.getDefById(id)
+    if id == "bool_and" or id == "bool_or" then
+        local lbl_w = font:getWidth(def and def.label or id) + 16
+        return BOOL_ANGLE + boolNodeW(node.left, font) + lbl_w + boolNodeW(node.right, font) + BOOL_ANGLE
+    elseif id == "bool_not" then
+        local lbl_w = font:getWidth("not") + 16
+        return BOOL_ANGLE + lbl_w + boolNodeW(node.operand, font) + BOOL_ANGLE
+    else
+        if not def then return 60 end
+        local w = BOOL_ANGLE * 2 + font:getWidth(def.label or "") + 16
+        for _, sd in ipairs(def.slots or {}) do
+            local val    = node.slots and node.slots[sd.key] or sd.default or ""
+            local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+                           and state.slot_input
+                           and state.slot_input.node == node
+                           and state.slot_input.slot_key == sd.key
+            w = w + pillWidth(val, font, is_foc) + 4
+        end
+        return math.max(60, w)
+    end
+end
+
+local function stackNaturalW(node, font)
+    local RE  = require("services.DispatchRuleEngine")
+    local def = RE.getDefById(node.def_id)
+    local w   = font:getWidth((def and def.label) or "") + 24
+    for _, sd in ipairs((def and def.slots) or {}) do
+        local val    = (node.slots and node.slots[sd.key]) or sd.default or ""
+        local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+                       and state.slot_input
+                       and state.slot_input.node == node
+                       and state.slot_input.slot_key == sd.key
+        w = w + pillWidth(val, font, is_foc) + 6
+    end
+    return math.max(160, math.min(STACK_W_MAX, w))
+end
+
+local function controlNaturalW(node, font)
+    local cond_w = node.condition and boolNodeW(node.condition, font) or 80
+    -- If the control block itself has slots (like loop nodes), measure them too
+    local RE  = require("services.DispatchRuleEngine")
+    local def = RE.getDefById(node.def_id)
+    local slots_w = 0
+    if def and def.slots then
+        for _, sd in ipairs(def.slots) do
+            local val    = (node.slots and node.slots[sd.key]) or sd.default or ""
+            local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+                           and state.slot_input
+                           and state.slot_input.node == node
+                           and state.slot_input.slot_key == sd.key
+            slots_w = slots_w + pillWidth(val, font, is_foc) + 4
+        end
+    end
+    return math.max(220, C_INDENT + 16 + cond_w + 16 + slots_w)
+end
+
+local function loopNaturalW(node, font)
+    if node.def_id == "ctrl_repeat_until" then
+        local cond_w = node.condition and boolNodeW(node.condition, font) or 70
+        return math.max(200, 8 + font:getWidth("repeat until") + 8 + cond_w + 8)
+    end
+    return controlNaturalW(node, font)
 end
 
 -- ── Forward declarations ──────────────────────────────────────────────────────
@@ -331,6 +338,23 @@ local drawBoolNode
 local drawNodeList
 local drawControlNode
 local drawLoopNode
+local drawFindNode
+
+-- ── Path helpers ──────────────────────────────────────────────────────────────
+
+local function pathsEqual(a, b)
+    if not a or not b or #a ~= #b then return false end
+    for i = 1, #a do if a[i] ~= b[i] then return false end end
+    return true
+end
+
+local function appendPath(base, key)
+    local p = {}
+    for _, k in ipairs(base or {}) do p[#p+1] = k end
+    p[#p+1] = key
+    return p
+end
+
 
 -- ── drawBoolNode ──────────────────────────────────────────────────────────────
 
@@ -461,10 +485,10 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
             local val     = node.slots and node.slots[sd.key] or sd.default or ""
             local has_rep = type(val) == "table" and val.kind == "reporter"
             local is_foc  = not has_rep
-                            and (sd.type == "number" or sd.type == "string")
-                            and state.input_focus
-                            and state.input_focus.node_ref == node
-                            and state.input_focus.slot_key == sd.key
+                            and (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+                            and state.slot_input
+                            and state.slot_input.node == node
+                            and state.slot_input.slot_key == sd.key
             local pill_x = px
             local pw     = drawSlotPill(val, px, y, BOOL_H, font, alpha, is_foc)
             slot_rects[#slot_rects+1] = { key = sd.key, x = pill_x, w = pw, sd_type = sd.type }
@@ -492,7 +516,7 @@ local function drawHatNode(node, x, y, w, game, nrects, path, alpha)
 
     -- Shadow
     love.graphics.setColor(0, 0, 0, 0.22 * alpha)
-    love.graphics.polygon("fill", polyHat(x + 2, y + 2, w, STACK_H))
+    love.graphics.polygon("fill", polyHatShadow(x + 2, y + 2, w, STACK_H))
 
     love.graphics.setColor(c[1], c[2], c[3], alpha)
     love.graphics.polygon("fill", polyHat(x, y, w, STACK_H))
@@ -512,10 +536,10 @@ local function drawHatNode(node, x, y, w, game, nrects, path, alpha)
         for i = #(def.slots or {}), 1, -1 do
             local sd      = def.slots[i]
             local val     = node.slots and node.slots[sd.key] or sd.default or ""
-            local is_foc  = sd.type == "number"
-                            and state.input_focus
-                            and state.input_focus.node_ref == node
-                            and state.input_focus.slot_key == sd.key
+            local is_foc  = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+                            and state.slot_input
+                            and state.slot_input.node == node
+                            and state.slot_input.slot_key == sd.key
             local pw = pillWidth(val, font, is_foc)
             px = px - pw
             drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc)
@@ -542,7 +566,7 @@ local function drawStackNode(node, x, y, w, game, nrects, path, warn_map, alpha)
 
     -- Shadow
     love.graphics.setColor(0, 0, 0, 0.22 * alpha)
-    love.graphics.polygon("fill", polyStack(x + 2, y + 2, w, STACK_H))
+    love.graphics.polygon("fill", polyStackShadow(x + 2, y + 2, w, STACK_H))
 
     love.graphics.setColor(c[1], c[2], c[3], alpha)
     love.graphics.polygon("fill", polyStack(x, y, w, STACK_H))
@@ -577,10 +601,10 @@ local function drawStackNode(node, x, y, w, game, nrects, path, warn_map, alpha)
             local val      = node.slots and node.slots[sd.key] or sd.default or ""
             local has_rep  = type(val) == "table" and val.kind == "reporter"
             local is_foc   = not has_rep
-                             and (sd.type == "number" or sd.type == "string")
-                             and state.input_focus
-                             and state.input_focus.node_ref == node
-                             and state.input_focus.slot_key == sd.key
+                             and (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+                             and state.slot_input
+                             and state.slot_input.node == node
+                             and state.slot_input.slot_key == sd.key
             local pw = pillWidth(val, font, is_foc)
             px = px - pw
             drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc)
@@ -812,10 +836,10 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
                 local val     = (node.slots and node.slots[sd.key]) or sd.default or ""
                 local has_rep = type(val) == "table" and val.kind == "reporter"
                 local is_foc  = not has_rep
-                                and (sd.type == "number" or sd.type == "string")
-                                and state.input_focus
-                                and state.input_focus.node_ref == node
-                                and state.input_focus.slot_key == sd.key
+                                and (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+                                and state.slot_input
+                                and state.slot_input.node == node
+                                and state.slot_input.slot_key == sd.key
                 local pw  = pillWidth(val, font, is_foc)
                 px        = px - pw
                 drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc)
@@ -859,6 +883,97 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     end
 end
 
+-- ── drawFindNode ─────────────────────────────────────────────────────────────
+-- C-block (teal-blue) with sort pills + condition slot in header.
+
+drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, alpha)
+    local font    = game.fonts.ui_small
+    local fh      = font:getHeight()
+    alpha         = alpha or 1.0
+    local RE      = require("services.DispatchRuleEngine")
+    local def     = RE.getDefById(node.def_id)
+    local body_h  = math.max(MIN_BODY_H, measureStack(node.body or {}))
+    local find_c  = def and def.color or { 0.25, 0.55, 0.75 }
+
+    -- Shadow + fill
+    love.graphics.setColor(0, 0, 0, 0.20 * alpha)
+    love.graphics.polygon("fill", polyCBlock(x+2, y+2, w, body_h))
+    love.graphics.setColor(find_c[1], find_c[2], find_c[3], alpha)
+    love.graphics.polygon("fill", polyCBlock(x, y, w, body_h))
+    love.graphics.setColor(1, 1, 1, 0.15 * alpha)
+    love.graphics.setLineWidth(1)
+    love.graphics.polygon("line", polyCBlock(x, y, w, body_h))
+    love.graphics.setLineWidth(1)
+
+    -- Inner body background
+    love.graphics.setColor(0, 0, 0, 0.20 * alpha)
+    love.graphics.rectangle("fill", x + C_INDENT, y + STACK_H, w - C_INDENT, body_h)
+
+    -- ── Header: left-to-right  [label] [sort pills] [where] [condition] ──────
+    love.graphics.setFont(font)
+    local lbl        = (def and def.label) or node.def_id
+    local slot_rects = {}
+    local hx         = x + 10
+
+    -- Label
+    love.graphics.setColor(1, 1, 1, alpha)
+    love.graphics.print(lbl, hx, y + (STACK_H - fh) / 2)
+    hx = hx + font:getWidth(lbl) + 8
+
+    -- Sort slots (left to right, no overlap)
+    local slots = def and def.slots or {}
+    for _, sd in ipairs(slots) do
+        local val    = (node.slots and node.slots[sd.key]) or sd.default or ""
+        local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+                       and state.slot_input
+                       and state.slot_input.node == node
+                       and state.slot_input.slot_key == sd.key
+
+        local pw  = pillWidth(val, font, is_foc)
+        drawSlotPill(val, hx, y, STACK_H, font, alpha, is_foc)
+        slot_rects[#slot_rects+1] = { key = sd.key, x = hx, w = pw, sd_type = sd.type }
+        hx = hx + pw + 4
+    end
+
+    -- "where" separator
+    love.graphics.setColor(1, 1, 1, 0.50 * alpha)
+    love.graphics.print("where", hx, y + (STACK_H - fh) / 2)
+    hx = hx + font:getWidth("where") + 6
+
+    -- Condition slot
+    local cond_path = path and appendPath(path, "condition") or nil
+    drawBoolNode(node.condition, hx, y + (STACK_H - BOOL_H) / 2, game, nrects, dtargets, cond_path, warn_map, alpha)
+
+    -- ── Body ─────────────────────────────────────────────────────────────────
+    local body_x    = x + C_INDENT
+    local body_y    = y + STACK_H
+    local body_w    = w - C_INDENT
+    local body_path = path and appendPath(path, "body") or nil
+
+    -- Binding hint so user knows what's available inside
+    local bind_hint = (node.def_id == "ctrl_find_vehicle") and "ctx.vehicle = match" or "ctx.trip = match"
+    love.graphics.setFont(font)
+    love.graphics.setColor(1, 1, 1, 0.28 * alpha)
+    love.graphics.print(bind_hint, body_x + 4, body_y + 3)
+
+    if not node.body or #node.body == 0 then
+        love.graphics.setColor(1, 1, 1, 0.18 * alpha)
+        love.graphics.printf("drop actions here", body_x, body_y + fh + 6, body_w, "center")
+        if dtargets and body_path then
+            dtargets[#dtargets+1] = {
+                parent_path = body_path, slot = 1, accepts = "stack",
+                x = body_x, y = body_y, w = body_w, h = MIN_BODY_H
+            }
+        end
+    else
+        drawNodeList(node.body, body_x, body_y, body_w, game, nrects, dtargets, body_path, warn_map, alpha)
+    end
+
+    if nrects and path then
+        nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=measureNode(node), slot_rects=slot_rects }
+    end
+end
+
 -- ── drawNodeList ──────────────────────────────────────────────────────────────
 
 drawNodeList = function(stack, x, y, w, game, nrects, dtargets, path_prefix, warn_map, alpha)
@@ -871,10 +986,12 @@ drawNodeList = function(stack, x, y, w, game, nrects, dtargets, path_prefix, war
         }
     end
 
+    -- Pass 1: compute layout, register drop targets
+    local items = {}
+    local font  = game.fonts.ui_small
     for i, node in ipairs(stack or {}) do
         local node_path = appendPath(path_prefix, i)
-        local nh   = measureNode(node)
-        local font = game.fonts.ui_small
+        local nh = measureNode(node)
         local nw
         if node.kind == "hat" or node.kind == "stack" then
             nw = math.min(w, stackNaturalW(node, font))
@@ -882,27 +999,35 @@ drawNodeList = function(stack, x, y, w, game, nrects, dtargets, path_prefix, war
             nw = math.min(w, controlNaturalW(node, font))
         elseif node.kind == "loop" then
             nw = math.min(w, loopNaturalW(node, font))
+        elseif node.kind == "find" then
+            nw = math.min(w, controlNaturalW(node, font))
         else
             nw = math.min(w, 200)
         end
-
-        if node.kind == "hat" then
-            drawHatNode(node, x, cy, nw, game, nrects, node_path, alpha)
-        elseif node.kind == "stack" then
-            drawStackNode(node, x, cy, nw, game, nrects, node_path, warn_map, alpha)
-        elseif node.kind == "control" then
-            drawControlNode(node, x, cy, nw, game, nrects, dtargets, node_path, warn_map, alpha)
-        elseif node.kind == "loop" then
-            drawLoopNode(node, x, cy, nw, game, nrects, dtargets, node_path, warn_map, alpha)
-        end
-
+        items[i] = { node = node, node_path = node_path, cy = cy, nw = nw, nh = nh }
         cy = cy + nh
-
         if dtargets and path_prefix then
             dtargets[#dtargets+1] = {
                 parent_path = path_prefix, slot = i + 1, accepts = "stack",
                 x = x, y = cy - 10, w = w, h = 20
             }
+        end
+    end
+
+    -- Pass 2: draw bottom-to-top so upper blocks paint over lower notches
+    for i = #items, 1, -1 do
+        local it   = items[i]
+        local node = it.node
+        if node.kind == "hat" then
+            drawHatNode(node, x, it.cy, it.nw, game, nrects, it.node_path, alpha)
+        elseif node.kind == "stack" then
+            drawStackNode(node, x, it.cy, it.nw, game, nrects, it.node_path, warn_map, alpha)
+        elseif node.kind == "control" then
+            drawControlNode(node, x, it.cy, it.nw, game, nrects, dtargets, it.node_path, warn_map, alpha)
+        elseif node.kind == "loop" then
+            drawLoopNode(node, x, it.cy, it.nw, game, nrects, dtargets, it.node_path, warn_map, alpha)
+        elseif node.kind == "find" then
+            drawFindNode(node, x, it.cy, it.nw, game, nrects, dtargets, it.node_path, warn_map, alpha)
         end
     end
 
@@ -1120,16 +1245,23 @@ end
 -- ── Palette filter helpers ────────────────────────────────────────────────────
 
 -- Returns the subset of `all` that passes the current tag + search filters.
+-- Multi-tag: a block passes only if it has ALL active tags (AND semantics).
 local function filterDefs(all, filter)
     local has_tags = next(filter.active_tags) ~= nil
     local search   = filter.search:lower()
     local result   = {}
     for _, def in ipairs(all) do
-        -- Tag: pass if no active tags, or block has at least one matching tag
-        local tag_ok = not has_tags
-        if has_tags and def.tags then
-            for _, t in ipairs(def.tags) do
-                if filter.active_tags[t] then tag_ok = true; break end
+        -- Tag: must have every active tag
+        local tag_ok = true
+        if has_tags then
+            for t in pairs(filter.active_tags) do
+                local found = false
+                if def.tags then
+                    for _, dt in ipairs(def.tags) do
+                        if dt == t then found = true; break end
+                    end
+                end
+                if not found then tag_ok = false; break end
             end
         end
         -- Search: pass if empty or matches label or tooltip text
@@ -1139,6 +1271,54 @@ local function filterDefs(all, filter)
         if tag_ok and search_ok then result[#result+1] = def end
     end
     return result
+end
+
+-- Groups a flat list of defs by category, sorted by hue within each group.
+-- Returns an array of { cat, defs } in the canonical category order.
+local CAT_ORDER = { "hat", "control", "loop", "find", "boolean", "reporter", "stack" }
+
+local function rgbHue(r, g, b)
+    local mx = math.max(r, g, b)
+    local mn = math.min(r, g, b)
+    local d  = mx - mn
+    if d < 0.001 then return 0 end  -- achromatic
+    local h
+    if mx == r then     h = (g - b) / d % 6
+    elseif mx == g then h = (b - r) / d + 2
+    else                h = (r - g) / d + 4
+    end
+    return h / 6  -- 0–1
+end
+
+local function groupDefs(visible)
+    local by_cat  = {}
+    local seen    = {}
+    for _, def in ipairs(visible) do
+        local c = def.category
+        if not by_cat[c] then by_cat[c] = {}; seen[#seen+1] = c end
+        by_cat[c][#by_cat[c]+1] = def
+    end
+    -- Sort each group by hue so same-coloured blocks cluster together
+    for _, defs in pairs(by_cat) do
+        table.sort(defs, function(a, b)
+            local ca, cb = a.color or {0.5,0.5,0.5}, b.color or {0.5,0.5,0.5}
+            return rgbHue(ca[1],ca[2],ca[3]) < rgbHue(cb[1],cb[2],cb[3])
+        end)
+    end
+    local groups = {}
+    for _, c in ipairs(CAT_ORDER) do
+        if by_cat[c] then groups[#groups+1] = { cat=c, defs=by_cat[c] }; by_cat[c]=nil end
+    end
+    for _, c in ipairs(seen) do
+        if by_cat[c] then groups[#groups+1] = { cat=c, defs=by_cat[c] } end
+    end
+    return groups
+end
+
+-- Returns tooltip text for a def (plain, no tags — tags rendered as pills separately).
+local function defTooltip(def)
+    if not def then return nil end
+    return def.tooltip ~= "" and def.tooltip or nil
 end
 
 -- Computes the pixel height consumed by the filter header (tag pills + search field).
@@ -1171,24 +1351,22 @@ local function makePalette(rule_i, panel_w)
     local function calcPaletteH(pw)
         local font     = love.graphics.getFont()
         local filter_h = calcFilterHeaderH(font, pw, pad)
-        local visible  = filterDefs(all, state.palette_filter)
-        local cx, cy   = pad, pad + filter_h + CAT_HDR_H
-        local last_cat = nil
-        for _, def in ipairs(visible) do
-            if def.category ~= last_cat then
-                if last_cat then cy = cy + rowH(last_cat) + PAL_GAP + 6 + CAT_HDR_H end
-                cx = pad
-                last_cat = def.category
-            end
-            local bw = math.max(70, font:getWidth(def.label or "") + 24)
-            if cx + bw > pw - pad and cx > pad then cx = pad; cy = cy + rowH(def.category) + PAL_GAP end
-            cx = cx + bw + PAL_GAP
-        end
-        if not last_cat then
-            -- empty result: just need space for the "no blocks match" message
+        local groups   = groupDefs(filterDefs(all, state.palette_filter))
+        if #groups == 0 then
             return pad + filter_h + 40 + pad
         end
-        return cy + rowH(last_cat) + pad + 8
+        local cy = pad + filter_h
+        for _, g in ipairs(groups) do
+            cy = cy + CAT_HDR_H  -- section header
+            local cx = pad
+            for _, def in ipairs(g.defs) do
+                local bw = math.max(70, font:getWidth(def.label or "") + 24)
+                if cx + bw > pw - pad and cx > pad then cx = pad; cy = cy + rowH(g.cat) + PAL_GAP end
+                cx = cx + bw + PAL_GAP
+            end
+            cy = cy + rowH(g.cat) + PAL_GAP + 6  -- row + spacing after section
+        end
+        return cy + pad
     end
 
     local comp_h = calcPaletteH(panel_w)
@@ -1271,139 +1449,112 @@ local function makePalette(rule_i, panel_w)
             local sf_w = pw - pad * 2
             local sf_h = SEARCH_H
 
-            if filter.search_focused then
-                love.graphics.setColor(0.05, 0.06, 0.15, 0.95)
-                love.graphics.rectangle("fill", sf_x, sf_y, sf_w, sf_h, 3, 3)
-                love.graphics.setColor(0.45, 0.65, 1.0, 1.0)
-                love.graphics.setLineWidth(1.5)
-                love.graphics.rectangle("line", sf_x, sf_y, sf_w, sf_h, 3, 3)
-                love.graphics.setLineWidth(1)
-            else
-                love.graphics.setColor(0.11, 0.11, 0.18, 1.0)
-                love.graphics.rectangle("fill", sf_x, sf_y, sf_w, sf_h, 3, 3)
-                love.graphics.setColor(0.25, 0.25, 0.38, 1.0)
-                love.graphics.setLineWidth(1)
-                love.graphics.rectangle("line", sf_x, sf_y, sf_w, sf_h, 3, 3)
+            if not state.search_input then
+                state.search_input = TextInput:new("", filter.search, "text", function(val)
+                    filter.search = val
+                end, game)
             end
+            state.search_input.value = filter.search
+            state.search_input.is_focused = filter.search_focused
+            state.search_input:draw(sf_x, sf_y, sf_w, sf_h)
 
             local icon_w = font:getWidth("⌕") + 6
             love.graphics.setColor(0.45, 0.45, 0.62, 1.0)
             love.graphics.print("⌕", sf_x + 5, sf_y + (sf_h - fh) / 2)
 
-            if filter.search ~= "" then
-                love.graphics.setColor(1, 1, 1, 1.0)
-                love.graphics.print(filter.search, sf_x + icon_w + 4, sf_y + (sf_h - fh) / 2)
-                -- Blinking cursor when focused
-                if filter.search_focused then
-                    local cux = sf_x + icon_w + 4 + font:getWidth(filter.search)
-                    if math.floor(love.timer.getTime() * 2) % 2 == 0 then
-                        love.graphics.setColor(1, 1, 1, 1.0)
-                        love.graphics.setLineWidth(1)
-                        love.graphics.line(cux, sf_y + 3, cux, sf_y + sf_h - 3)
-                    end
-                end
-            else
+            if filter.search == "" and not filter.search_focused then
                 love.graphics.setColor(0.35, 0.35, 0.52, 1.0)
                 love.graphics.print("search blocks...", sf_x + icon_w + 4, sf_y + (sf_h - fh) / 2)
-                if filter.search_focused then
-                    local cux = sf_x + icon_w + 4
-                    if math.floor(love.timer.getTime() * 2) % 2 == 0 then
-                        love.graphics.setColor(1, 1, 1, 0.8)
-                        love.graphics.setLineWidth(1)
-                        love.graphics.line(cux, sf_y + 3, cux, sf_y + sf_h - 3)
-                    end
-                end
             end
 
             state.palette_search_rect = { x=sf_x, y=sf_y, w=sf_w, h=sf_h }
 
-            -- ── Block list (filtered) ────────────────────────────────────────
-            local visible = filterDefs(all, filter)
-            local cx, cy  = px + pad, sf_y + sf_h + PAL_GAP
-            local last_cat = nil
-            local prects   = {}
+            -- ── Block list (filtered + grouped by category) ──────────────────
+            local groups = groupDefs(filterDefs(all, filter))
+            local cy     = sf_y + sf_h + PAL_GAP
+            local prects = {}
 
-            if #visible == 0 then
+            if #groups == 0 then
                 love.graphics.setFont(font)
                 love.graphics.setColor(0.38, 0.38, 0.55)
                 love.graphics.printf("no blocks match", px, cy + 10, pw, "center")
             else
-                for _, def in ipairs(visible) do
-                    if def.category ~= last_cat then
-                        if last_cat then
-                            cy = cy + rowH(last_cat) + PAL_GAP + 6
-                        end
-                        cx = px + pad
-                        last_cat = def.category
-                        love.graphics.setFont(font)
-                        love.graphics.setColor(0.50, 0.50, 0.68)
-                        love.graphics.print(def.category:upper(), cx, cy)
-                        cy = cy + CAT_HDR_H
-                    end
-
+                for _, g in ipairs(groups) do
+                    local cat = g.cat
+                    -- Section header
                     love.graphics.setFont(font)
-                    local bw = math.max(70, font:getWidth(def.label or "") + 24)
-                    if cx + bw > px + pw - pad and cx > px + pad then
-                        cx = px + pad
-                        cy = cy + rowH(def.category) + PAL_GAP
-                    end
+                    love.graphics.setColor(0.50, 0.50, 0.68)
+                    love.graphics.print(cat:upper(), px + pad, cy)
+                    cy = cy + CAT_HDR_H
 
-                    local v  = validity[def.id]
-                    local ok = not v or v.valid
-                    local a  = ok and 1.0 or 0.18
-                    local c  = def.color or { 0.5, 0.5, 0.5 }
-
-                    -- Drop shadow
-                    if ok then
-                        love.graphics.setColor(0, 0, 0, 0.25)
-                        if def.category == "hat" then
-                            love.graphics.polygon("fill", polyHat(cx+1, cy+2, bw, PAL_BLOCK_H - NOTCH_H))
-                        elseif def.category == "boolean" then
-                            love.graphics.polygon("fill", polyBool(cx+1, cy+2, bw, PAL_BLOCK_H))
-                        elseif def.category == "stack" then
-                            love.graphics.polygon("fill", polyStack(cx+1, cy+2, bw, PAL_BLOCK_H - NOTCH_H))
+                    local cx = px + pad
+                    for _, def in ipairs(g.defs) do
+                        love.graphics.setFont(font)
+                        local bw = math.max(70, font:getWidth(def.label or "") + 24)
+                        if cx + bw > px + pw - pad and cx > px + pad then
+                            cx = px + pad
+                            cy = cy + rowH(cat) + PAL_GAP
                         end
+
+                        local v  = validity[def.id]
+                        local ok = not v or v.valid
+                        local a  = ok and 1.0 or 0.18
+                        local c  = def.color or { 0.5, 0.5, 0.5 }
+
+                        -- Drop shadow
+                        if ok then
+                            love.graphics.setColor(0, 0, 0, 0.25)
+                            if cat == "hat" then
+                                love.graphics.polygon("fill", polyHat(cx+1, cy+2, bw, PAL_BLOCK_H - NOTCH_H))
+                            elseif cat == "boolean" then
+                                love.graphics.polygon("fill", polyBool(cx+1, cy+2, bw, PAL_BLOCK_H))
+                            elseif cat == "stack" then
+                                love.graphics.polygon("fill", polyStack(cx+1, cy+2, bw, PAL_BLOCK_H - NOTCH_H))
+                            end
+                        end
+
+                        -- Shape fill
+                        love.graphics.setColor(c[1], c[2], c[3], a)
+                        if cat == "hat" then
+                            love.graphics.polygon("fill", polyHat(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
+                        elseif cat == "boolean" then
+                            love.graphics.polygon("fill", polyBool(cx, cy, bw, PAL_BLOCK_H))
+                        elseif cat == "stack" then
+                            love.graphics.polygon("fill", polyStack(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
+                        else
+                            love.graphics.polygon("fill", polyHat(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
+                        end
+
+                        -- Border
+                        love.graphics.setColor(1, 1, 1, 0.18 * a)
+                        love.graphics.setLineWidth(1)
+                        if cat == "hat" then
+                            love.graphics.polygon("line", polyHat(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
+                        elseif cat == "boolean" then
+                            love.graphics.polygon("line", polyBool(cx, cy, bw, PAL_BLOCK_H))
+                        elseif cat == "stack" then
+                            love.graphics.polygon("line", polyStack(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
+                        else
+                            love.graphics.polygon("line", polyHat(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
+                        end
+                        love.graphics.setLineWidth(1)
+
+                        -- Label
+                        love.graphics.setColor(1, 1, 1, a)
+                        local lbl_h = (cat == "boolean") and PAL_BLOCK_H or (PAL_BLOCK_H - NOTCH_H)
+                        love.graphics.printf(def.label or def.id, cx, cy + (lbl_h - fh) / 2, bw, "center")
+
+                        -- Tooltip hint dot
+                        if ok and def.tooltip then
+                            love.graphics.setColor(0.55, 0.55, 0.75, 0.6)
+                            love.graphics.circle("fill", cx + bw - 5, cy + 5, 2)
+                        end
+
+                        prects[def.id] = { x=cx, y=cy, w=bw, h=lbl_h, def=def, valid=ok }
+                        cx = cx + bw + PAL_GAP
                     end
 
-                    -- Shape fill
-                    love.graphics.setColor(c[1], c[2], c[3], a)
-                    if def.category == "hat" then
-                        love.graphics.polygon("fill", polyHat(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
-                    elseif def.category == "boolean" then
-                        love.graphics.polygon("fill", polyBool(cx, cy, bw, PAL_BLOCK_H))
-                    elseif def.category == "stack" then
-                        love.graphics.polygon("fill", polyStack(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
-                    else
-                        love.graphics.polygon("fill", polyHat(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
-                    end
-
-                    -- Border
-                    love.graphics.setColor(1, 1, 1, 0.18 * a)
-                    love.graphics.setLineWidth(1)
-                    if def.category == "hat" then
-                        love.graphics.polygon("line", polyHat(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
-                    elseif def.category == "boolean" then
-                        love.graphics.polygon("line", polyBool(cx, cy, bw, PAL_BLOCK_H))
-                    elseif def.category == "stack" then
-                        love.graphics.polygon("line", polyStack(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
-                    else
-                        love.graphics.polygon("line", polyHat(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
-                    end
-                    love.graphics.setLineWidth(1)
-
-                    -- Label
-                    love.graphics.setColor(1, 1, 1, a)
-                    local lbl_h = (def.category == "boolean") and PAL_BLOCK_H or (PAL_BLOCK_H - NOTCH_H)
-                    love.graphics.printf(def.label or def.id, cx, cy + (lbl_h - fh) / 2, bw, "center")
-
-                    -- Tooltip hint dot
-                    if ok and def.tooltip then
-                        love.graphics.setColor(0.55, 0.55, 0.75, 0.6)
-                        love.graphics.circle("fill", cx + bw - 5, cy + 5, 2)
-                    end
-
-                    prects[def.id] = { x=cx, y=cy, w=bw, h=lbl_h, def=def, valid=ok }
-                    cx = cx + bw + PAL_GAP
+                    cy = cy + rowH(cat) + PAL_GAP + 6  -- advance past last row + inter-section gap
                 end
             end
 
@@ -1523,13 +1674,15 @@ function DispatchTab.updateHover(dt, mx, my, game)
 
     local found_id   = nil
     local found_text = nil
+    local found_tags = nil
 
     -- Check palette rects (content space)
     for def_id, r in pairs(state.palette_rects or {}) do
         if content_x >= r.x and content_x <= r.x + r.w
            and content_y >= r.y and content_y <= r.y + r.h then
             found_id   = "pal_" .. def_id
-            found_text = r.def and r.def.tooltip
+            found_text = defTooltip(r.def)
+            found_tags = r.def and r.def.tags
             break
         end
     end
@@ -1542,11 +1695,11 @@ function DispatchTab.updateHover(dt, mx, my, game)
                    and content_y >= r.y and content_y <= r.y + r.h then
                     local RE  = require("services.DispatchRuleEngine")
                     local def = RE.getDefById(r.node.def_id)
-                    -- Stable ID: rule + path
                     local path_str = tostring(rule_i)
                     for _, k in ipairs(r.path or {}) do path_str = path_str .. "/" .. tostring(k) end
                     found_id   = "node_" .. path_str
-                    found_text = def and def.tooltip
+                    found_text = defTooltip(def)
+                    found_tags = def and def.tags
                     break
                 end
             end
@@ -1560,6 +1713,7 @@ function DispatchTab.updateHover(dt, mx, my, game)
         hover.id           = found_id
         hover.timer        = 0
         hover.tooltip_text = found_text
+        hover.tooltip_tags = found_tags
         hover.mx           = mx
         hover.my           = my
     end
@@ -1601,7 +1755,7 @@ function DispatchTab.drawDragGhost(panel, game)
         local def = RE.getDefById(node.def_id)
         if not def then return end
         local gw = 160
-        local gh = (node.kind == "control" or node.kind == "loop") and (STACK_H + MIN_BODY_H + CAP_H) or
+        local gh = (node.kind == "control" or node.kind == "loop" or node.kind == "find") and (STACK_H + MIN_BODY_H + CAP_H) or
                    (node.kind == "bool")                            and BOOL_H or STACK_H
         local gx = mx - gw / 2
         local gy = my - gh / 2
@@ -1652,39 +1806,71 @@ end
 function DispatchTab.drawTooltip(game)
     if hover.timer < 2.0 or not hover.tooltip_text then return end
 
-    local font    = game.fonts.ui_small
-    local fh      = font:getHeight()
-    local max_w   = 230
-    local pad     = 9
-    local text    = hover.tooltip_text
+    local font   = game.fonts.ui_small
+    local fh     = font:getHeight()
+    local max_w  = 230
+    local pad    = 9
+    local text   = hover.tooltip_text
+    local tags   = hover.tooltip_tags
 
-    -- Measure wrapped height
+    -- Build tag pill layout
+    local PILL_H  = fh + 4
+    local PILL_PX = 6
+    local PILL_GAP = 4
+    local tag_row_h = (tags and #tags > 0) and (PILL_H + 8) or 0  -- 8 = top separator gap
+
+    -- Build colour lookup for tags
+    local tag_color = {}
+    for _, td in ipairs(TAG_DEFS) do tag_color[td.id] = td end
+
+    -- Measure text height
     local _, lines = font:getWrap(text, max_w)
-    local th = #lines * (fh + 2) + pad * 2
+    local text_h   = #lines * (fh + 2)
+    local th       = text_h + pad * 2 + tag_row_h
 
     local sw = love.graphics.getWidth()
     local sh = love.graphics.getHeight()
     local tx = math.min(hover.mx + 16, sw - max_w - pad * 2 - 4)
     local ty = math.max(4, math.min(hover.my - th / 2, sh - th - 4))
+    local tw = max_w + pad * 2
 
     -- Shadow
     love.graphics.setColor(0, 0, 0, 0.40)
-    love.graphics.rectangle("fill", tx + 3, ty + 3, max_w + pad * 2, th, 5, 5)
+    love.graphics.rectangle("fill", tx + 3, ty + 3, tw, th, 5, 5)
 
     -- Background
     love.graphics.setColor(0.07, 0.07, 0.13, 0.97)
-    love.graphics.rectangle("fill", tx, ty, max_w + pad * 2, th, 5, 5)
+    love.graphics.rectangle("fill", tx, ty, tw, th, 5, 5)
 
     -- Border
     love.graphics.setColor(0.38, 0.38, 0.62, 1.0)
     love.graphics.setLineWidth(1)
-    love.graphics.rectangle("line", tx, ty, max_w + pad * 2, th, 5, 5)
+    love.graphics.rectangle("line", tx, ty, tw, th, 5, 5)
     love.graphics.setLineWidth(1)
 
     -- Text
     love.graphics.setFont(font)
     love.graphics.setColor(0.88, 0.88, 1.0)
     love.graphics.printf(text, tx + pad, ty + pad, max_w, "left")
+
+    -- Tag pills
+    if tags and #tags > 0 then
+        local pill_y = ty + pad + text_h + 6
+        local pill_x = tx + pad
+        for _, tag in ipairs(tags) do
+            local td = tag_color[tag]
+            local lbl = td and td.label or tag
+            local c   = td and td.color or { 0.5, 0.5, 0.5 }
+            local pw  = font:getWidth(lbl) + PILL_PX * 2
+            love.graphics.setColor(c[1], c[2], c[3], 0.88)
+            love.graphics.rectangle("fill", pill_x, pill_y, pw, PILL_H, 3, 3)
+            love.graphics.setColor(1, 1, 1, 0.15)
+            love.graphics.rectangle("line", pill_x, pill_y, pw, PILL_H, 3, 3)
+            love.graphics.setColor(1, 1, 1, 0.95)
+            love.graphics.printf(lbl, pill_x, pill_y + (PILL_H - fh) / 2, pw, "center")
+            pill_x = pill_x + pw + PILL_GAP
+        end
+    end
 
     love.graphics.setColor(1, 1, 1)
 end
@@ -1697,91 +1883,49 @@ end
 
 -- Called when the user types a character (routed from InputController.textinput)
 function DispatchTab.handleTextInput(char)
-    local f = state.input_focus
-    if not f then return end
-    if _isStringSlot(f) then
-        -- String slots: accept all printable characters
-        f.text = f.text .. char
-    else
-        -- Number slots: digits and leading minus only
-        if char:match("^%d$") then
-            if f.text == "0" or f.text == "-0" then
-                f.text = (f.text == "-0") and "-" .. char or char
-            else
-                f.text = f.text .. char
-            end
-        elseif char == "-" and f.text == "" then
-            f.text = "-"
-        end
+    if state.slot_input and state.slot_input.input.is_focused then
+        return state.slot_input.input:handle_textinput(char)
     end
+    return false
 end
 
 -- Called on keypressed (routed from InputController.keypressed when focused)
 -- Returns true if the key was consumed.
 function DispatchTab.handleKeyPressed(key)
-    local f = state.input_focus
-    if not f then return false end
-
-    if key == "backspace" then
-        if #f.text > 0 then
-            f.text = f.text:sub(1, -2)
-            if not _isStringSlot(f) then
-                if f.text == "" or f.text == "-" then f.text = "0" end
-            end
+    if state.slot_input and state.slot_input.input.is_focused then
+        local consumed = state.slot_input.input:handle_keypressed(key)
+        if state.slot_input.input.is_focused == false then
+            state.slot_input = nil
         end
-        return true
-    elseif key == "return" or key == "kpenter" then
-        DispatchTab.commitFocus()
-        return true
-    elseif key == "escape" then
-        state.input_focus = nil
-        return true
-    elseif not _isStringSlot(f) then
-        if key == "up" then
-            local val  = tonumber(f.text) or 0
-            local step = f.sd and f.sd.step or 1
-            f.text = tostring(val + step)
-            return true
-        elseif key == "down" then
-            local val  = tonumber(f.text) or 0
-            local step = f.sd and f.sd.step or 1
-            local mn   = f.sd and f.sd.min
-            val = val - step
-            if mn then val = math.max(mn, val) end
-            f.text = tostring(val)
-            return true
-        end
+        return consumed
     end
     return false
 end
-
 -- Commit the current input value to the node slot.
 function DispatchTab.commitFocus()
-    local f = state.input_focus
-    if not f then return end
-    if not f.node_ref then state.input_focus = nil; return end
-    if _isStringSlot(f) then
-        f.node_ref.slots[f.slot_key] = f.text
-    else
-        local val = tonumber(f.text)
-        if val then
-            if f.sd and f.sd.min then val = math.max(f.sd.min, val) end
-            f.node_ref.slots[f.slot_key] = val
-        end
+    if state.slot_input then
+        state.slot_input.input:defocus()
+        state.slot_input = nil
     end
-    state.input_focus = nil
+    if state.search_input then
+        state.search_input:defocus()
+    end
 end
 
 -- Clear focus without committing (e.g., on drag start).
 function DispatchTab.clearFocus()
-    state.input_focus = nil
+    state.slot_input = nil
 end
 
 -- ── Palette filter / search exported functions ────────────────────────────────
 
 function DispatchTab.toggleFilterTag(tag_id)
     local f = state.palette_filter
-    f.active_tags[tag_id] = f.active_tags[tag_id] and nil or true
+    if f.active_tags[tag_id] then
+        f.active_tags[tag_id] = nil
+    else
+        f.active_tags[tag_id] = true
+    end
 end
 
 function DispatchTab.blurPaletteSearch()
@@ -1792,25 +1936,21 @@ end
 
 -- Returns true if the character was consumed (search field was focused).
 function DispatchTab.handleSearchInput(char)
-    local f = state.palette_filter
-    if not f or not f.search_focused then return false end
-    f.search = f.search .. char
-    return true
+    if state.search_input and state.search_input.is_focused then
+        return state.search_input:handle_textinput(char)
+    end
+    return false
 end
 
 -- Returns true if the key was consumed by the search field.
 function DispatchTab.handleSearchKey(key)
-    local f = state.palette_filter
-    if not f or not f.search_focused then return false end
-    if key == "escape" then
-        f.search_focused = false
-        f.search         = ""
-        return true
-    elseif key == "backspace" then
-        if #f.search > 0 then f.search = f.search:sub(1, -2) end
-        return true
+    if state.search_input and state.search_input.is_focused then
+        local consumed = state.search_input:handle_keypressed(key)
+        if state.search_input.is_focused == false then
+            state.palette_filter.search_focused = false
+        end
+        return consumed
     end
-    -- Let other keys (arrows etc.) fall through so the sidebar can still scroll
     return false
 end
 
@@ -1840,30 +1980,26 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
                 local idx = 1
                 for i, v in ipairs(types) do if v == node.slots[slot_key] then idx = i; break end end
                 node.slots[slot_key] = types[(idx % #types) + 1]
-            elseif sd.type == "text_var_enum" then
-                local opts = { "A", "B", "C" }
-                local idx  = 1
-                for i, v in ipairs(opts) do if v == node.slots[slot_key] then idx = i; break end end
-                node.slots[slot_key] = opts[(idx % #opts) + 1]
-            elseif sd.type == "upgrade_enum" then
-                local names = {}
-                for k in pairs(game.state.upgrades_purchased or {}) do names[#names+1] = k end
-                table.sort(names)
-                if #names == 0 then return end
-                local idx = 1
-                for i, v in ipairs(names) do if v == node.slots[slot_key] then idx = i; break end end
-                node.slots[slot_key] = names[(idx % #names) + 1]
-            elseif sd.type == "sound_enum" then
-                local ok, SS = pcall(require, "services.SoundService")
-                local names  = ok and SS and SS.getNames() or { "beep" }
-                local idx    = 1
-                for i, v in ipairs(names) do if v == node.slots[slot_key] then idx = i; break end end
-                node.slots[slot_key] = names[(idx % #names) + 1]
+            elseif sd.type == "text_var_enum" or sd.type == "string" then
+                local mode = "text"
+                state.slot_input = {
+                    node     = node,
+                    slot_key = slot_key,
+                    input    = TextInput:new("", node.slots[slot_key], mode, function(val)
+                        node.slots[slot_key] = val
+                    end, game)
+                }
+                state.slot_input.input:focus()
             elseif sd.type == "number" then
-                local step   = sd.step or 100
-                local mn     = sd.min  or 0
-                local next_v = (node.slots[slot_key] or sd.default or 0) + step
-                node.slots[slot_key] = next_v > 9999 and mn or next_v
+                state.slot_input = {
+                    node     = node,
+                    slot_key = slot_key,
+                    input    = TextInput:new("", node.slots[slot_key], "number", function(val)
+                        if sd.min then val = math.max(sd.min, val) end
+                        node.slots[slot_key] = val
+                    end, game)
+                }
+                state.slot_input.input:focus()
             end
             break
         end

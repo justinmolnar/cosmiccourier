@@ -16,11 +16,22 @@ function InputController:new(game)
     return instance
 end
 
+local HOTKEYS = { ["1"]=true,["2"]=true,["3"]=true,["4"]=true,["5"]=true,
+                  ["6"]=true,["7"]=true,["8"]=true,["9"]=true,["0"]=true,
+                  ["space"]=true }
+
 function InputController:keypressed(key)
     -- Route to dispatch input handlers: search field first, then number slot.
     local DT = require("views.tabs.DispatchTab")
     if DT.handleSearchKey(key)  then return end
     if DT.handleKeyPressed(key) then return end
+
+    -- Fire hotkey hat rules (1-0, space)
+    if HOTKEYS[key] then
+        local RE = require("services.DispatchRuleEngine")
+        RE.fireEvent(self.game.state.dispatch_rules or {}, "hotkey",
+            { game = self.game, key = key })
+    end
 
     if key == "escape" then
         -- Close context menu first; only quit if nothing to close
