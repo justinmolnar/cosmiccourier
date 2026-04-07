@@ -41,6 +41,12 @@ function UIView:draw()
     -- Panel (tab bar + scrollable content). Manages its own scissor.
     ui_manager.panel:draw(Game)
 
+    -- Drag ghost overlay (drawn above panel, clipped to sidebar)
+    love.graphics.setScissor(0, 0, sidebar_w, screen_h)
+    local DT = require("views.tabs.DispatchTab")
+    DT.drawDragGhost(ui_manager.panel, Game)
+    love.graphics.setScissor()
+
     -- Modals always on top
     ui_manager.modal_manager:draw(Game)
 end

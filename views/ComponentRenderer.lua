@@ -56,6 +56,10 @@ function CR._drawComp(comp, px, pw, p, y, game)
         return comp.h or 6
     elseif t == "spacer" then
         return comp.h or 8
+    elseif t == "custom" then
+        local h = comp.h or 0
+        if comp.draw_fn then comp.draw_fn(px, y, pw, h, game) end
+        return h
     end
     return comp.h or 0
 end
@@ -183,6 +187,13 @@ function CR.hitTest(components, panel_x, panel_w, cx, cy)
                     end
                     icon_x = icon_x + ICON_SIZE + ICON_SPACING
                 end
+            end
+
+        elseif comp.type == "custom" then
+            h = comp.h or 0
+            if comp.hit_fn and cy >= cursor_y and cy < cursor_y + h then
+                local result = comp.hit_fn(panel_x, cursor_y, panel_w, h, cx, cy)
+                if result then return result end
             end
 
         else

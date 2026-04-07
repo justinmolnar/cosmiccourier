@@ -134,7 +134,6 @@ function Entities:handle_click(x, y, game)
                 self.selected_vehicle = nil
                 if game.ui_manager and game.ui_manager.panel then
                     game.ui_manager.panel.depot_view = depot
-                    game.ui_manager.panel:setActiveTab("depot")
                 end
                 return true
             end
@@ -154,11 +153,6 @@ function Entities:handle_click(x, y, game)
     if #candidates == 0 then
         self.selected_vehicle = nil
         self.selected_depot = nil
-        if game.ui_manager and game.ui_manager.panel
-        and game.ui_manager.panel.active_tab_id == "depot" then
-            game.ui_manager.panel:setActiveTab("vehicles")
-            game.ui_manager.panel.depot_view = nil
-        end
         return false
     end
 

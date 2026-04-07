@@ -156,7 +156,7 @@ local function pickClientPlot(depot, game)
         end
     end
 
-    local pool = #same_district > 0 and same_district or same_city
+    local pool = same_district  -- origin must be in the depot's own district
     local c    = pickRandom(pool)
     return c and c.plot or nil
 end
@@ -177,6 +177,7 @@ function DebugTripFactory.create(scope, depot, game)
     local bonus = game.C.GAMEPLAY.INITIAL_SPEED_BONUS or 100
 
     local t = Trip:new(base, bonus)
+    t.scope = scope
     t:addLeg(src, dest, 1, "road")
     return t
 end

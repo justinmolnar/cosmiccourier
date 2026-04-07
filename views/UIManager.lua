@@ -10,6 +10,7 @@ local ClientsTab   = require("views.tabs.ClientsTab")
 
 local DepotTab            = require("views.tabs.DepotTab")
 local InfrastructureTab   = require("views.tabs.InfrastructureTab")
+local DispatchTab         = require("views.tabs.DispatchTab")
 
 local PANEL_Y = 120   -- pixels below top of sidebar where panel begins
 
@@ -27,9 +28,11 @@ function UIManager:new(C, game)
     local screen_h = love.graphics.getHeight()
     instance.panel = Panel:new(0, PANEL_Y, C.UI.SIDEBAR_WIDTH, screen_h - PANEL_Y)
 
-    instance.panel:registerTab({ id = "trips",    label = "Trips",    icon = "📦", priority = 1,
+    instance.panel:registerTab({ id = "dispatch",  label = "Dispatch", icon = "⚡", priority = 1,
+        build = function(g) return DispatchTab.build(g, instance) end })
+    instance.panel:registerTab({ id = "trips",    label = "Trips",    icon = "📦", priority = 2,
         build = function(g) return TripsTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "vehicles", label = "Vehicles", icon = "🚗", priority = 2,
+    instance.panel:registerTab({ id = "vehicles", label = "Vehicles", icon = "🚗", priority = 3,
         build = function(g) return VehiclesTab.build(g, instance) end })
     instance.panel:registerTab({ id = "upgrades", label = "Upgrades", icon = "⬆️", priority = 3,
         build = function(g) return UpgradesTab.build(g, instance) end })

@@ -1679,7 +1679,12 @@ function WorldSandboxController:sendToGame()
         if States and States.Idle then v:changeState(States.Idle, game) end
     end
 
-    -- Reset trips and respawn clients
+    -- Persist world dimensions FIRST so district lookups work during client respawn
+    game.world_city_locations   = self.city_locations
+    game.world_w                = self.world_w
+    game.world_h                = self.world_h
+
+    -- Reset trips and respawn clients (must be after world_w is set)
     game.entities.trips.pending = {}
     local num_clients = math.max(1, #game.entities.clients)
     game.entities.clients = {}
@@ -1688,11 +1693,6 @@ function WorldSandboxController:sendToGame()
         local depot = depots[((i - 1) % math.max(1, #depots)) + 1]
         game.entities:addClient(game, depot)
     end
-
-    -- Persist city markers and highway network for game-view world map rendering
-    game.world_city_locations   = self.city_locations
-    game.world_w                = self.world_w
-    game.world_h                = self.world_h
     game.world_highway_paths   = self.highway_paths or {}
     game.world_highway_map     = self.highway_map  or {}
     game._world_highway_smooth = nil   -- reset cached smooth paths on new world

@@ -36,6 +36,22 @@ function State:new(C, game)
     instance.rush_hour = { active = false, timer = 0 }
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
     instance.metro_license_unlocked = false
+    -- Named counters and flags available to dispatch rules (persistent, saved with game)
+    instance.counters = { A = 0, B = 0, C = 0, D = 0, E = 0 }
+    instance.flags    = { X = false, Y = false, Z = false }
+
+    -- Default fallback rule: assign any eligible vehicle to any pending trip.
+    -- Sits at the bottom of the list; player rules inserted at index 1 take priority.
+    instance.dispatch_rules = {
+        {
+            id      = "rule_default",
+            enabled = true,
+            blocks  = {
+                { def_id = "trigger_trip",      slots = {} },
+                { def_id = "action_assign_any", slots = {} },
+            },
+        },
+    }
 
     -- Create upgrade system
     instance.upgrade_system = require("models.UpgradeSystem"):new(instance, C, game)

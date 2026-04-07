@@ -210,9 +210,13 @@ end
 function Vehicle:updateAbstracted(dt, game)
     if not self.current_path_eta or self.current_path_eta <= 0 then
         if not self.current_path_eta then
-            if self.state and (self.state.name == "Picking Up" or
-                              self.state.name == "Dropping Off" or
-                              self.state.name == "Deciding") then
+            -- If a path is already set (e.g. vehicle enters abstraction mid-travel),
+            -- just estimate the remaining time without forcing a state transition.
+            if self.path and (self.path_i or 1) <= #self.path then
+                self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)
+            elseif self.state and (self.state.name == "Picking Up" or
+                                   self.state.name == "Dropping Off" or
+                                   self.state.name == "Deciding") then
                 self:_resolveOffScreenState(game)
                 if self.path and (self.path_i or 1) <= #self.path then
                     self.current_path_eta = PathfindingService.estimatePathTravelTime(self.path, self, game, game.maps.city)

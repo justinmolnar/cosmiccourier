@@ -304,12 +304,14 @@ function InputController:mousepressed(x, y, button)
 end
 
 function InputController:mousereleased(x, y, button)
+    -- Let UIController commit any dispatch drag-and-drop first
+    self.ui_controller:handleMouseUp(x, y, button, self.game)
+
     if self.game.ui_manager and self.game.ui_manager.handle_mouse_up then
         self.game.ui_manager:handle_mouse_up(x, y, button)
     end
     if button == 1 and self._drag_active then
         if not self._drag_panning then
-            -- Short click: fire world click at original press position
             self:handleGameWorldClick(self._drag_sx, self._drag_sy)
         end
         self._drag_active  = false
@@ -318,6 +320,12 @@ function InputController:mousereleased(x, y, button)
 end
 
 function InputController:mousemoved(x, y, dx, dy)
+    -- Track sidebar drag-and-drop
+    local sidebar_w = self.game.C.UI.SIDEBAR_WIDTH
+    if x < sidebar_w then
+        self.ui_controller:handleMouseMoved(x, y)
+    end
+
     if not self._drag_active then return end
     local total_dist = math.abs(x - self._drag_sx) + math.abs(y - self._drag_sy)
     if not self._drag_panning and total_dist > 5 then
@@ -364,9 +372,7 @@ function InputController:handleGameWorldClick(x, y, button)
 
     if self.game.entities and self.game.entities.handle_click then
         local hit = self.game.entities:handle_click(world_x, world_y, self.game)
-        if hit and self.game.ui_manager and self.game.entities.selected_vehicle then
-            self.game.ui_manager.panel:setActiveTab("vehicles")
-        end
+        -- tab unchanged: user stays on whichever tab they had open
     end
 end
 
@@ -504,7 +510,6 @@ function InputController:_tryPlaceDepot(wx, wy, sx, sy)
     game.entities.build_depot_mode = false
     if game.ui_manager and game.ui_manager.panel then
         game.ui_manager.panel.depot_view = depot
-        game.ui_manager.panel:setActiveTab("depot")
     end
     require("services.FloatingTextSystem").emit("Depot Built! -$" .. cost, wx, wy, game.C)
 end
@@ -565,7 +570,6 @@ function InputController:openContextMenu(sx, sy, game)
         table.insert(items, { icon = "📊", label = "View Depot Info",
             action = function(g)
                 g.ui_manager.panel.depot_view = hit_depot
-                g.ui_manager.panel:setActiveTab("depot")
             end })
         -- Hire menu per vehicle type
         local sorted = {}
@@ -609,7 +613,6 @@ function InputController:openContextMenu(sx, sy, game)
             action = function(g)
                 g.entities.selected_vehicle = hit_vehicle
                 g.entities.selected_depot   = nil
-                g.ui_manager.panel:setActiveTab("vehicles")
             end })
         table.insert(items, { icon = "🏠", label = "Recall to Depot",
             action = function(g)
@@ -625,9 +628,6 @@ function InputController:openContextMenu(sx, sy, game)
             action = function(g)
                 g.entities.build_highway_mode = true
                 g.entities.highway_build_nodes = {{ wx = hw_wx, wy = hw_wy }}
-                if g.ui_manager and g.ui_manager.panel then
-                    g.ui_manager.panel:setActiveTab("infrastructure")
-                end
             end })
 
     -- ── Context: empty world space ───────────────────────────────────────────

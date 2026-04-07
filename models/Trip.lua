@@ -10,6 +10,8 @@ function Trip:new(base_payout, initial_bonus)
     instance.legs = {}
     instance.current_leg = 1
     
+    instance.scope         = nil   -- "district"|"city"|"region"|"continent"|"world"|nil
+    instance.wait_time     = 0    -- seconds this trip has spent in the pending queue
     instance.is_in_transit = false
     instance.transit_start_time = 0
     instance.last_update_time = love.timer.getTime()

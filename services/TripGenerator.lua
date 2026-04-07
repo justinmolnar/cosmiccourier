@@ -37,6 +37,7 @@ function TripGenerator.generateTrip(client_plot, game, city_map)
     if dest_plot.x == client_plot.x and dest_plot.y == client_plot.y then return nil end
 
     local new_trip = Trip:new(base_payout, speed_bonus)
+    new_trip.scope = "district"
     new_trip:addLeg(client_plot, dest_plot, 1, "road")
     return new_trip
 end
