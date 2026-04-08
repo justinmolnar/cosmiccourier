@@ -196,12 +196,16 @@ function RuleTreeUtils.defaultSlots(def, game)
     local slots = {}
     for _, sd in ipairs(def.slots or {}) do
         if sd.type == "vehicle_enum" then
-            local first = nil
-            for id in pairs(game and game.C and game.C.VEHICLES or {}) do
-                local low = id:lower()
-                if not first or low < first then first = low end
+            -- Only provide a default for vehicle_enum if it's NOT the Get block, 
+            -- or keep it nil so it cascades.
+            if def.id ~= "rep_get_property" then
+                local first = nil
+                for id in pairs(game and game.C and game.C.VEHICLES or {}) do
+                    local low = id:lower()
+                    if not first or low < first then first = low end
+                end
+                slots[sd.key] = first or sd.default or ""
             end
-            slots[sd.key] = first or sd.default or ""
         else
             slots[sd.key] = sd.default
         end

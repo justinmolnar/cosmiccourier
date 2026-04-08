@@ -117,6 +117,8 @@ function Validator.getPaletteValidity(context, game)
                and def.category ~= "stack" and def.category ~= "control"
                and def.category ~= "loop" then
             ok = false; why = "only stack/control/loop blocks go here"
+        elseif drop_type == "reporter" and def.category ~= "reporter" then
+            ok = false; why = "only reporter blocks go here"
         end
 
         -- Hat block: only valid if rule has no hat yet

@@ -26,11 +26,14 @@ local function setVar(game, key, val)
     game.state.vars[key] = val
 end
 
--- Generic comparison: op is ">", "<", or "="
+-- Generic comparison operator. Supports all 6 operators.
 local function cmp(a, op, b)
-    if op == ">" then return a > b
-    elseif op == "<" then return a < b
-    else return a == b
+    if     op == ">"  then return a >  b
+    elseif op == "<"  then return a <  b
+    elseif op == ">=" then return a >= b
+    elseif op == "<=" then return a <= b
+    elseif op == "!=" then return a ~= b
+    else                   return a == b   -- "="
     end
 end
 
@@ -467,7 +470,7 @@ end
 
 -- ── Reporter comparison condition ─────────────────────────────────────────────
 
-local function reporter_compare(block, ctx)
+local function bool_compare(block, ctx)
     local lv = tonumber(evalSlot(block.slots.left,  ctx)) or 0
     local rv = tonumber(evalSlot(block.slots.right, ctx)) or 0
     return cmp(lv, block.slots.op or ">", rv)
@@ -1086,7 +1089,7 @@ return {
     shake_screen         = shake_screen,
 
     -- Reporter comparison
-    reporter_compare     = reporter_compare,
+    bool_compare         = bool_compare,
 
     -- Text variables
     text_var_eq          = text_var_eq,

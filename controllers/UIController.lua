@@ -15,6 +15,23 @@ function UIController:handleMouseDown(x, y, button)
     local ui_manager = Game.ui_manager
     local panel      = ui_manager.panel
 
+    -- 0. Active dropdown check (highest priority overlay)
+    local DT = require("views.tabs.DispatchTab")
+    local st = DT.getState()
+    if st.active_dropdown then
+        local comps = panel:getComponents()
+        if comps then
+            -- The dropdown is always the last component in build()
+            local drop_comp = comps[#comps]
+            if drop_comp and drop_comp.hit_fn then
+                -- Dropdown hit_fn is in content space, but handles internal screen space logic
+                local cy  = panel:toContentY(y)
+                local hit = drop_comp.hit_fn(panel.x, cy, panel.w, 0, x, cy)
+                if hit then return true end
+            end
+        end
+    end
+
     -- Commit any in-progress number slot text input on any click.
     local DT_early = require("views.tabs.DispatchTab")
     DT_early.commitFocus()
@@ -198,6 +215,10 @@ function UIController:handleMouseDown(x, y, button)
         local DT = require("views.tabs.DispatchTab")
         DT.cycleSlot(data.rule_i, data.path, data.slot_key, Game)
 
+    elseif id == "dispatch_cycle_rep_inner_slot" then
+        local DT = require("views.tabs.DispatchTab")
+        DT.cycleRepInnerSlot(data.rep_node, data.rep_key, data.rep_sd, Game)
+
     elseif id == "toggle_pause_trip_gen" then
         local e = Game.entities
         e.pause_trip_generation = not (e.pause_trip_generation or false)
@@ -233,6 +254,11 @@ function UIController:handleMouseDown(x, y, button)
         f.active_tags    = {}
         f.search         = ""
         f.search_focused = false
+
+    elseif id == "dispatch_palette_toggle_legacy" then
+        local DT = require("views.tabs.DispatchTab")
+        local f = DT.getState().palette_filter
+        f.show_legacy = not (f.show_legacy or false)
 
     elseif id == "_noop" then
         -- swallowed click (e.g. invalid palette block) — do nothing

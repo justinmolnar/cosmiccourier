@@ -148,6 +148,37 @@ local function rep_random(node, ctx)
     return love.math.random(a, b)
 end
 
+-- ── Get Property reporter ─────────────────────────────────────────────────────
+-- Generic reporter: Get(source, property). Replaces all hard-coded data reporters.
+-- source:   "trip" | "vehicle" | "game" | "fleet"
+-- property: key string from data/dispatch_properties.lua
+
+local _prop_cache = nil
+local function getPropCache()
+    if not _prop_cache then
+        _prop_cache = {}
+        for _, p in ipairs(require("data.dispatch_properties")) do
+            _prop_cache[p.source .. "." .. p.key] = p
+        end
+    end
+    return _prop_cache
+end
+
+local function rep_get_property(node, ctx)
+    local source = node.slots and node.slots.source
+    local key    = node.slots and node.slots.property
+    local prop   = (source and key) and getPropCache()[source .. "." .. key]
+
+    -- Pure pass-through: the registry entry handles context safety and params.
+    return prop and prop.read(ctx, node.slots or {}) or 0
+end
+
+-- Get Variable reporter: returns the value of a named variable.
+-- Replaces rep_counter, rep_flag, and rep_text_var (all three read the same vars table).
+local function rep_get_var(node, ctx)
+    return getVar(ctx.game, node.slots and node.slots.key or "my_var")
+end
+
 -- ── String operators ──────────────────────────────────────────────────────────
 
 local function rep_join(node, ctx)
@@ -177,6 +208,8 @@ end
 -- ─────────────────────────────────────────────────────────────────────────────
 
 return {
+    rep_get_property        = rep_get_property,
+    rep_get_var             = rep_get_var,
     rep_money               = rep_money,
     rep_queue_count         = rep_queue_count,
     rep_trips_completed     = rep_trips_completed,

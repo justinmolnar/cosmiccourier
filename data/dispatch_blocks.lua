@@ -37,7 +37,7 @@ local AMOUNT_SLOT   = { key = "amount",       type = "number",       default = 1
 local N_SLOT        = { key = "n",            type = "number",       default = 1,   step = 1,   min = 1 }
 
 -- Reusable operator slots
-local OP_CMP_SLOT   = { key = "op",  type = "enum", options = { ">", "<", "=" },   default = ">" }
+local OP_CMP_SLOT   = { key = "op",  type = "enum", options = { ">", "<", ">=", "<=", "!=", "=" },   default = ">" }
 local OP_DELTA_SLOT = { key = "op",  type = "enum", options = { "+=", "-=" },       default = "+=" }
 local TEXT_VAR_SLOT = { key = "key", type = "string",       default = "my_var" }
 
@@ -1067,164 +1067,189 @@ return {
 -- BOOLEAN — reporter comparison
 -- ═══════════════════════════════════════════════════════════════════════════
 
-    { id           = "cond_reporter_compare",
+    { id           = "bool_compare",
       category     = "boolean",
       tags         = { "logic" },
       color        = { 0.82, 0.78, 0.15 },
-      label        = "compare",
-      tooltip      = "True when the left reporter value compares to the right reporter value using the operator. Drop reporter blocks into the left/right slots.",
-      slots        = { { key="left", type="number", default=0, step=1 }, OP_CMP_SLOT,
-                       { key="right", type="number", default=0, step=1 } },
-      evaluator    = "reporter_compare" },
+      label        = "Compare",
+      tooltip      = "True when the left reporter value compares to the right reporter value. Drop reporter blocks (like 'Get') into the left/right slots.",
+      evaluator    = "bool_compare",
+      slots        = {
+          { key="left",  type="reporter", default=0 },
+          { key="op",    type="enum", options={ ">", "<", ">=", "<=", "!=", "=" }, default=">" },
+          { key="right", type="reporter", default=0 },
+      } },
+-- ═══════════════════════════════════════════════════════════════════════════
+-- REPORTER — core primitives (Phase 2)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+    -- All property keys available for rep_get_property, grouped by source:
+    --   trip:    payout  wait_time  bonus  leg_count  scope  cargo_size
+    --   vehicle: speed   trips_completed  type
+    --   game:    money   queue_count  trips_completed  rh_timer
+    --   fleet:   count   idle_count  utilization
+
+    { id           = "rep_get_property",
+      category     = "reporter",
+      tags         = { "trip", "vehicle", "game", "logic" },
+      color        = { 0.30, 0.72, 0.62 },
+      label        = "Get",
+      tooltip      = "Returns a property from any entity. Pick a source, then pick a property. Some properties may require additional parameters.",
+      evaluator    = "rep_get_property",
+      slots        = {
+          { key="source",       type="enum", options = "dynamic" },
+          { key="property",     type="enum", options = "dynamic" },
+      } },
+
+    { id           = "rep_get_var",
+      category     = "reporter",
+      tags         = { "counter", "logic" },
+      color        = { 0.55, 0.38, 0.80 },
+      label        = "Var",
+      tooltip      = "Returns the value of a named variable. Works with numeric counters, boolean flags, and text vars. Replaces the legacy counter/flag/text-var reporters.",
+      evaluator    = "rep_get_var",
+      slots        = {
+          { key="key", type="string", default="my_var" },
+      } },
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- REPORTER — game / global (no context needed)
+-- REPORTER — legacy (replaced by rep_get_property / rep_get_var)
+-- These blocks are hidden from the main palette. Toggle "Show Legacy" to see them.
+-- Evaluator functions are unchanged — existing rules continue to work.
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id           = "rep_money",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.30, 0.72, 0.62 },
       label        = "money",
-      tooltip      = "Returns your current money balance.",
+      tooltip      = "LEGACY — use Get(game, money) instead. Returns your current money balance.",
       slots        = {},
       evaluator    = "rep_money" },
 
     { id           = "rep_queue_count",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.30, 0.72, 0.62 },
       label        = "queue size",
-      tooltip      = "Returns the number of pending trips currently in the queue.",
+      tooltip      = "LEGACY — use Get(game, queue_count) instead. Returns the number of pending trips.",
       slots        = {},
       evaluator    = "rep_queue_count" },
 
     { id           = "rep_trips_completed",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.30, 0.72, 0.62 },
       label        = "trips completed",
-      tooltip      = "Returns the total number of trips delivered so far this session.",
+      tooltip      = "LEGACY — use Get(game, trips_completed) instead. Returns total trips delivered.",
       slots        = {},
       evaluator    = "rep_trips_completed" },
 
     { id           = "rep_rush_hour_remaining",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.85, 0.40, 0.20 },
       label        = "rush hour remaining",
-      tooltip      = "Returns the remaining seconds of the active rush hour (0 if not active).",
+      tooltip      = "LEGACY — use Get(game, rh_timer) instead. Returns remaining rush hour seconds.",
       slots        = {},
       evaluator    = "rep_rush_hour_remaining" },
 
     { id           = "rep_counter",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.55, 0.38, 0.80 },
       label        = "counter",
-      tooltip      = "Returns the value of the named counter.",
+      tooltip      = "LEGACY — use Var instead. Returns the value of the named counter.",
       slots        = { VAR_SLOT },
       evaluator    = "rep_counter" },
 
     { id           = "rep_flag",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.55, 0.38, 0.80 },
       label        = "flag as number",
-      tooltip      = "Returns 1 if the named flag is set, 0 if clear.",
+      tooltip      = "LEGACY — use Var instead. Returns 1 if the named flag is set, 0 if clear.",
       slots        = { VAR_SLOT },
       evaluator    = "rep_flag" },
 
     { id           = "rep_text_var",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.82, 0.78, 0.15 },
       label        = "text var",
-      tooltip      = "Returns the current value of the named text variable as a string.",
+      tooltip      = "LEGACY — use Var instead. Returns the current value of the named text variable.",
       slots        = { TEXT_VAR_SLOT },
       evaluator    = "rep_text_var" },
 
--- ═══════════════════════════════════════════════════════════════════════════
--- REPORTER — fleet
--- ═══════════════════════════════════════════════════════════════════════════
-
     { id           = "rep_vehicle_count",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.20, 0.65, 0.45 },
       label        = "vehicle count",
-      tooltip      = "Returns the total number of vehicles of the chosen type in your fleet.",
+      tooltip      = "LEGACY — use Get(fleet, count) instead. Returns total vehicles of chosen type.",
       slots        = { VEHICLE_SLOT },
       evaluator    = "rep_vehicle_count" },
 
     { id           = "rep_idle_count",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.20, 0.65, 0.45 },
       label        = "idle count",
-      tooltip      = "Returns the number of idle vehicles of the chosen type.",
+      tooltip      = "LEGACY — use Get(fleet, idle_count) instead. Returns idle vehicles of chosen type.",
       slots        = { VEHICLE_SLOT },
       evaluator    = "rep_idle_count" },
 
--- ═══════════════════════════════════════════════════════════════════════════
--- REPORTER — trip context
--- ═══════════════════════════════════════════════════════════════════════════
-
     { id           = "rep_trip_payout",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.22, 0.68, 0.32 },
       label        = "trip payout",
-      tooltip      = "Returns the base payout of the current trip.",
+      tooltip      = "LEGACY — use Get(trip, payout) instead. Returns the base payout of the current trip.",
       slots        = {},
       evaluator    = "rep_trip_payout" },
 
     { id           = "rep_trip_wait",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.22, 0.68, 0.32 },
       label        = "trip wait time",
-      tooltip      = "Returns how long the current trip has been waiting (seconds).",
+      tooltip      = "LEGACY — use Get(trip, wait_time) instead. Returns how long the trip has waited.",
       slots        = {},
       evaluator    = "rep_trip_wait" },
 
     { id           = "rep_trip_bonus",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.22, 0.68, 0.32 },
       label        = "trip bonus",
-      tooltip      = "Returns the current speed bonus on this trip.",
+      tooltip      = "LEGACY — use Get(trip, bonus) instead. Returns the current speed bonus on this trip.",
       slots        = {},
       evaluator    = "rep_trip_bonus" },
 
     { id           = "rep_trip_leg_count",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.22, 0.68, 0.32 },
       label        = "trip legs",
-      tooltip      = "Returns the number of legs in the current trip.",
+      tooltip      = "LEGACY — use Get(trip, leg_count) instead. Returns the number of legs in this trip.",
       slots        = {},
       evaluator    = "rep_trip_leg_count" },
 
--- ═══════════════════════════════════════════════════════════════════════════
--- REPORTER — vehicle context
--- ═══════════════════════════════════════════════════════════════════════════
-
     { id           = "rep_this_vehicle_speed",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.20, 0.65, 0.45 },
       label        = "this vehicle speed",
-      tooltip      = "Returns the effective speed of the vehicle that fired this rule.",
+      tooltip      = "LEGACY — use Get(vehicle, speed) instead. Returns this vehicle's effective speed.",
       slots        = {},
       evaluator    = "rep_this_vehicle_speed" },
 
     { id           = "rep_this_vehicle_trips",
-      category     = "reporter",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.20, 0.65, 0.45 },
       label        = "this vehicle trips",
-      tooltip      = "Returns the total trips completed by the vehicle that fired this rule.",
+      tooltip      = "LEGACY — use Get(vehicle, trips_completed) instead. Returns trips completed by this vehicle.",
       slots        = {},
       evaluator    = "rep_this_vehicle_trips" },
 

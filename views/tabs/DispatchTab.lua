@@ -7,10 +7,12 @@ local DispatchTab = {}
 
 local Validator = require("services.DispatchValidator")
 local TextInput = require("views.components.TextInput")
+local Dropdown  = require("views.components.Dropdown")
 
 -- ── Visual constants ──────────────────────────────────────────────────────────
 
 -- ── Filter / search constants ─────────────────────────────────────────────────
+local LEGACY_TOGGLE_H = 20  -- height of the "Show Legacy" toggle pill
 local TAG_PILL_H   = 20   -- height of each topic-tag filter pill
 local TAG_PILL_PAD = 7    -- horizontal padding inside each pill
 local TAG_GAP      = 5    -- gap between pills
@@ -61,16 +63,19 @@ local state = {
         active_tags    = {},    -- map tag_id → true when active
         search         = "",
         search_focused = false,
+        show_legacy    = false, -- when true, legacy blocks appear in their own section
     },
     -- New componentized inputs
     search_input = nil,
     slot_input   = nil, -- { node, slot_key, input_component }
+    active_dropdown = nil, -- Dropdown instance
 
     -- populated each draw frame:
     node_rects           = {},
     drop_targets         = {},
     palette_rects        = {},
     palette_filter_rects = {},  -- array of { tag=id, x,y,w,h }
+    palette_legacy_rect  = nil, -- rect for the "Show Legacy" toggle pill
     palette_search_rect  = nil,
     rule_card_tops       = {},
     rule_card_bots       = {},
@@ -180,27 +185,39 @@ end
 -- ── Height measurement ────────────────────────────────────────────────────────
 
 local measureStack
-local function measureNode(node)
+local measureNode
+local boolNodeW
+local boolNodeSize
+
+measureNode = function(node, game, panel_w)
+    local font = game.fonts.ui_small
+    local cond_h = BOOL_H
+    if node.condition then
+        local _, ch = boolNodeSize(node.condition, font, panel_w)
+        cond_h = ch
+    end
+    local header_h = math.max(STACK_H, cond_h + 10)
+
     if node.kind == "hat" or node.kind == "stack" then
         return STACK_H
     elseif node.kind == "control" then
-        local bh = math.max(MIN_BODY_H, measureStack(node.body or {}))
-        local h  = STACK_H + bh + CAP_H
+        local bh = math.max(MIN_BODY_H, measureStack(node.body or {}, game, panel_w))
+        local h  = header_h + bh + CAP_H
         if node.else_body then
-            local eh = math.max(MIN_BODY_H, measureStack(node.else_body or {}))
+            local eh = math.max(MIN_BODY_H, measureStack(node.else_body or {}, game, panel_w))
             h = h + eh + CAP_H
         end
         return h
     elseif node.kind == "loop" or node.kind == "find" then
-        local bh = math.max(MIN_BODY_H, measureStack(node.body or {}))
-        return STACK_H + bh + CAP_H
+        local bh = math.max(MIN_BODY_H, measureStack(node.body or {}, game, panel_w))
+        return header_h + bh + CAP_H
     end
     return STACK_H
 end
 
-measureStack = function(stack)
+measureStack = function(stack, game, panel_w)
     local h = 0
-    for _, n in ipairs(stack or {}) do h = h + measureNode(n) end
+    for _, n in ipairs(stack or {}) do h = h + measureNode(n, game, panel_w) end
     return h
 end
 
@@ -256,15 +273,225 @@ local function drawSlotPill(val, x, y, block_h, font, alpha, focused)
     return pw
 end
 
+-- Measures the total width of an inline-expanded reporter (label + inner slot pills).
+local function inlineRepW(rep_node, font)
+    local RE  = require("services.DispatchRuleEngine")
+    local def = RE.getDefById(rep_node.def_id)
+    if not def then return 40 end
+    local w = 8 + font:getWidth(def.label or "?") + 6
+    for _, sd in ipairs(def.slots or {}) do
+        -- ── Cascading visibility for rep_get_property ────────────────────────
+        local visible = true
+        if rep_node.def_id == "rep_get_property" then
+            if sd.key == "property" then
+                visible = (rep_node.slots and rep_node.slots.source ~= nil)
+            elseif sd.key == "vehicle_type" then
+                visible = (rep_node.slots and rep_node.slots.source == "fleet" and rep_node.slots.property ~= nil)
+            end
+        end
+
+        if visible then
+            local v = rep_node.slots and rep_node.slots[sd.key]
+            local is_foc = state.slot_input
+                           and state.slot_input.node == rep_node
+                           and state.slot_input.slot_key == sd.key
+            local vstr
+            if is_foc and state.slot_input then
+                vstr = state.slot_input.input.text_buffer or tostring(v or "")
+            elseif v == nil then
+                vstr = "<" .. (sd.key or "?") .. ">"
+            else
+                vstr = tostring(v)
+            end
+            w = w + math.max(font:getWidth(vstr) + 16, is_foc and 36 or 0) + 4
+        end
+    end
+
+    -- ── Variadic params from registry ────────────────────────────────────────
+    if rep_node.def_id == "rep_get_property" and rep_node.slots.source and rep_node.slots.property then
+        local PROPS = require("data.dispatch_properties")
+        local entry = nil
+        for _, p in ipairs(PROPS) do
+            if p.source == rep_node.slots.source and p.key == rep_node.slots.property then
+                entry = p; break
+            end
+        end
+        if entry and entry.params then
+            for _, psd in ipairs(entry.params) do
+                local v = rep_node.slots[psd.key]
+                local is_foc = state.slot_input
+                               and state.slot_input.node == rep_node
+                               and state.slot_input.slot_key == psd.key
+                local vstr
+                if is_foc and state.slot_input then
+                    vstr = state.slot_input.input.text_buffer or tostring(v or "")
+                elseif v == nil then
+                    vstr = "<" .. (psd.key or "?") .. ">"
+                else
+                    vstr = tostring(v)
+                end
+                w = w + math.max(font:getWidth(vstr) + 16, is_foc and 36 or 0) + 4
+            end
+        end
+    end
+
+    return math.max(w + 4, 40)
+end
+
 -- Compute pill width without drawing (for layout of right-aligned slots).
 local function pillWidth(val, font, focused)
+    if type(val) == "table" and val.kind == "reporter" and val.node then
+        return inlineRepW(val.node, font)
+    end
     local s = pillDisplay(val, focused)
     return math.max(font:getWidth(s) + 16, focused and 36 or 0)
 end
 
--- ── Natural Width measurement ──────────────────────────────────────────────────
+-- Draws an inline-expanded reporter node: label + each inner slot pill side-by-side.
+-- Appends inner slot rects (higher priority) then the outer container rect to slot_rects_out.
+-- Returns the total width drawn.
+local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rects_out, outer_key, outer_sd_type)
+    local rep_node = rep_val.node
+    local RE  = require("services.DispatchRuleEngine")
+    local def = rep_node and RE.getDefById(rep_node.def_id)
+    if not def then
+        local pw = drawSlotPill(rep_val, x, y, block_h, font, alpha, false)
+        slot_rects_out[#slot_rects_out+1] = { key = outer_key, x = x, w = pw, sd_type = outer_sd_type }
+        return pw
+    end
 
-local function boolNodeW(node, font)
+    local total_w = inlineRepW(rep_node, font)
+    local fh      = font:getHeight()
+    local py      = y + (block_h - 16) / 2
+
+    -- Outer teal reporter background
+    love.graphics.setColor(0.22, 0.48, 0.55, 0.90 * alpha)
+    love.graphics.rectangle("fill", x, py, total_w, 16, 3, 3)
+    love.graphics.setColor(0.40, 0.85, 0.90, 0.60 * alpha)
+    love.graphics.rectangle("line", x, py, total_w, 16, 3, 3)
+
+    -- Reporter label
+    local lbl   = def.label or "?"
+    local lbl_x = x + 8
+    love.graphics.setFont(font)
+    love.graphics.setColor(1, 1, 1, alpha)
+    love.graphics.print(lbl, lbl_x, py + (16 - fh) / 2)
+
+    -- Inner slot sub-pills
+    local inner_x = lbl_x + font:getWidth(lbl) + 6
+    for _, sd in ipairs(def.slots or {}) do
+        -- ── Cascading visibility for rep_get_property ────────────────────────
+        local visible = true
+        if rep_node.def_id == "rep_get_property" then
+            if sd.key == "property" then
+                visible = (rep_node.slots and rep_node.slots.source ~= nil)
+            elseif sd.key == "vehicle_type" then
+                visible = (rep_node.slots and rep_node.slots.source == "fleet" and rep_node.slots.property ~= nil)
+            end
+        end
+
+        if visible then
+            local v = rep_node.slots and rep_node.slots[sd.key]
+            local is_foc = state.slot_input
+                           and state.slot_input.node == rep_node
+                           and state.slot_input.slot_key == sd.key
+            local vstr
+            if is_foc and state.slot_input then
+                vstr = state.slot_input.input.text_buffer or tostring(v or "")
+            elseif v == nil then
+                vstr = "<" .. (sd.key or "?") .. ">"
+            else
+                vstr = tostring(v)
+            end
+            local vpw = math.max(font:getWidth(vstr) + 16, is_foc and 36 or 0)
+
+            if is_foc and state.slot_input then
+                state.slot_input.input:draw(inner_x, py + 2, vpw, 12)
+            else
+                love.graphics.setColor(0, 0, 0, 0.40 * alpha)
+                love.graphics.rectangle("fill", inner_x, py + 2, vpw, 12, 2, 2)
+                love.graphics.setColor(1, 1, 1, 0.20 * alpha)
+                love.graphics.rectangle("line", inner_x, py + 2, vpw, 12, 2, 2)
+                love.graphics.setColor(1, 1, 1, alpha)
+                love.graphics.print(vstr, inner_x + 7, py + 2 + (12 - fh) / 2)
+            end
+
+            -- Inner slot rect (higher priority — checked before outer)
+            slot_rects_out[#slot_rects_out+1] = {
+                key      = outer_key,
+                x        = inner_x,
+                w        = vpw,
+                sd_type  = "rep_inner",
+                rep_node = rep_node,
+                rep_key  = sd.key,
+                rep_sd   = sd,
+            }
+            inner_x = inner_x + vpw + 4
+        end
+    end
+
+    -- ── Variadic params from registry ────────────────────────────────────────
+    if rep_node.def_id == "rep_get_property" and rep_node.slots.source and rep_node.slots.property then
+        local PROPS = require("data.dispatch_properties")
+        local entry = nil
+        for _, p in ipairs(PROPS) do
+            if p.source == rep_node.slots.source and p.key == rep_node.slots.property then
+                entry = p; break
+            end
+        end
+        if entry and entry.params then
+            for _, psd in ipairs(entry.params) do
+                local v = rep_node.slots[psd.key]
+                local is_foc = state.slot_input
+                               and state.slot_input.node == rep_node
+                               and state.slot_input.slot_key == psd.key
+                local vstr
+                if is_foc and state.slot_input then
+                    vstr = state.slot_input.input.text_buffer or tostring(v or "")
+                elseif v == nil then
+                    vstr = "<" .. (psd.key or "?") .. ">"
+                else
+                    vstr = tostring(v)
+                end
+                local vpw = math.max(font:getWidth(vstr) + 16, is_foc and 36 or 0)
+
+                if is_foc and state.slot_input then
+                    state.slot_input.input:draw(inner_x, py + 2, vpw, 12)
+                else
+                    love.graphics.setColor(0, 0, 0, 0.40 * alpha)
+                    love.graphics.rectangle("fill", inner_x, py + 2, vpw, 12, 2, 2)
+                    love.graphics.setColor(1, 1, 1, 0.20 * alpha)
+                    love.graphics.rectangle("line", inner_x, py + 2, vpw, 12, 2, 2)
+                    love.graphics.setColor(1, 1, 1, alpha)
+                    love.graphics.print(vstr, inner_x + 7, py + 2 + (12 - fh) / 2)
+                end
+
+                slot_rects_out[#slot_rects_out+1] = {
+                    key      = outer_key,
+                    x        = inner_x,
+                    w        = vpw,
+                    sd_type  = "rep_inner",
+                    rep_node = rep_node,
+                    rep_key  = psd.key,
+                    rep_sd   = psd,
+                }
+                inner_x = inner_x + vpw + 4
+            end
+        end
+    end
+
+    -- Outer container rect (lower priority — catches label-area clicks to clear)
+    slot_rects_out[#slot_rects_out+1] = {
+        key     = outer_key,
+        x       = x,
+        w       = total_w,
+        sd_type = outer_sd_type,
+    }
+
+    return total_w
+end
+
+boolNodeW = function(node, font)
     if not node then return 60 end
     local id  = node.def_id
     local RE  = require("services.DispatchRuleEngine")
@@ -287,6 +514,37 @@ local function boolNodeW(node, font)
             w = w + pillWidth(val, font, is_foc) + 4
         end
         return math.max(60, w)
+    end
+end
+
+boolNodeSize = function(node, font, panel_w)
+    if not node then return 60, BOOL_H end
+    local id  = node.def_id
+    local RE  = require("services.DispatchRuleEngine")
+    local def = RE.getDefById(id)
+    local wrap_x = (panel_w or 400) - 40
+
+    if id == "bool_and" or id == "bool_or" then
+        local lbl_w = font:getWidth(def and def.label or id) + 16
+        local lw, lh = boolNodeSize(node.left, font, panel_w)
+        local rw, rh = boolNodeSize(node.right, font, panel_w)
+        
+        -- Logic mirrors drawBoolNode: BOOL_ANGLE + LW + LBL + RW + BOOL_ANGLE
+        local total_w_no_wrap = BOOL_ANGLE + lw + lbl_w + rw + BOOL_ANGLE
+        
+        if total_w_no_wrap > wrap_x then
+            -- Wrapped: max of children widths, height is sum
+            local max_w = math.max(lw, lbl_w + rw) + BOOL_ANGLE * 2
+            return max_w, lh + rh
+        else
+            return total_w_no_wrap, BOOL_H
+        end
+    elseif id == "bool_not" then
+        local lbl_w = font:getWidth("not") + 16
+        local ow, oh = boolNodeSize(node.operand, font, panel_w)
+        return BOOL_ANGLE + lbl_w + ow + BOOL_ANGLE, BOOL_H
+    else
+        return boolNodeW(node, font), BOOL_H
     end
 end
 
@@ -363,6 +621,10 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
     local fh   = font:getHeight()
     alpha = alpha or 1.0
 
+    -- Fetch panel width for wrapping
+    local panel_w = game.ui_manager and game.ui_manager.panel and game.ui_manager.panel.w or 400
+    local wrap_x  = panel_w - 40 -- Margin
+
     if node == nil then
         local w = 60
         love.graphics.setColor(0.4, 0.4, 0.5, 0.30 * alpha)
@@ -387,16 +649,20 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
     local RE  = require("services.DispatchRuleEngine")
     local id  = node.def_id
     local def = RE.getDefById(id)
-    local w   = boolNodeW(node, font)
+    local w, h = boolNodeSize(node, font, panel_w)
 
     if id == "bool_and" or id == "bool_or" then
         local lbl      = def and def.label or id
         local lbl_w    = font:getWidth(lbl) + 16
-        local left_w   = boolNodeW(node.left, font)
+        local left_w, left_h = boolNodeSize(node.left, font, panel_w)
         local c        = def and def.color or { 0.82, 0.78, 0.15 }
 
+        -- Decide if we should wrap
+        local total_w_no_wrap = BOOL_ANGLE + left_w + lbl_w + boolNodeSize(node.right, font, panel_w) + BOOL_ANGLE
+        local should_wrap = (x + total_w_no_wrap > wrap_x)
+
         love.graphics.setColor(c[1] * 0.85, c[2] * 0.85, c[3] * 0.85, 0.9 * alpha)
-        love.graphics.polygon("fill", polyBool(x, y, w, BOOL_H))
+        love.graphics.polygon("fill", polyBool(x, y, w, h))
         if warn_map and warn_map[node] then
             love.graphics.setColor(0.95, 0.62, 0.12, alpha)
             love.graphics.setLineWidth(2)
@@ -404,19 +670,32 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
             love.graphics.setColor(0, 0, 0, 0.25 * alpha)
             love.graphics.setLineWidth(1)
         end
-        love.graphics.polygon("line", polyBool(x, y, w, BOOL_H))
+        love.graphics.polygon("line", polyBool(x, y, w, h))
         love.graphics.setLineWidth(1)
 
         local lx = x + BOOL_ANGLE
         drawBoolNode(node.left,  lx, y, game, nrects, dtargets, appendPath(path, "left"),  warn_map, alpha)
-        local op_x = lx + left_w
+        
+        local op_x, op_y, next_x, next_y
+        if should_wrap then
+            op_x = x + BOOL_ANGLE
+            op_y = y + left_h
+            next_x = op_x + lbl_w
+            next_y = op_y
+        else
+            op_x = lx + left_w
+            op_y = y
+            next_x = op_x + lbl_w
+            next_y = y
+        end
+
         love.graphics.setFont(font)
         love.graphics.setColor(1, 1, 1, alpha)
-        love.graphics.printf(lbl, op_x, y + (BOOL_H - fh) / 2, lbl_w, "center")
-        drawBoolNode(node.right, op_x + lbl_w, y, game, nrects, dtargets, appendPath(path, "right"), warn_map, alpha)
+        love.graphics.printf(lbl, op_x, op_y + (BOOL_H - fh) / 2, lbl_w, "center")
+        drawBoolNode(node.right, next_x, next_y, game, nrects, dtargets, appendPath(path, "right"), warn_map, alpha)
 
         if nrects and path then
-            nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=BOOL_H, slot_rects={} }
+            nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=h, slot_rects={} }
         end
 
     elseif id == "bool_not" then
@@ -490,8 +769,13 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
                             and state.slot_input.node == node
                             and state.slot_input.slot_key == sd.key
             local pill_x = px
-            local pw     = drawSlotPill(val, px, y, BOOL_H, font, alpha, is_foc)
-            slot_rects[#slot_rects+1] = { key = sd.key, x = pill_x, w = pw, sd_type = sd.type }
+            local pw
+            if has_rep then
+                pw = drawInlineReporter(val, px, y, BOOL_H, font, alpha, slot_rects, sd.key, sd.type)
+            else
+                pw = drawSlotPill(val, px, y, BOOL_H, font, alpha, is_foc)
+                slot_rects[#slot_rects+1] = { key = sd.key, x = pill_x, w = pw, sd_type = sd.type }
+            end
             px = px + pw + 4
         end
 
@@ -607,8 +891,12 @@ local function drawStackNode(node, x, y, w, game, nrects, path, warn_map, alpha)
                              and state.slot_input.slot_key == sd.key
             local pw = pillWidth(val, font, is_foc)
             px = px - pw
-            drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc)
-            slot_rects[#slot_rects+1] = { key = sd.key, x = px, w = pw, sd_type = sd.type }
+            if has_rep then
+                drawInlineReporter(val, px, y, STACK_H, font, alpha, slot_rects, sd.key, sd.type)
+            else
+                drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc)
+                slot_rects[#slot_rects+1] = { key = sd.key, x = px, w = pw, sd_type = sd.type }
+            end
             px = px - 4
         end
     end
@@ -628,10 +916,13 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
     local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
 
-    local body_h = math.max(MIN_BODY_H, measureStack(node.body or {}))
+    -- Fetch panel width for wrapping
+    local panel_w = game.ui_manager and game.ui_manager.panel and game.ui_manager.panel.w or 400
+
+    local body_h = math.max(MIN_BODY_H, measureStack(node.body or {}, game, panel_w))
     local else_h = nil
     if node.def_id == "ctrl_if_else" and node.else_body then
-        else_h = math.max(MIN_BODY_H, measureStack(node.else_body or {}))
+        else_h = math.max(MIN_BODY_H, measureStack(node.else_body or {}, game, panel_w))
     end
 
     local ctrl_c = { 0.75, 0.55, 0.08 }
@@ -751,7 +1042,7 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
     end
 
     if nrects and path then
-        nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=measureNode(node), slot_rects={} }
+        nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=measureNode(node, game, panel_w), slot_rects={} }
     end
 end
 
@@ -765,7 +1056,10 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
 
-    local body_h  = math.max(MIN_BODY_H, measureStack(node.body or {}))
+    -- Fetch panel width for wrapping
+    local panel_w = game.ui_manager and game.ui_manager.panel and game.ui_manager.panel.w or 400
+
+    local body_h  = math.max(MIN_BODY_H, measureStack(node.body or {}, game, panel_w))
     local loop_c  = { 0.20, 0.55, 0.75 }
 
     -- Shadow
@@ -885,16 +1179,19 @@ end
 
 -- ── drawFindNode ─────────────────────────────────────────────────────────────
 -- C-block (teal-blue) with sort pills + condition slot in header.
-
 drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, alpha)
-    local font    = game.fonts.ui_small
-    local fh      = font:getHeight()
-    alpha         = alpha or 1.0
-    local RE      = require("services.DispatchRuleEngine")
-    local def     = RE.getDefById(node.def_id)
-    local body_h  = math.max(MIN_BODY_H, measureStack(node.body or {}))
-    local find_c  = def and def.color or { 0.25, 0.55, 0.75 }
+    local font = game.fonts.ui_small
+    local fh   = font:getHeight()
+    alpha = alpha or 1.0
 
+    local RE  = require("services.DispatchRuleEngine")
+    local def = RE.getDefById(node.def_id)
+
+    -- Fetch panel width for wrapping
+    local panel_w = game.ui_manager and game.ui_manager.panel and game.ui_manager.panel.w or 400
+
+    local body_h  = math.max(MIN_BODY_H, measureStack(node.body or {}, game, panel_w))
+    local find_c  = { 0.20, 0.55, 0.75 }
     -- Shadow + fill
     love.graphics.setColor(0, 0, 0, 0.20 * alpha)
     love.graphics.polygon("fill", polyCBlock(x+2, y+2, w, body_h))
@@ -970,7 +1267,7 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     end
 
     if nrects and path then
-        nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=measureNode(node), slot_rects=slot_rects }
+        nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=measureNode(node, game, panel_w), slot_rects=slot_rects }
     end
 end
 
@@ -989,9 +1286,12 @@ drawNodeList = function(stack, x, y, w, game, nrects, dtargets, path_prefix, war
     -- Pass 1: compute layout, register drop targets
     local items = {}
     local font  = game.fonts.ui_small
+    -- Fetch panel width for wrapping
+    local panel_w = game.ui_manager and game.ui_manager.panel and game.ui_manager.panel.w or 400
+
     for i, node in ipairs(stack or {}) do
         local node_path = appendPath(path_prefix, i)
-        local nh = measureNode(node)
+        local nh = measureNode(node, game, panel_w)
         local nw
         if node.kind == "hat" or node.kind == "stack" then
             nw = math.min(w, stackNaturalW(node, font))
@@ -1036,10 +1336,11 @@ end
 
 -- ── Rule card component ───────────────────────────────────────────────────────
 
-local function makeRuleCard(rule_i, rule, panel_w)
+local function makeRuleCard(rule_i, rule, game, panel_w)
     local pad      = RULE_PAD
     local stack    = rule.stack or {}
-    local stack_h  = measureStack(stack)
+    local font     = game.fonts.ui_small
+    local stack_h  = measureStack(stack, game, panel_w)
     local inner_h  = math.max(MIN_BODY_H, stack_h)
     local is_open  = state.palette_open and state.selected_rule == rule_i
     local is_coll  = state.collapsed_rules[rule.id or ""]
@@ -1224,6 +1525,11 @@ local function makeRuleCard(rule_i, rule, panel_w)
                 if mx >= r.x and mx <= r.x + r.w and my >= r.y and my <= r.y + r.h then
                     for _, sp in ipairs(r.slot_rects or {}) do
                         if mx >= sp.x and mx <= sp.x + sp.w then
+                            -- Inner reporter sub-slot (cycle/edit the reporter node's own slot)
+                            if sp.sd_type == "rep_inner" then
+                                return { id = "dispatch_cycle_rep_inner_slot",
+                                         data = { rep_node = sp.rep_node, rep_key = sp.rep_key, rep_sd = sp.rep_sd } }
+                            end
                             if sp.sd_type == "number" or sp.sd_type == "string" then
                                 return { id = "dispatch_focus_slot",
                                          data = { rule_i = rule_i, path = r.path,
@@ -1246,11 +1552,16 @@ end
 
 -- Returns the subset of `all` that passes the current tag + search filters.
 -- Multi-tag: a block passes only if it has ALL active tags (AND semantics).
+-- Legacy blocks are excluded unless filter.show_legacy is true.
 local function filterDefs(all, filter)
-    local has_tags = next(filter.active_tags) ~= nil
-    local search   = filter.search:lower()
-    local result   = {}
+    local has_tags   = next(filter.active_tags) ~= nil
+    local search     = filter.search:lower()
+    local show_legacy = filter.show_legacy or false
+    local result     = {}
     for _, def in ipairs(all) do
+        -- Hide legacy blocks unless toggle is on
+        if def.category == "legacy" and not show_legacy then goto continue end
+
         -- Tag: must have every active tag
         local tag_ok = true
         if has_tags then
@@ -1269,13 +1580,14 @@ local function filterDefs(all, filter)
             or (def.label   and def.label:lower():find(search, 1, true))
             or (def.tooltip and def.tooltip:lower():find(search, 1, true))
         if tag_ok and search_ok then result[#result+1] = def end
+        ::continue::
     end
     return result
 end
 
 -- Groups a flat list of defs by category, sorted by hue within each group.
 -- Returns an array of { cat, defs } in the canonical category order.
-local CAT_ORDER = { "hat", "control", "loop", "find", "boolean", "reporter", "stack" }
+local CAT_ORDER = { "hat", "control", "loop", "find", "boolean", "reporter", "stack", "legacy" }
 
 local function rgbHue(r, g, b)
     local mx = math.max(r, g, b)
@@ -1333,7 +1645,7 @@ local function calcFilterHeaderH(font, pw, pad)
     -- Clear-all pill — check if it wraps (treated as another pill)
     local clear_w = font:getWidth("✕ clear") + TAG_PILL_PAD * 2
     if cx + clear_w > pw - pad and cx > pad then rows = rows + 1 end
-    return rows * (TAG_PILL_H + TAG_GAP) + PAL_GAP + SEARCH_H + PAL_GAP
+    return rows * (TAG_PILL_H + TAG_GAP) + PAL_GAP + SEARCH_H + PAL_GAP + LEGACY_TOGGLE_H + PAL_GAP
 end
 
 -- ── Palette component ─────────────────────────────────────────────────────────
@@ -1469,9 +1781,28 @@ local function makePalette(rule_i, panel_w)
 
             state.palette_search_rect = { x=sf_x, y=sf_y, w=sf_w, h=sf_h }
 
+            -- ── Legacy toggle pill ───────────────────────────────────────────
+            local lt_y   = sf_y + sf_h + PAL_GAP
+            local lt_lbl = filter.show_legacy and "⊠ Legacy ON" or "⊞ Legacy OFF"
+            local lt_w   = font:getWidth(lt_lbl) + TAG_PILL_PAD * 2
+            if filter.show_legacy then
+                love.graphics.setColor(0.40, 0.20, 0.65, 1.0)
+                love.graphics.rectangle("fill", sf_x, lt_y, lt_w, LEGACY_TOGGLE_H, 3, 3)
+                love.graphics.setColor(0.72, 0.52, 1.0, 1.0)
+            else
+                love.graphics.setColor(0.14, 0.12, 0.22, 1.0)
+                love.graphics.rectangle("fill", sf_x, lt_y, lt_w, LEGACY_TOGGLE_H, 3, 3)
+                love.graphics.setColor(0.40, 0.38, 0.55, 1.0)
+                -- coloured left accent
+                love.graphics.rectangle("fill", sf_x, lt_y, 3, LEGACY_TOGGLE_H, 3, 3)
+                love.graphics.setColor(0.50, 0.48, 0.68, 1.0)
+            end
+            love.graphics.print(lt_lbl, sf_x + TAG_PILL_PAD, lt_y + (LEGACY_TOGGLE_H - fh) / 2)
+            state.palette_legacy_rect = { x=sf_x, y=lt_y, w=lt_w, h=LEGACY_TOGGLE_H }
+
             -- ── Block list (filtered + grouped by category) ──────────────────
             local groups = groupDefs(filterDefs(all, filter))
-            local cy     = sf_y + sf_h + PAL_GAP
+            local cy     = lt_y + LEGACY_TOGGLE_H + PAL_GAP
             local prects = {}
 
             if #groups == 0 then
@@ -1577,7 +1908,12 @@ local function makePalette(rule_i, panel_w)
             if sr and mx >= sr.x and mx <= sr.x + sr.w and my >= sr.y and my <= sr.y + sr.h then
                 return { id = "dispatch_palette_search_focus", data = {} }
             end
-            -- 3. Block pills
+            -- 3. Legacy toggle
+            local lr = state.palette_legacy_rect
+            if lr and mx >= lr.x and mx <= lr.x + lr.w and my >= lr.y and my <= lr.y + lr.h then
+                return { id = "dispatch_palette_toggle_legacy", data = {} }
+            end
+            -- 4. Block pills
             for def_id, r in pairs(state.palette_rects or {}) do
                 if mx >= r.x and mx <= r.x + r.w and my >= r.y and my <= r.y + r.h then
                     if r.valid then
@@ -1611,11 +1947,41 @@ function DispatchTab.build(game, ui_manager)
     for rule_i, rule in ipairs(rules) do
         table.insert(comps, { type = "spacer", h = 6 })
         local is_open = state.palette_open and state.selected_rule == rule_i
-        table.insert(comps, makeRuleCard(rule_i, rule, pw))
+        table.insert(comps, makeRuleCard(rule_i, rule, game, pw))
         if is_open and not state.collapsed_rules[rule.id or ""] then
             table.insert(comps, makePalette(rule_i, pw))
         end
     end
+
+    -- ── Dropdown Overlay ─────────────────────────────────────────────────────
+    if state.active_dropdown then
+        table.insert(comps, {
+            type = "custom",
+            h = 0, -- Floating
+            draw_fn = function(px, y, pw, h, game)
+                -- We need to draw this in screen space, but draw_fn is translated
+                -- by ComponentRenderer. We'll use love.graphics.push/pop or just
+                -- inverse translate.
+                love.graphics.push("all")
+                love.graphics.origin() -- Draw in absolute screen space
+                state.active_dropdown:update(0) -- dt is 0 for draw
+                state.active_dropdown:draw()
+                love.graphics.pop()
+            end,
+            hit_fn = function(px, cy, pw, h, mx, my)
+                -- mx, my are in panel content space. Dropdown needs screen space.
+                local screen_mx, screen_my = love.mouse.getPosition()
+                if state.active_dropdown:mousepressed(screen_mx, screen_my, 1) then
+                    state.active_dropdown = nil
+                    return { id = "_noop", data = {} }
+                end
+                -- Close if clicked outside
+                state.active_dropdown = nil
+                return { id = "_noop", data = {} }
+            end
+        })
+    end
+
     return comps
 end
 
@@ -1968,18 +2334,44 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
 
     for _, sd in ipairs(def.slots or {}) do
         if sd.key == slot_key then
-            if sd.type == "enum" then
+            if sd.type == "enum" or sd.type == "vehicle_enum" then
                 local opts = sd.options or {}
-                local idx  = 1
-                for i, v in ipairs(opts) do if v == node.slots[slot_key] then idx = i; break end end
-                node.slots[slot_key] = opts[(idx % #opts) + 1]
-            elseif sd.type == "vehicle_enum" then
-                local types = {}
-                for id in pairs(game.C.VEHICLES or {}) do types[#types+1] = id:lower() end
-                table.sort(types)
-                local idx = 1
-                for i, v in ipairs(types) do if v == node.slots[slot_key] then idx = i; break end end
-                node.slots[slot_key] = types[(idx % #types) + 1]
+                if sd.type == "vehicle_enum" then
+                    opts = {}
+                    for id in pairs(game.C.VEHICLES or {}) do opts[#opts+1] = id:lower() end
+                    table.sort(opts)
+                end
+                
+                -- Calculate screen position
+                local panel = game.ui_manager.panel
+                local scroll_y = panel.scroll[panel.active_tab_id] and panel.scroll[panel.active_tab_id].scroll_y or 0
+                -- Find the rect for this slot in state.node_rects
+                local slot_rect = nil
+                local nr_list = state.node_rects[rule_i] or {}
+                for _, nr in ipairs(nr_list) do
+                    if pathsEqual(nr.path, path) then
+                        for _, sr in ipairs(nr.slot_rects or {}) do
+                            if sr.key == slot_key then slot_rect = sr; break end
+                        end
+                    end
+                end
+
+                local drop_x = slot_rect and (panel.x + slot_rect.x) or (love.mouse.getX() - 60)
+                local drop_y = slot_rect and (panel.content_y - scroll_y + nr_list[1].y + (slot_rect.y or 0) + 20) or love.mouse.getY()
+                -- (Note: nr_list[1].y is a simplification, we need the actual y for nr)
+                for _, nr in ipairs(nr_list) do
+                    if pathsEqual(nr.path, path) then
+                        drop_y = panel.content_y - scroll_y + nr.y + 20
+                        break
+                    end
+                end
+
+                state.active_dropdown = Dropdown:new(opts, node.slots[slot_key], function(val)
+                    node.slots[slot_key] = val
+                    state.active_dropdown = nil
+                end, game)
+                state.active_dropdown.x = drop_x
+                state.active_dropdown.y = drop_y
             elseif sd.type == "text_var_enum" or sd.type == "string" then
                 local mode = "text"
                 state.slot_input = {
@@ -2003,6 +2395,106 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
             end
             break
         end
+    end
+end
+
+-- ── Cycle / edit an inner slot of an embedded reporter node ──────────────────
+
+function DispatchTab.cycleRepInnerSlot(rep_node, rep_key, rep_sd, game)
+    if not rep_node or not rep_key then return end
+    local RE  = require("services.DispatchRuleEngine")
+    local def = RE.getDefById(rep_node.def_id)
+    if not def then return end
+
+    -- Find the slot def (use rep_sd if provided, else look it up)
+    local sd = rep_sd
+    if not sd then
+        for _, s in ipairs(def.slots or {}) do
+            if s.key == rep_key then sd = s; break end
+        end
+    end
+    if not sd then return end
+
+    if sd.type == "enum" or sd.type == "vehicle_enum" then
+        local opts = sd.options or {}
+
+        -- ── Dynamic options for rep_get_property ─────────────────────────────
+        if sd.options == "dynamic" and rep_node.def_id == "rep_get_property" then
+            local PROPS = require("data.dispatch_properties")
+            if sd.key == "source" then
+                local seen = {}
+                opts = {}
+                for _, p in ipairs(PROPS) do
+                    if not seen[p.source] then
+                        opts[#opts+1] = p.source
+                        seen[p.source] = true
+                    end
+                end
+                table.sort(opts)
+            elseif sd.key == "property" then
+                local source = rep_node.slots.source
+                opts = {}
+                for _, p in ipairs(PROPS) do
+                    if p.source == source then
+                        opts[#opts+1] = p.key
+                    end
+                end
+                table.sort(opts)
+            end
+        elseif sd.type == "vehicle_enum" then
+            opts = {}
+            for id in pairs(game.C.VEHICLES or {}) do opts[#opts+1] = id:lower() end
+            table.sort(opts)
+        end
+
+        -- Calculate screen position
+        local panel = game.ui_manager.panel
+        local scroll_y = panel.scroll[panel.active_tab_id] and panel.scroll[panel.active_tab_id].scroll_y or 0
+        -- We don't easily have the node's current drawn position here without searching state.node_rects
+        -- but cycleRepInnerSlot is called from a hit_fn which has the info.
+        -- Let's use mouse position as a fallback, but better to use hit rect if we can.
+        local drop_x = love.mouse.getX() - 60
+        local drop_y = love.mouse.getY()
+
+        state.active_dropdown = Dropdown:new(opts, rep_node.slots[rep_key], function(val)
+            local old_val = rep_node.slots[rep_key]
+            rep_node.slots[rep_key] = val
+            
+            -- ── Cascading reset for rep_get_property ─────────────────────────────
+            if rep_node.def_id == "rep_get_property" and sd.key == "source" and val ~= old_val then
+                local PROPS = require("data.dispatch_properties")
+                for _, p in ipairs(PROPS) do
+                    if p.source == val then
+                        rep_node.slots.property = p.key
+                        break
+                    end
+                end
+            end
+            state.active_dropdown = nil
+        end, game)
+        state.active_dropdown.x = drop_x
+        state.active_dropdown.y = drop_y
+
+    elseif sd.type == "number" then
+        state.slot_input = {
+            node     = rep_node,
+            slot_key = rep_key,
+            input    = TextInput:new("", rep_node.slots[rep_key], "number", function(val)
+                if sd.min then val = math.max(sd.min, val) end
+                rep_node.slots[rep_key] = val
+            end, game)
+        }
+        state.slot_input.input:focus()
+
+    elseif sd.type == "string" or sd.type == "text_var_enum" then
+        state.slot_input = {
+            node     = rep_node,
+            slot_key = rep_key,
+            input    = TextInput:new("", rep_node.slots[rep_key], "text", function(val)
+                rep_node.slots[rep_key] = val
+            end, game)
+        }
+        state.slot_input.input:focus()
     end
 end
 
