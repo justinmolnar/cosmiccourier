@@ -828,11 +828,11 @@ return {
       terminal     = true },
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- STACK — smart assignment (find best vehicle by a metric)
+-- LEGACY — hidden from main palette
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id             = "action_assign_fastest",
-      category       = "stack",
+      category       = "legacy",
       tags           = { "trip", "vehicle" },
       color          = { 0.28, 0.45, 0.88 },
       label          = "assign fastest",
@@ -843,7 +843,7 @@ return {
       constraint     = "vehicle_covers_trip_scope" },
 
     { id             = "action_assign_most_capacity",
-      category       = "stack",
+      category       = "legacy",
       tags           = { "trip", "vehicle" },
       color          = { 0.28, 0.45, 0.88 },
       label          = "assign most capacity",
@@ -854,13 +854,24 @@ return {
       constraint     = "vehicle_covers_trip_scope" },
 
     { id             = "action_assign_least_recent",
-      category       = "stack",
+      category       = "legacy",
       tags           = { "trip", "vehicle" },
       color          = { 0.28, 0.45, 0.88 },
       label          = "assign least recent",
       tooltip        = "Action: assigns the trip to the eligible vehicle that has been idle the longest (round-robin fairness).",
       slots          = { VEHICLE_SLOT },
       evaluator      = "assign_least_recent",
+      vehicle_slot_key = "vehicle_type",
+      constraint     = "vehicle_covers_trip_scope" },
+
+    { id             = "action_assign_nearest",
+      category       = "legacy",
+      tags           = { "trip", "vehicle" },
+      color          = { 0.28, 0.45, 0.88 },
+      label          = "nearest",
+      tooltip        = "Action: assigns the trip to the nearest eligible idle vehicle of the chosen type (by travel distance).",
+      slots          = { VEHICLE_SLOT },
+      evaluator      = "assign_nearest",
       vehicle_slot_key = "vehicle_type",
       constraint     = "vehicle_covers_trip_scope" },
 
@@ -1772,10 +1783,31 @@ return {
       hat_evaluator = "hat_after_n_seconds",
       slots        = { { key="seconds", type="number", default=10, step=5, min=1 } } },
 
-    -- ── Find + query blocks ───────────────────────────────────────────────────
+-- ═══════════════════════════════════════════════════════════════════════════
+-- FIND — core primitives (Phase 4)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+    { id           = "find_match",
+      category     = "find",
+      node_kind    = "find",
+      tags         = { "logic", "query" },
+      color        = { 0.20, 0.55, 0.75 },
+      label        = "Find",
+      tooltip      = "Finds the best matching item in a collection and stores it in a variable. Use 'where' to filter and 'sorter' to rank.",
+      evaluator    = "find_match",
+      has_condition = true,
+      slots        = {
+          { key="collection", type="enum", options="dynamic" },
+          { key="sorter",     type="enum", options="dynamic" },
+          { key="variable",   type="string" },
+      } },
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- LEGACY — hidden from main palette
+-- ═══════════════════════════════════════════════════════════════════════════
 
     { id           = "ctrl_find_trip",
-      category     = "control",
+      category     = "legacy",
       node_kind    = "find",
       tags         = { "trip", "logic" },
       color        = { 0.25, 0.55, 0.75 },
@@ -1787,7 +1819,7 @@ return {
                          options={"desc","asc"} } } },
 
     { id           = "ctrl_find_vehicle",
-      category     = "control",
+      category     = "legacy",
       node_kind    = "find",
       tags         = { "vehicle", "logic" },
       color        = { 0.25, 0.55, 0.75 },

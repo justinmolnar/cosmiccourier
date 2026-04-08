@@ -47,6 +47,7 @@ end
 
 -- Exposed so ReporterEvaluators (and DispatchEvaluators) can call it for nesting.
 RuleEngine.evalReporter = evalReporter
+RuleEngine.evalBoolNode = evalBoolNode
 
 function RuleEngine.getDefById(id)  return getDefs()[id] end
 function RuleEngine.getAllDefs()    return require("data.dispatch_blocks") end
@@ -166,77 +167,13 @@ local function evalStack(stack, ctx)
             if result then return result end
 
         elseif node.kind == "find" then
-            local SCOPE_RANK = { district=1, city=2, region=3, continent=4, world=5 }
-            if node.def_id == "ctrl_find_trip" then
-                local sort_by = node.slots and node.slots.sort_by or "none"
-                local order   = node.slots and node.slots.order   or "desc"
-                local snapshot = {}
-                for _, t in ipairs(ctx.game.entities.trips.pending) do
-                    snapshot[#snapshot+1] = t
-                end
-                if sort_by == "wait" then
-                    table.sort(snapshot, function(a,b)
-                        local av, bv = a.wait_time or 0, b.wait_time or 0
-                        return order == "asc" and av < bv or av > bv
-                    end)
-                elseif sort_by == "payout" then
-                    table.sort(snapshot, function(a,b)
-                        local av, bv = a.base_payout or 0, b.base_payout or 0
-                        return order == "asc" and av < bv or av > bv
-                    end)
-                elseif sort_by == "scope" then
-                    table.sort(snapshot, function(a,b)
-                        local av = SCOPE_RANK[a.scope or "district"] or 1
-                        local bv = SCOPE_RANK[b.scope or "district"] or 1
-                        return order == "asc" and av < bv or av > bv
-                    end)
-                end
-                for _, t in ipairs(snapshot) do
-                    local fctx = { game=ctx.game, trip=t, vehicle=ctx.vehicle,
-                                   _rule_id=ctx._rule_id, _call_depth=ctx._call_depth }
-                    if not node.condition or evalBoolNode(node.condition, fctx) then
-                        local result = evalStack(node.body, fctx)
-                        if result then return result end
-                        break
-                    end
-                end
-
-            elseif node.def_id == "ctrl_find_vehicle" then
-                local want    = ((node.slots and node.slots.vehicle_type) or ""):lower()
-                local sort_by = node.slots and node.slots.sort_by or "none"
-                local snapshot = {}
-                for _, v in ipairs(ctx.game.entities.vehicles) do
-                    if (want == "" or (v.type or ""):lower() == want)
-                       and v:isAvailable(ctx.game) then
-                        snapshot[#snapshot+1] = v
-                    end
-                end
-                if sort_by == "speed" then
-                    table.sort(snapshot, function(a,b)
-                        return (a:getSpeed() or 0) > (b:getSpeed() or 0)
-                    end)
-                elseif sort_by == "capacity" then
-                    table.sort(snapshot, function(a,b)
-                        return (a:getEffectiveCapacity(ctx.game) or 0)
-                             > (b:getEffectiveCapacity(ctx.game) or 0)
-                    end)
-                elseif sort_by == "idle_time" then
-                    table.sort(snapshot, function(a,b)
-                        local now = love.timer.getTime()
-                        local at = a.idle_since and (now - a.idle_since) or 0
-                        local bt = b.idle_since and (now - b.idle_since) or 0
-                        return at > bt
-                    end)
-                end
-                for _, v in ipairs(snapshot) do
-                    local fctx = { game=ctx.game, trip=ctx.trip, vehicle=v,
-                                   _rule_id=ctx._rule_id, _call_depth=ctx._call_depth }
-                    if not node.condition or evalBoolNode(node.condition, fctx) then
-                        local result = evalStack(node.body, fctx)
-                        if result then return result end
-                        break
-                    end
-                end
+            local def = getDefs()[node.def_id]
+            local fn  = def and def.evaluator and getEvaluators()[def.evaluator]
+            if fn then 
+                local res = fn(node, ctx)
+                -- If the evaluator returns a terminal status, propagate it.
+                -- Most 'find' evaluators will return false after setting a variable.
+                if res then return res end
             end
 
         elseif node.kind == "stack" then

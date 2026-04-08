@@ -570,26 +570,49 @@ local function stackNaturalW(node, font)
 end
 
 local function controlNaturalW(node, font, panel_w)
+    local RE  = require("services.DispatchRuleEngine")
+    local def = RE.getDefById(node.def_id)
+    
     local cond_w = 80
     if node.condition then
         local cw, _ = boolNodeSize(node.condition, font, panel_w)
         cond_w = cw
     end
-    -- If the control block itself has slots (like loop nodes), measure them too
-    local RE  = require("services.DispatchRuleEngine")
-    local def = RE.getDefById(node.def_id)
-    local slots_w = 0
+
+    -- Base width includes the label
+    local lbl_w = font:getWidth((def and def.label) or node.def_id)
+    local total_w = 8 + lbl_w + 8
+
+    -- Add slots and extra labels for specific core blocks
     if def and def.slots then
         for _, sd in ipairs(def.slots) do
+            -- Find block has extra labels between slots
+            if node.def_id == "find_match" then
+                if sd.key == "sorter" then
+                    total_w = total_w + font:getWidth("sorted by") + 10
+                elseif sd.key == "variable" then
+                    total_w = total_w + font:getWidth("as") + 10
+                end
+            end
+
             local val    = (node.slots and node.slots[sd.key]) or sd.default or ""
-            local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+            local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum" or sd.type == "reporter")
                            and state.slot_input
                            and state.slot_input.node == node
                            and state.slot_input.slot_key == sd.key
-            slots_w = slots_w + pillWidth(val, font, is_foc) + 4
+            total_w = total_w + pillWidth(val, font, is_foc) + 4
         end
     end
-    return math.max(220, C_INDENT + 16 + cond_w + 16 + slots_w)
+
+    -- Special: Find block has extra 'where' label
+    if node.kind == "find" then
+        total_w = total_w + font:getWidth("where") + 10
+    end
+
+    -- Add condition
+    total_w = total_w + cond_w + 16
+
+    return math.max(220, C_INDENT + total_w)
 end
 
 local function loopNaturalW(node, font, panel_w)
@@ -1265,36 +1288,79 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     love.graphics.setColor(0, 0, 0, 0.20 * alpha)
     love.graphics.rectangle("fill", x + C_INDENT, y + header_h, w - C_INDENT, body_h)
 
-    -- ── Header: left-to-right  [label] [sort pills] [where] [condition] ──────
+    -- ── Header: Find [coll] sorted by [sort] as [var] where [cond] ──────────
     love.graphics.setFont(font)
     local lbl        = (def and def.label) or node.def_id
     local slot_rects = {}
     local hx         = x + 10
 
-    -- Label
+    -- "Find" label
     love.graphics.setColor(1, 1, 1, alpha)
     love.graphics.print(lbl, hx, y + (header_h - fh) / 2)
     hx = hx + font:getWidth(lbl) + 8
 
-    -- Sort slots (left to right, no overlap)
     local slots = def and def.slots or {}
     for _, sd in ipairs(slots) do
-        local val    = (node.slots and node.slots[sd.key]) or sd.default or ""
-        local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+        -- Inter-slot labels
+        if sd.key == "sorter" then
+            love.graphics.setColor(1, 1, 1, 0.6 * alpha)
+            love.graphics.print("sorted by", hx, y + (header_h - fh) / 2)
+            hx = hx + font:getWidth("sorted by") + 8
+        elseif sd.key == "variable" then
+            love.graphics.setColor(1, 1, 1, 0.6 * alpha)
+            love.graphics.print("as", hx, y + (header_h - fh) / 2)
+            hx = hx + font:getWidth("as") + 8
+        end
+
+        local val    = (node.slots and node.slots[sd.key]) or sd.default
+        local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum" or sd.type == "reporter")
                        and state.slot_input
                        and state.slot_input.node == node
                        and state.slot_input.slot_key == sd.key
 
-        local pw  = pillWidth(val, font, is_foc)
-        drawSlotPill(val, hx, y, header_h, font, alpha, is_foc)
-        slot_rects[#slot_rects+1] = { key = sd.key, x = hx, w = pw, sd_type = sd.type }
+        local vstr
+        if is_foc and state.slot_input then
+            vstr = state.slot_input.input.text_buffer or tostring(val or "")
+        elseif val == nil then
+            vstr = "<" .. (sd.key or "?") .. ">"
+        else
+            vstr = tostring(val)
+        end
+
+        local fw = font:getWidth(vstr)
+        local pw = math.max(fw + 16, is_foc and 36 or 0)
+        local pill_x = hx
+
+        if is_foc and state.slot_input then
+            state.slot_input.input:draw(pill_x, y + (header_h - 16) / 2, pw, 16)
+        else
+            -- Use distinct color for variable slot
+            if sd.key == "variable" then
+                love.graphics.setColor(0.40, 0.25, 0.60, 0.90 * alpha) -- Purple theme for vars
+            else
+                love.graphics.setColor(0, 0, 0, 0.35 * alpha)
+            end
+            love.graphics.rectangle("fill", pill_x, y + (header_h - 16) / 2, pw, 16, 3, 3)
+            
+            if sd.key == "variable" then
+                love.graphics.setColor(0.70, 0.50, 0.90, 0.40 * alpha)
+            else
+                love.graphics.setColor(1, 1, 1, 0.18 * alpha)
+            end
+            love.graphics.rectangle("line", pill_x, y + (header_h - 16) / 2, pw, 16, 3, 3)
+            
+            love.graphics.setColor(1, 1, 1, alpha)
+            love.graphics.print(vstr, pill_x + 7, y + (header_h - fh) / 2)
+        end
+
+        slot_rects[#slot_rects+1] = { key = sd.key, x = pill_x, y = y, w = pw, h = header_h, sd_type = sd.type }
         hx = hx + pw + 4
     end
 
     -- "where" separator
-    love.graphics.setColor(1, 1, 1, 0.50 * alpha)
+    love.graphics.setColor(1, 1, 1, 0.6 * alpha)
     love.graphics.print("where", hx, y + (header_h - fh) / 2)
-    hx = hx + font:getWidth("where") + 6
+    hx = hx + font:getWidth("where") + 8
 
     -- Condition slot
     local cond_path = path and appendPath(path, "condition") or nil
@@ -1307,15 +1373,9 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     local body_w    = w - C_INDENT
     local body_path = path and appendPath(path, "body") or nil
 
-    -- Binding hint so user knows what's available inside
-    local bind_hint = (node.def_id == "ctrl_find_vehicle") and "ctx.vehicle = match" or "ctx.trip = match"
-    love.graphics.setFont(font)
-    love.graphics.setColor(1, 1, 1, 0.28 * alpha)
-    love.graphics.print(bind_hint, body_x + 4, body_y + 3)
-
     if not node.body or #node.body == 0 then
         love.graphics.setColor(1, 1, 1, 0.18 * alpha)
-        love.graphics.printf("drop actions here", body_x, body_y + fh + 6, body_w, "center")
+        love.graphics.printf("drop actions here", body_x, body_y + 10, body_w, "center")
         if dtargets and body_path then
             dtargets[#dtargets+1] = {
                 parent_path = body_path, slot = 1, accepts = "stack",
@@ -2400,7 +2460,26 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
             local val = node.slots[slot_key]
             if sd.type == "enum" or sd.type == "vehicle_enum" then
                 local opts = sd.options or {}
-                if sd.type == "vehicle_enum" then
+
+                -- ── Dynamic options for core blocks ──────────────────────────────
+                if sd.options == "dynamic" then
+                    if def.id == "find_match" then
+                        if sd.key == "collection" then
+                            local COLLECTIONS = require("data.dispatch_collections")
+                            opts = {}
+                            for _, c in ipairs(COLLECTIONS) do opts[#opts+1] = c.id end
+                            table.sort(opts)
+                        elseif sd.key == "sorter" then
+                            local SORTERS = require("data.dispatch_sorters")
+                            local col_id  = node.slots.collection or "vehicles"
+                            opts = {}
+                            for _, s in ipairs(SORTERS) do
+                                if s.for_type == col_id then opts[#opts+1] = s.id end
+                            end
+                            table.sort(opts)
+                        end
+                    end
+                elseif sd.type == "vehicle_enum" then
                     opts = {}
                     for id in pairs(game.C.VEHICLES or {}) do opts[#opts+1] = id:lower() end
                     table.sort(opts)
@@ -2427,7 +2506,13 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
                 local drop_y = (slot_rect and nr_ref) and (panel.content_y - scroll_y + nr_ref.y + 20) or love.mouse.getY()
 
                 state.active_dropdown = Dropdown:new(opts, val, function(v)
+                    local old_v = node.slots[slot_key]
                     node.slots[slot_key] = v
+                    -- Cascading reset for Find block
+                    if def.id == "find_match" and slot_key == "collection" and v ~= old_v then
+                        node.slots.sorter = nil
+                        node.slots.output_var = nil
+                    end
                     state.active_dropdown = nil
                 end, game)
                 state.active_dropdown.x = drop_x

@@ -52,12 +52,12 @@ end
 -- slots:     sort_by, order, vehicle_type (for ctrl_find_vehicle)
 -- condition: bool-node filter (nil = accept first)
 -- body:      array of stack-nodes
-function RuleTreeUtils.newFindNode(def_id, slots, body)
+function RuleTreeUtils.newFindNode(def_id, slots, body, condition)
     return {
         kind      = "find",
         def_id    = def_id,
         slots     = slots or {},
-        condition = nil,
+        condition = condition,
         body      = body or {},
     }
 end
