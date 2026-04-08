@@ -96,6 +96,19 @@ function RuleTreeUtils.newRule()
     return { id = makeId(), enabled = true, stack = {} }
 end
 
+-- Creates a new node instance based on its definition.
+function RuleTreeUtils.newNode(def, game)
+    local slots = RuleTreeUtils.defaultSlots(def, game)
+    local id, cat = def.id, def.category
+    if def.node_kind == "find" then return RuleTreeUtils.newFindNode(id, slots)
+    elseif cat == "hat"        then return RuleTreeUtils.newHatNode(id, slots)
+    elseif cat == "boolean"    then return RuleTreeUtils.newBoolLeaf(id, slots)
+    elseif cat == "control"    then return RuleTreeUtils.newControlNode(id, nil, {}, nil)
+    elseif cat == "loop"       then return RuleTreeUtils.newLoopNode(id, slots)
+    elseif cat == "reporter"   then return { kind = "reporter", def_id = id, slots = slots }
+    else return RuleTreeUtils.newStackNode(id, slots) end
+end
+
 -- ── Deep copy ─────────────────────────────────────────────────────────────────
 
 function RuleTreeUtils.deepCopy(orig)

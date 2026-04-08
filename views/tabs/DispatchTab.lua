@@ -197,6 +197,11 @@ measureNode = function(node, game, panel_w)
         cond_h = ch
     end
     local header_h = math.max(STACK_H, cond_h + 10)
+    
+    -- Special: Find block has a two-row header
+    if node.kind == "find" then
+        header_h = STACK_H + math.max(STACK_H, cond_h + 6)
+    end
 
     if node.kind == "hat" or node.kind == "stack" then
         return STACK_H
@@ -233,19 +238,21 @@ local function slotStr(val)
     return tostring(val)
 end
 
--- Returns the display string for a slot pill (respects active text input).
-local function pillDisplay(val, focused)
+-- Returns the display string for a slot pill (respects active text input and placeholders).
+local function pillDisplay(val, focused, placeholder)
     if type(val) == "table" and val.kind == "reporter" then
         return slotStr(val)
     end
     if focused and state.slot_input then
         return state.slot_input.input.text_buffer
     end
-    return tostring(val)
+    local s = tostring(val or "")
+    if s == "" and placeholder then return "<" .. placeholder .. ">" end
+    return s
 end
 
-local function drawSlotPill(val, x, y, block_h, font, alpha, focused)
-    local s   = pillDisplay(val, focused)
+local function drawSlotPill(val, x, y, block_h, font, alpha, focused, placeholder)
+    local s   = pillDisplay(val, focused, placeholder)
     local fw  = font:getWidth(s)
     local pw  = math.max(fw + 16, focused and 36 or (fw + 16))
     local fh  = font:getHeight()
@@ -262,11 +269,22 @@ local function drawSlotPill(val, x, y, block_h, font, alpha, focused)
         love.graphics.setColor(1, 1, 1, alpha)
         love.graphics.print(s, x + 7, py + (16 - fh) / 2)
     else
+        local is_placeholder = (tostring(val or "") == "" and placeholder ~= nil)
         love.graphics.setColor(0, 0, 0, 0.35 * alpha)
         love.graphics.rectangle("fill", x, py, pw, 16, 3, 3)
-        love.graphics.setColor(1, 1, 1, 0.18 * alpha)
+        
+        if is_placeholder then
+            love.graphics.setColor(1, 1, 1, 0.30 * alpha)
+        else
+            love.graphics.setColor(1, 1, 1, 0.18 * alpha)
+        end
         love.graphics.rectangle("line", x, py, pw, 16, 3, 3)
-        love.graphics.setColor(1, 1, 1, alpha)
+        
+        if is_placeholder then
+            love.graphics.setColor(1, 1, 1, 0.40 * alpha)
+        else
+            love.graphics.setColor(1, 1, 1, alpha)
+        end
         love.graphics.print(s, x + 7, py + (16 - fh) / 2)
     end
 
@@ -295,14 +313,7 @@ local function inlineRepW(rep_node, font)
             local is_foc = state.slot_input
                            and state.slot_input.node == rep_node
                            and state.slot_input.slot_key == sd.key
-            local vstr
-            if is_foc and state.slot_input then
-                vstr = state.slot_input.input.text_buffer or tostring(v or "")
-            elseif v == nil then
-                vstr = "<" .. (sd.key or "?") .. ">"
-            else
-                vstr = tostring(v)
-            end
+            local vstr = pillDisplay(v, is_foc, sd.key)
             w = w + math.max(font:getWidth(vstr) + 16, is_foc and 36 or 0) + 4
         end
     end
@@ -322,14 +333,7 @@ local function inlineRepW(rep_node, font)
                 local is_foc = state.slot_input
                                and state.slot_input.node == rep_node
                                and state.slot_input.slot_key == psd.key
-                local vstr
-                if is_foc and state.slot_input then
-                    vstr = state.slot_input.input.text_buffer or tostring(v or "")
-                elseif v == nil then
-                    vstr = "<" .. (psd.key or "?") .. ">"
-                else
-                    vstr = tostring(v)
-                end
+                local vstr = pillDisplay(v, is_foc, psd.key)
                 w = w + math.max(font:getWidth(vstr) + 16, is_foc and 36 or 0) + 4
             end
         end
@@ -339,11 +343,11 @@ local function inlineRepW(rep_node, font)
 end
 
 -- Compute pill width without drawing (for layout of right-aligned slots).
-local function pillWidth(val, font, focused)
+local function pillWidth(val, font, focused, placeholder)
     if type(val) == "table" and val.kind == "reporter" and val.node then
         return inlineRepW(val.node, font)
     end
-    local s = pillDisplay(val, focused)
+    local s = pillDisplay(val, focused, placeholder)
     return math.max(font:getWidth(s) + 16, focused and 36 or 0)
 end
 
@@ -355,7 +359,7 @@ local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rect
     local RE  = require("services.DispatchRuleEngine")
     local def = rep_node and RE.getDefById(rep_node.def_id)
     if not def then
-        local pw = drawSlotPill(rep_val, x, y, block_h, font, alpha, false)
+        local pw = drawSlotPill(rep_val, x, y, block_h, font, alpha, false, outer_key)
         slot_rects_out[#slot_rects_out+1] = { key = outer_key, x = x, w = pw, sd_type = outer_sd_type }
         return pw
     end
@@ -395,24 +399,28 @@ local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rect
             local is_foc = state.slot_input
                            and state.slot_input.node == rep_node
                            and state.slot_input.slot_key == sd.key
-            local vstr
-            if is_foc and state.slot_input then
-                vstr = state.slot_input.input.text_buffer or tostring(v or "")
-            elseif v == nil then
-                vstr = "<" .. (sd.key or "?") .. ">"
-            else
-                vstr = tostring(v)
-            end
+            local vstr = pillDisplay(v, is_foc, sd.key)
             local vpw = math.max(font:getWidth(vstr) + 16, is_foc and 36 or 0)
 
             if is_foc and state.slot_input then
                 state.slot_input.input:draw(inner_x, py + 2, vpw, 12)
             else
+                local is_placeholder = (tostring(v or "") == "" and sd.key ~= nil)
                 love.graphics.setColor(0, 0, 0, 0.40 * alpha)
                 love.graphics.rectangle("fill", inner_x, py + 2, vpw, 12, 2, 2)
-                love.graphics.setColor(1, 1, 1, 0.20 * alpha)
+                
+                if is_placeholder then
+                    love.graphics.setColor(1, 1, 1, 0.10 * alpha)
+                else
+                    love.graphics.setColor(1, 1, 1, 0.20 * alpha)
+                end
                 love.graphics.rectangle("line", inner_x, py + 2, vpw, 12, 2, 2)
-                love.graphics.setColor(1, 1, 1, alpha)
+                
+                if is_placeholder then
+                    love.graphics.setColor(1, 1, 1, 0.40 * alpha)
+                else
+                    love.graphics.setColor(1, 1, 1, alpha)
+                end
                 love.graphics.print(vstr, inner_x + 7, py + 2 + (12 - fh) / 2)
             end
 
@@ -447,24 +455,28 @@ local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rect
                 local is_foc = state.slot_input
                                and state.slot_input.node == rep_node
                                and state.slot_input.slot_key == psd.key
-                local vstr
-                if is_foc and state.slot_input then
-                    vstr = state.slot_input.input.text_buffer or tostring(v or "")
-                elseif v == nil then
-                    vstr = "<" .. (psd.key or "?") .. ">"
-                else
-                    vstr = tostring(v)
-                end
+                local vstr = pillDisplay(v, is_foc, psd.key)
                 local vpw = math.max(font:getWidth(vstr) + 16, is_foc and 36 or 0)
 
                 if is_foc and state.slot_input then
                     state.slot_input.input:draw(inner_x, py + 2, vpw, 12)
                 else
+                    local is_placeholder = (tostring(v or "") == "" and psd.key ~= nil)
                     love.graphics.setColor(0, 0, 0, 0.40 * alpha)
                     love.graphics.rectangle("fill", inner_x, py + 2, vpw, 12, 2, 2)
-                    love.graphics.setColor(1, 1, 1, 0.20 * alpha)
+                    
+                    if is_placeholder then
+                        love.graphics.setColor(1, 1, 1, 0.10 * alpha)
+                    else
+                        love.graphics.setColor(1, 1, 1, 0.20 * alpha)
+                    end
                     love.graphics.rectangle("line", inner_x, py + 2, vpw, 12, 2, 2)
-                    love.graphics.setColor(1, 1, 1, alpha)
+                    
+                    if is_placeholder then
+                        love.graphics.setColor(1, 1, 1, 0.40 * alpha)
+                    else
+                        love.graphics.setColor(1, 1, 1, alpha)
+                    end
                     love.graphics.print(vstr, inner_x + 7, py + 2 + (12 - fh) / 2)
                 end
 
@@ -513,11 +525,11 @@ boolNodeW = function(node, font)
         local w = BOOL_ANGLE * 2 + font:getWidth(def.label or "") + 16
         for _, sd in ipairs(def.slots or {}) do
             local val    = node.slots and node.slots[sd.key] or sd.default or ""
-            local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+            local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum" or sd.type == "reporter")
                            and state.slot_input
                            and state.slot_input.node == node
                            and state.slot_input.slot_key == sd.key
-            w = w + pillWidth(val, font, is_foc) + 4
+            w = w + pillWidth(val, font, is_foc, sd.key) + 4
         end
         return math.max(60, w)
     end
@@ -558,13 +570,34 @@ local function stackNaturalW(node, font)
     local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
     local w   = font:getWidth((def and def.label) or "") + 24
+    
+    -- ── Variadic params for block_call ──────────────────────────────────
+    if node.def_id == "block_call" and node.slots.action then
+        local ACTIONS = require("data.dispatch_actions")
+        local action_def = nil
+        for _, a in ipairs(ACTIONS) do
+            if a.id == node.slots.action then action_def = a; break end
+        end
+        
+        if action_def and action_def.params then
+            for _, psd in ipairs(action_def.params) do
+                local val    = node.slots[psd.key] or psd.default or ""
+                local is_foc = (psd.type == "number" or psd.type == "string" or psd.type == "text_var_enum" or psd.type == "reporter")
+                               and state.slot_input
+                               and state.slot_input.node == node
+                               and state.slot_input.slot_key == psd.key
+                w = w + pillWidth(val, font, is_foc, psd.key) + 6
+            end
+        end
+    end
+
     for _, sd in ipairs((def and def.slots) or {}) do
         local val    = (node.slots and node.slots[sd.key]) or sd.default or ""
         local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
                        and state.slot_input
                        and state.slot_input.node == node
                        and state.slot_input.slot_key == sd.key
-        w = w + pillWidth(val, font, is_foc) + 6
+        w = w + pillWidth(val, font, is_foc, sd.key) + 6
     end
     return math.max(160, math.min(STACK_W_MAX, w))
 end
@@ -572,47 +605,53 @@ end
 local function controlNaturalW(node, font, panel_w)
     local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
+    if not def then return 220 end
     
     local cond_w = 80
     if node.condition then
         local cw, _ = boolNodeSize(node.condition, font, panel_w)
         cond_w = cw
+    else
+        cond_w = 60
     end
 
     -- Base width includes the label
-    local lbl_w = font:getWidth((def and def.label) or node.def_id)
-    local total_w = 8 + lbl_w + 8
+    local lbl_w = font:getWidth(def.label or node.def_id)
+    local total_w = 10 + lbl_w + 10
 
     -- Add slots and extra labels for specific core blocks
-    if def and def.slots then
+    if def.slots then
         for _, sd in ipairs(def.slots) do
             -- Find block has extra labels between slots
             if node.def_id == "find_match" then
                 if sd.key == "sorter" then
-                    total_w = total_w + font:getWidth("sorted by") + 10
+                    total_w = total_w + font:getWidth("sorted by") + 12
                 elseif sd.key == "variable" then
-                    total_w = total_w + font:getWidth("as") + 10
+                    total_w = total_w + font:getWidth("as") + 12
                 end
             end
 
-            local val    = (node.slots and node.slots[sd.key]) or sd.default or ""
+            local val    = (node.slots and node.slots[sd.key]) or sd.default
             local is_foc = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum" or sd.type == "reporter")
                            and state.slot_input
                            and state.slot_input.node == node
                            and state.slot_input.slot_key == sd.key
-            total_w = total_w + pillWidth(val, font, is_foc) + 4
+            
+            local vstr = pillDisplay(val, is_foc, sd.key)
+            local pw = math.max(font:getWidth(vstr) + 16, is_foc and 36 or 0)
+            total_w = total_w + pw + 6
         end
     end
 
     -- Special: Find block has extra 'where' label
     if node.kind == "find" then
-        total_w = total_w + font:getWidth("where") + 10
+        total_w = total_w + font:getWidth("where") + 12
     end
 
     -- Add condition
-    total_w = total_w + cond_w + 16
+    total_w = total_w + cond_w + 20
 
-    return math.max(220, C_INDENT + total_w)
+    return math.max(220, total_w)
 end
 
 local function loopNaturalW(node, font, panel_w)
@@ -834,7 +873,7 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
             if has_rep then
                 pw = drawInlineReporter(val, px, y, BOOL_H, font, alpha, slot_rects, sd.key, sd.type)
             else
-                pw = drawSlotPill(val, px, y, BOOL_H, font, alpha, is_foc)
+                pw = drawSlotPill(val, px, y, BOOL_H, font, alpha, is_foc, sd.key)
                 slot_rects[#slot_rects+1] = { key = sd.key, x = pill_x, y = y, w = pw, h = BOOL_H, sd_type = sd.type }
             end
             px = px + pw + 4
@@ -885,9 +924,9 @@ local function drawHatNode(node, x, y, w, game, nrects, path, alpha)
                             and state.slot_input
                             and state.slot_input.node == node
                             and state.slot_input.slot_key == sd.key
-            local pw = pillWidth(val, font, is_foc)
+            local pw = pillWidth(val, font, is_foc, sd.key)
             px = px - pw
-            drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc)
+            drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc, sd.key)
             slot_rects[#slot_rects+1] = { key = sd.key, x = px, w = pw, sd_type = sd.type }
             px = px - 4
         end
@@ -941,6 +980,38 @@ local function drawStackNode(node, x, y, w, game, nrects, path, warn_map, alpha)
     local slot_rects = {}
     if def then
         local px = x + w - 8
+        
+        -- ── Variadic params for block_call ──────────────────────────────────
+        if node.def_id == "block_call" and node.slots.action then
+            local ACTIONS = require("data.dispatch_actions")
+            local action_def = nil
+            for _, a in ipairs(ACTIONS) do
+                if a.id == node.slots.action then action_def = a; break end
+            end
+            
+            if action_def and action_def.params then
+                for i = #action_def.params, 1, -1 do
+                    local psd    = action_def.params[i]
+                    local val    = node.slots[psd.key] or psd.default or ""
+                    local has_rep = type(val) == "table" and val.kind == "reporter"
+                    local is_foc = not has_rep
+                                     and (psd.type == "number" or psd.type == "string" or psd.type == "text_var_enum" or psd.type == "reporter")
+                                     and state.slot_input
+                                     and state.slot_input.node == node
+                                     and state.slot_input.slot_key == psd.key
+                    local pw = pillWidth(val, font, is_foc, psd.key)
+                    px = px - pw
+                    if has_rep then
+                        drawInlineReporter(val, px, y, STACK_H, font, alpha, slot_rects, psd.key, psd.type)
+                    else
+                        drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc, psd.key)
+                        slot_rects[#slot_rects+1] = { key = psd.key, x = px, w = pw, sd_type = psd.type }
+                    end
+                    px = px - 4
+                end
+            end
+        end
+
         for i = #(def.slots or {}), 1, -1 do
             local sd       = def.slots[i]
             local val      = node.slots and node.slots[sd.key] or sd.default or ""
@@ -950,12 +1021,12 @@ local function drawStackNode(node, x, y, w, game, nrects, path, warn_map, alpha)
                              and state.slot_input
                              and state.slot_input.node == node
                              and state.slot_input.slot_key == sd.key
-            local pw = pillWidth(val, font, is_foc)
+            local pw = pillWidth(val, font, is_foc, sd.key)
             px = px - pw
             if has_rep then
                 drawInlineReporter(val, px, y, STACK_H, font, alpha, slot_rects, sd.key, sd.type)
             else
-                drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc)
+                drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc, sd.key)
                 slot_rects[#slot_rects+1] = { key = sd.key, x = px, w = pw, sd_type = sd.type }
             end
             px = px - 4
@@ -1209,9 +1280,9 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
                                 and state.slot_input
                                 and state.slot_input.node == node
                                 and state.slot_input.slot_key == sd.key
-                local pw  = pillWidth(val, font, is_foc)
+                local pw  = pillWidth(val, font, is_foc, sd.key)
                 px        = px - pw
-                drawSlotPill(val, px, y, header_h, font, alpha, is_foc)
+                drawSlotPill(val, px, y, header_h, font, alpha, is_foc, sd.key)
                 slot_rects[#slot_rects+1] = { key = sd.key, x = px, w = pw, sd_type = sd.type }
                 px = px - 4
             end
@@ -1270,7 +1341,7 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
         local _, ch = boolNodeSize(node.condition, font, panel_w)
         cond_h = ch
     end
-    local header_h = math.max(STACK_H, cond_h + 10)
+    local header_h = STACK_H + math.max(STACK_H, cond_h + 6)
 
     local body_h  = math.max(MIN_BODY_H, measureStack(node.body or {}, game, panel_w))
     local find_c  = { 0.20, 0.55, 0.75 }
@@ -1288,15 +1359,16 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     love.graphics.setColor(0, 0, 0, 0.20 * alpha)
     love.graphics.rectangle("fill", x + C_INDENT, y + header_h, w - C_INDENT, body_h)
 
-    -- ── Header: Find [coll] sorted by [sort] as [var] where [cond] ──────────
+    -- ── Header: Row 1 — Find [coll] sorted by [sort] as [var] ──────────
     love.graphics.setFont(font)
     local lbl        = (def and def.label) or node.def_id
     local slot_rects = {}
     local hx         = x + 10
+    local hy         = y
 
     -- "Find" label
     love.graphics.setColor(1, 1, 1, alpha)
-    love.graphics.print(lbl, hx, y + (header_h - fh) / 2)
+    love.graphics.print(lbl, hx, hy + (STACK_H - fh) / 2)
     hx = hx + font:getWidth(lbl) + 8
 
     local slots = def and def.slots or {}
@@ -1304,11 +1376,11 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
         -- Inter-slot labels
         if sd.key == "sorter" then
             love.graphics.setColor(1, 1, 1, 0.6 * alpha)
-            love.graphics.print("sorted by", hx, y + (header_h - fh) / 2)
+            love.graphics.print("sorted by", hx, hy + (STACK_H - fh) / 2)
             hx = hx + font:getWidth("sorted by") + 8
         elseif sd.key == "variable" then
             love.graphics.setColor(1, 1, 1, 0.6 * alpha)
-            love.graphics.print("as", hx, y + (header_h - fh) / 2)
+            love.graphics.print("as", hx, hy + (STACK_H - fh) / 2)
             hx = hx + font:getWidth("as") + 8
         end
 
@@ -1318,54 +1390,58 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
                        and state.slot_input.node == node
                        and state.slot_input.slot_key == sd.key
 
-        local vstr
-        if is_foc and state.slot_input then
-            vstr = state.slot_input.input.text_buffer or tostring(val or "")
-        elseif val == nil then
-            vstr = "<" .. (sd.key or "?") .. ">"
-        else
-            vstr = tostring(val)
-        end
-
+        local vstr = pillDisplay(val, is_foc, sd.key)
         local fw = font:getWidth(vstr)
         local pw = math.max(fw + 16, is_foc and 36 or 0)
         local pill_x = hx
 
         if is_foc and state.slot_input then
-            state.slot_input.input:draw(pill_x, y + (header_h - 16) / 2, pw, 16)
+            state.slot_input.input:draw(pill_x, hy + (STACK_H - 16) / 2, pw, 16)
         else
             -- Use distinct color for variable slot
             if sd.key == "variable" then
-                love.graphics.setColor(0.40, 0.25, 0.60, 0.90 * alpha) -- Purple theme for vars
+                love.graphics.setColor(0.40, 0.25, 0.60, 0.90 * alpha)
             else
                 love.graphics.setColor(0, 0, 0, 0.35 * alpha)
             end
-            love.graphics.rectangle("fill", pill_x, y + (header_h - 16) / 2, pw, 16, 3, 3)
+            love.graphics.rectangle("fill", pill_x, hy + (STACK_H - 16) / 2, pw, 16, 3, 3)
             
             if sd.key == "variable" then
                 love.graphics.setColor(0.70, 0.50, 0.90, 0.40 * alpha)
             else
                 love.graphics.setColor(1, 1, 1, 0.18 * alpha)
             end
-            love.graphics.rectangle("line", pill_x, y + (header_h - 16) / 2, pw, 16, 3, 3)
+            love.graphics.rectangle("line", pill_x, hy + (STACK_H - 16) / 2, pw, 16, 3, 3)
             
             love.graphics.setColor(1, 1, 1, alpha)
-            love.graphics.print(vstr, pill_x + 7, y + (header_h - fh) / 2)
+            love.graphics.print(vstr, pill_x + 7, hy + (STACK_H - fh) / 2)
         end
 
-        slot_rects[#slot_rects+1] = { key = sd.key, x = pill_x, y = y, w = pw, h = header_h, sd_type = sd.type }
+        slot_rects[#slot_rects+1] = { key = sd.key, x = pill_x, y = hy, w = pw, h = STACK_H, sd_type = sd.type }
         hx = hx + pw + 4
     end
 
-    -- "where" separator
+    -- ── Header: Row 2 — where [cond] ──────────────────────────────────
+    hx = x + 14 -- Indent slightly for the second row
+    hy = y + STACK_H
+    local row2_h = header_h - STACK_H
+
     love.graphics.setColor(1, 1, 1, 0.6 * alpha)
-    love.graphics.print("where", hx, y + (header_h - fh) / 2)
-    hx = hx + font:getWidth("where") + 8
+    love.graphics.print("where", hx, hy + (row2_h - fh) / 2)
+    hx = hx + font:getWidth("where") + 10
 
     -- Condition slot
     local cond_path = path and appendPath(path, "condition") or nil
-    local cond_y    = y + (header_h - cond_h) / 2
+    local cond_y    = hy + (row2_h - cond_h) / 2
     drawBoolNode(node.condition, hx, cond_y, game, nrects, dtargets, cond_path, warn_map, alpha)
+
+    if dtargets and path then
+        local cw, ch = boolNodeSize(node.condition, font, panel_w)
+        dtargets[#dtargets+1] = {
+            parent_path = path, slot = "condition", accepts = "boolean",
+            x = hx, y = cond_y, w = cw, h = ch
+        }
+    end
 
     -- ── Body ─────────────────────────────────────────────────────────────────
     local body_x    = x + C_INDENT
@@ -2455,7 +2531,24 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
     local def  = RE.getDefById(node.def_id)
     if not def then return end
 
-    for _, sd in ipairs(def.slots or {}) do
+    local slots_to_check = {}
+    for _, sd in ipairs(def.slots or {}) do slots_to_check[#slots_to_check+1] = sd end
+    
+    -- ── Check variadic params for block_call ───────────────────────────────
+    if node.def_id == "block_call" and node.slots.action then
+        local ACTIONS = require("data.dispatch_actions")
+        local action_def = nil
+        for _, a in ipairs(ACTIONS) do
+            if a.id == node.slots.action then action_def = a; break end
+        end
+        if action_def and action_def.params then
+            for _, psd in ipairs(action_def.params) do
+                slots_to_check[#slots_to_check+1] = psd
+            end
+        end
+    end
+
+    for _, sd in ipairs(slots_to_check) do
         if sd.key == slot_key then
             local val = node.slots[slot_key]
             if sd.type == "enum" or sd.type == "vehicle_enum" then
@@ -2476,6 +2569,13 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
                             for _, s in ipairs(SORTERS) do
                                 if s.for_type == col_id then opts[#opts+1] = s.id end
                             end
+                            table.sort(opts)
+                        end
+                    elseif def.id == "block_call" then
+                        if sd.key == "action" then
+                            local ACTIONS = require("data.dispatch_actions")
+                            opts = {}
+                            for _, a in ipairs(ACTIONS) do opts[#opts+1] = a.id end
                             table.sort(opts)
                         end
                     end

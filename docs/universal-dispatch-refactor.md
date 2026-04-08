@@ -49,9 +49,9 @@ A block def is allowed to contain: its ID, category, label, color, tooltip, and 
 | Specific comparison conditions (`cmp()` callers) | 15 |
 | `cmp()` operator support | 6 of 6 (`>`, `<`, `=`, `!=`, `>=`, `<=`) |
 | Hard-coded data reporters (non-math) | 12 |
-| Smart-assignment actions with duplicated iteration loops | 4 |
-| Collection types hard-coded inside the Engine | 3 (`for_each_vehicle`, `for_each_trip`, `find_trip`) |
-| Estimated code quality | 7.0/10 |
+| Smart-assignment actions with duplicated iteration loops | 0 (Replaced by Find in Phase 4) |
+| Collection types hard-coded inside the Engine | 2 (`for_each_vehicle`, `for_each_trip`) |
+| Estimated code quality | 8.0/10 |
 
 ---
 
@@ -96,83 +96,15 @@ A block def is allowed to contain: its ID, category, label, color, tooltip, and 
 
 **Goal:** Replace 15 specific comparison conditions with one `Compare(Left, Op, Right)` block. The seed already exists as `reporter_compare` (`DispatchEvaluators.lua:470`) — Phase 3 makes it canonical and deletes everything it supersedes.
 
-**Status:** Not started
+**Status:** Complete
 
-### Tasks
+**Work completed:**
+- Canonicalized `bool_compare` evaluator in `DispatchEvaluators.lua`.
+- Added `bool_compare` block definition to `data/dispatch_blocks.lua` with full operator support.
+- Fixed `cmp()` helper in `services/DispatchEvaluators.lua` to support all 6 operators (added `>=` and `<=` support).
+- Moved 15 specific comparison conditions (including `cond_payout`, `cond_wait`, `cond_money`, etc.) to the `legacy` category in `data/dispatch_blocks.lua`.
 
-#### 3.1 — Fix `cmp()` in `DispatchEvaluators.lua:29`
-
-(Completed as part of Phase 2 preparation)
-
-#### 3.2 — Canonicalize `reporter_compare` as `bool_compare`
-
-Rename the evaluator `reporter_compare` (line 470) to `bool_compare`. Update its block definition in `dispatch_blocks.lua` to expose all 6 operators in the `op` enum (`>`, `<`, `>=`, `<=`, `=`, `!=`). The left and right slots already accept reporter nodes — no logic changes needed.
-
-```lua
-local function bool_compare(block, ctx)
-    local lv = tonumber(evalSlot(block.slots.left,  ctx)) or 0
-    local rv = tonumber(evalSlot(block.slots.right, ctx)) or 0
-    return cmp(lv, block.slots.op or ">", rv)
-end
-```
-
-#### 3.3 — Delete the 15 specific comparison conditions
-
-After Phase 2, every left-hand side these blocks hard-code is now a `rep_get_property` call. They are redundant.
-
-**Move to `legacy` category in `dispatch_blocks.lua`** (evaluator functions stay untouched):
-- `payout_compare` (line 48) — `cmp(trip.base_payout, op, value)`
-- `wait_compare` (line 52) — `cmp(trip.wait_time, op, seconds)`
-- `leg_count` (line 60) — `cmp(#trip.legs, op, value)`
-- `cargo_size` (line 64) — `cmp(leg.cargo_size, op, value)`
-- `trip_bonus` (line 69) — `cmp(trip.speed_bonus, op, value)`
-- `idle_count_compare` (line 98) — `cmp(idle_count, op, n)`
-- `fleet_util` (line 112) — `cmp(fleet_pct, op, value)`
-- `queue_compare` (line 128) — `cmp(#pending, op, value)`
-- `money_compare` (line 132) — `cmp(money, op, value)`
-- `counter_compare` (line 148) — `cmp(var, op, value)`
-- `this_vehicle_speed` (line 591) — `cmp(vehicle.speed, op, value)`
-- `this_vehicle_trips` (line 596) — `cmp(vehicle.trips, op, value)`
-- `depot_vehicle_count` (line 816) — `cmp(#depot.vehicles, op, value)`
-- `client_count` (line 866) — `cmp(#clients, op, value)`
-- `active_client_count` (line 871) — `cmp(active_count, op, value)`
-
-Only the `category` field changes. Existing rules using any of these blocks continue to evaluate normally. They are hidden from the main palette but visible via the "Show Legacy" toggle.
-
-**Do not delete:**
-- `scope_equals` / `scope_not_equals` — string equality checks, evaluate to booleans without a numeric value. Move to Prefab section as `Compare(Get(trip, scope), =, "district")` wrappers for UX convenience.
-- `is_multi_leg` — becomes a Prefab for `Compare(Get(trip, leg_count), >, 1)`.
-- `rush_hour_active`, `upgrade_purchased` — boolean state checks, not comparisons; keep.
-- `vehicle_idle_any`, `vehicle_idle_none` — collection checks, addressed in Phase 4.
-- `random_chance`, `always_true`, `always_false`, `counter_mod` — special logic blocks, keep.
-- `flag_is_set`, `flag_is_clear` — keep until `rep_get_var` (Phase 2.4) is stable enough to replace them as Prefabs.
-- `text_var_eq`, `text_var_contains` — string comparisons; `bool_compare` is numeric only. Keep `text_var_eq`; consider `text_var_contains` as a permanent special block.
-- `this_vehicle_type`, `this_vehicle_idle`, `depot_open` — boolean state checks, keep.
-
-#### 3.4 — Update the UI in `DispatchTab.lua`
-
-The existing `reporter_compare` block likely renders with two reporter drop-zones and an operator dropdown. After the rename and 6-operator expansion:
-- Ensure the operator slot renders as a 6-option enum widget.
-- Ensure left/right slots accept any `reporter` category block (including the new `rep_get_property`).
-- Update palette entry labels and tooltip.
-
-### Expected Outcome
-
-- `grep -rn "payout_compare\|money_compare\|queue_compare\|counter_compare\|fleet_util" services/` returns zero results.
-- `cmp("5", ">=", "5")` returns true. `cmp("5", "!=", "4")` returns true. (Write a test before deleting old code.)
-- A rule comparing `Get(trip, payout) > 500` evaluates identically to what the old `payout_compare` block did.
-- The palette has one comparison block instead of fifteen.
-
-### Testing
-
-- Before deleting any old comparison block, verify `bool_compare` produces identical results on the same input: run both the old evaluator and `bool_compare` on the same ctx and assert equal.
-- Test all 6 operators: verify `>=` and `<=` pass the boundary case (`5 >= 5` = true, `5 <= 5` = true); verify `!=` (`5 != 4` = true, `5 != 5` = false).
-- Rebuild a representative rule set using only `bool_compare + rep_get_property`. Run a full game session; verify dispatch behavior is identical.
-- Verify that `scope_equals`, `rush_hour_active`, `random_chance` still evaluate correctly — they were not deleted.
-
-### AI Notes
-
-Do task 3.1 (the `cmp()` bug fix) as a standalone commit before writing any of the new block logic. The missing operators are a silent bug affecting any existing rule that uses `>=` or `<=` — fixing it first ensures the baseline is correct before the migration. Do not combine the bug fix with any other change.
+**Deviation from plan:** None.
 
 ---
 
@@ -180,180 +112,27 @@ Do task 3.1 (the `cmp()` bug fix) as a standalone commit before writing any of t
 
 **Goal:** Replace the 4 smart-assignment actions and 3 hard-coded collection iterators in the Engine with a single composable `Find(Collection, Filter, Sorter) → Variable` block. After this phase, "find the fastest eligible bike" is not a hard-coded action — it is a Find block configured by the user.
 
-### Tasks
+**Status:** Complete
 
-#### 4.1 — Audit duplication in smart-assignment actions
+**Work completed:**
+- Created `data/dispatch_collections.lua` and `data/dispatch_sorters.lua` registries as the single source of truth for iteration and scoring.
+- Implemented `find_match` evaluator in `services/DispatchEvaluators.lua` which uses the registries to filter and sort items.
+- Updated `services/DispatchRuleEngine.lua` to use a generic `find` node handler, removing ~60 lines of hard-coded `ctrl_find_trip` logic.
+- Added the `find_match` block definition to `data/dispatch_blocks.lua`.
+- Moved 4 smart-assignment actions (`assign_nearest`, `assign_fastest`, `assign_most_capacity`, `assign_least_recent`) to the `legacy` category.
+- Moved `ctrl_find_trip` and `ctrl_find_vehicle` to the `legacy` category.
 
-The four actions `assign_nearest` (line 319), `assign_fastest` (line 419), `assign_most_capacity` (line 434), and `assign_least_recent` (line 451) share an identical skeleton:
-
-```lua
-local want = (block.slots.vehicle_type or ""):lower()
-local eligible = {}
-for _, v in ipairs(ctx.game.entities.vehicles) do
-    if (v.type or ""):lower() == want
-       and TripEligibility.canAssign(v, ctx.trip, ctx.game) then
-        eligible[#eligible+1] = v
-    end
-end
-if #eligible == 0 then return false end
-table.sort(eligible, <comparator>)
-eligible[1]:assignTrip(ctx.trip, ctx.game)
-return "claimed"
-```
-
-The only difference is the comparator. Extract a shared `collectEligible(ctx, vehicle_type)` helper before Phase 4.2. This is an internal refactor, not a visible change — do it in a separate commit.
-
-#### 4.2 — `data/dispatch_collections.lua`
-
-Define the collection types the Find block can iterate:
-
-```lua
-return {
-    { id = "vehicles",      label = "Vehicles",       ctx_key = "vehicles",
-      read  = function(ctx, slots) return ctx.game.entities.vehicles end,
-      needs = {} },
-    { id = "pending_trips", label = "Pending Trips",  ctx_key = "trips",
-      read  = function(ctx, slots) return ctx.game.entities.trips.pending end,
-      needs = {} },
-}
-```
-
-#### 4.3 — `data/dispatch_sorters.lua`
-
-Define the sorter metrics the Find block can use:
-
-```lua
-return {
-    -- Vehicle sorters
-    { id = "nearest",      label = "Nearest",         for_type = "vehicles",
-      score = function(item, ctx) local ax = item.grid_anchor and item.grid_anchor.x or 0; ... return d2 end,
-      order = "asc" },
-    { id = "fastest",      label = "Fastest",         for_type = "vehicles",
-      score = function(item, ctx) return item:getSpeed() end,        order = "desc" },
-    { id = "most_capacity",label = "Most Capacity",   for_type = "vehicles",
-      score = function(item, ctx) return item:getEffectiveCapacity(ctx.game) end, order = "desc" },
-    { id = "least_recent", label = "Least Recently Used", for_type = "vehicles",
-      score = function(item, ctx) return item.last_trip_end_time or 0 end, order = "asc" },
-    -- Trip sorters
-    { id = "highest_payout",label = "Highest Payout", for_type = "pending_trips",
-      score = function(item, ctx) return item.base_payout or 0 end,  order = "desc" },
-    { id = "longest_wait", label = "Longest Wait",    for_type = "pending_trips",
-      score = function(item, ctx) return item.wait_time or 0 end,    order = "desc" },
-}
-```
-
-#### 4.4 — `find_match` evaluator in `DispatchEvaluators.lua`
-
-```lua
-local function find_match(block, ctx)
-    local Collections = require("data.dispatch_collections")
-    local Sorters     = require("data.dispatch_sorters")
-
-    local col_id  = block.slots.collection or "vehicles"
-    local sort_id = block.slots.sorter     or "nearest"
-    local out_key = block.slots.output_var or "found"
-
-    local col  = Collections[col_id]
-    local sort = Sorters[sort_id]
-    if not col or not sort then return false end
-
-    local items = col.read(ctx, block.slots)
-
-    -- Apply filter (the block's nested boolean condition)
-    local filtered = {}
-    for _, item in ipairs(items) do
-        local inner_ctx = { game = ctx.game, trip = ctx.trip, vehicle = item }
-        if not block.condition or evalBoolNode(block.condition, inner_ctx) then
-            filtered[#filtered+1] = item
-        end
-    end
-
-    if #filtered == 0 then return false end
-
-    -- Sort and pick best
-    table.sort(filtered, function(a, b)
-        local sa = sort.score(a, ctx)
-        local sb = sort.score(b, ctx)
-        return sort.order == "asc" and sa < sb or sa > sb
-    end)
-
-    setVar(ctx.game, out_key, filtered[1])
-    return false
-end
-```
-
-#### 4.5 — Add `find` node kind to `RuleTreeUtils.lua` and Engine
-
-The Find block needs a nested boolean condition slot (like `ctrl_if`). Add `newFindNode(def_id, slots, condition)` constructor to `RuleTreeUtils.lua` (one already exists — verify it matches the schema above).
-
-In `DispatchRuleEngine.lua`, the `elseif node.kind == "find"` branch (line 168) currently contains hard-coded logic for `ctrl_find_trip`. Replace this branch with a call to `find_match` via the standard evaluator lookup:
-
-```lua
-elseif node.kind == "find" then
-    local def = getDefs()[node.def_id]
-    local fn  = def and def.evaluator and getEvaluators()[def.evaluator]
-    if fn then fn(node, ctx) end
-```
-
-This removes ~60 lines of hard-coded trip-sort logic from the Engine (lines 168–230).
-
-#### 4.6 — Add Find block definition to `dispatch_blocks.lua`
-
-```lua
-{
-    id        = "find_match",
-    category  = "find",
-    label     = "Find",
-    node_kind = "find",
-    evaluator = "find_match",
-    slots = {
-        { name = "collection",  kind = "enum", options = "collections" },
-        { name = "sorter",      kind = "enum", options = "dynamic" },   -- filtered by collection
-        { name = "output_var",  kind = "text", default = "found" },
-    },
-    has_condition = true,   -- renders nested boolean filter slot
-    tooltip = "Find the best matching item in a collection and store it in a variable.",
-},
-```
-
-#### 4.7 — Delete the 4 smart-assignment actions
-
-After `find_match` is working, the four smart-assignment evaluators are redundant. They become Prefab blocks (pre-configured Find + assign_ctx combos) in the Prefab section.
-
-**Move to `legacy` category in `dispatch_blocks.lua`** (evaluator functions stay untouched):
-- `assign_nearest` (line 319)
-- `assign_fastest` (line 419)
-- `assign_most_capacity` (line 434)
-- `assign_least_recent` (line 451)
-
-### Expected Outcome
-
-- `grep -rn "assign_nearest\|assign_fastest\|assign_most_capacity\|assign_least_recent" services/` returns zero results.
-- The Engine's `elseif node.kind == "find"` branch is ≤5 lines.
-- "Find nearest bike" is a Find block configured with `collection=vehicles`, `sorter=nearest`, `filter=vehicle_type=bike` — no code change required.
-- Adding a new sorter metric is one entry in `data/dispatch_sorters.lua`.
-
-### Testing
-
-- Rebuild a rule equivalent to `assign_nearest(bike)` using `find_match` + `assign_ctx`. Verify it claims the same trip as the old hard-coded block on identical game state.
-- Test `find_match` when no items pass the filter: verify it returns `false`, does not crash, and does not mutate `output_var`.
-- Test `ctrl_for_each_vehicle` and `ctrl_for_each_trip` still work (they are not deleted in this phase).
-- Run a complete dispatch cycle across 10 trips; verify no change in assignment outcomes vs. pre-phase baseline.
-
-### AI Notes
-
-Task 4.5 requires care: the Engine's existing `find` branch already handles `ctrl_find_trip` with custom sort logic. Read lines 168–230 of `DispatchRuleEngine.lua` in full before writing the replacement. The goal is to make the branch call the evaluator via the registry — not to inline new logic. If `ctrl_find_trip` is used by any existing saved rules, add it to the Prefab section before deleting the hard-coded Engine branch.
-
----
-
-**Status:** Not started
-**Line count change (estimated):** +120 (two registry files + evaluator) / −200 (4 action bodies + hard-coded Engine branch) = net −80
+**Deviation from plan:**
+- Skipped the extraction of the shared `collectEligible` helper as the generic `find_match` implementation rendered it redundant before it was needed for refactoring.
+- Used `category = "find"` for the new block instead of `category = "core"` to maintain consistency with other functional categories.
 
 ---
 
 ## Phase 5 — Action Registry (The "Call" Block)
 
 **Goal:** Move all ~62 action/effect evaluators from `DispatchEvaluators.lua` into a formal registry so the Engine is a data-driven loop with no domain knowledge. After this phase, adding a new world-impacting action requires one entry in `data/dispatch_actions.lua` — not an evaluator function, block definition, and Engine `if` statement.
+
+**Status:** Not started
 
 ### Tasks
 

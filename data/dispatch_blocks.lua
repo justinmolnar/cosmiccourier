@@ -358,7 +358,7 @@ return {
       assertion    = { subject = "trip", property = "scope", op = "neq", slot = "scope" } },
 
     { id           = "cond_payout",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.22, 0.68, 0.32 },
       label        = "payout",
@@ -368,7 +368,7 @@ return {
       assertion    = { subject = "trip", property = "payout", op_from_slot = "op", slot = "value" } },
 
     { id           = "cond_wait",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.22, 0.68, 0.32 },
       label        = "waited",
@@ -387,7 +387,7 @@ return {
       evaluator    = "is_multi_leg" },
 
     { id           = "cond_leg_count",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.22, 0.68, 0.32 },
       label        = "leg count",
@@ -397,7 +397,7 @@ return {
       assertion    = { subject="trip", property="leg_count", op_from_slot="op", slot="value" } },
 
     { id           = "cond_cargo_size",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.22, 0.68, 0.32 },
       label        = "cargo size",
@@ -406,7 +406,7 @@ return {
       evaluator    = "cargo_size" },
 
     { id           = "cond_trip_bonus",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.22, 0.68, 0.32 },
       label        = "trip bonus",
@@ -439,7 +439,7 @@ return {
       assertion    = { subject = "fleet", property = "idle", op = "none", key_slot = "vehicle_type" } },
 
     { id           = "cond_idle_count",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "vehicle", "game" },
       color        = { 0.28, 0.72, 0.58 },
       label        = "idle count",
@@ -449,7 +449,7 @@ return {
       assertion    = { subject = "fleet", property = "idle", op_from_slot = "op", slot = "n", key_slot = "vehicle_type" } },
 
     { id           = "cond_fleet_util",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "vehicle", "game" },
       color        = { 0.28, 0.72, 0.58 },
       label        = "fleet util %",
@@ -462,7 +462,7 @@ return {
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id           = "cond_queue",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "game", "trip" },
       color        = { 0.35, 0.65, 0.72 },
       label        = "queue",
@@ -472,7 +472,7 @@ return {
       assertion    = { subject = "game", property = "queue", op_from_slot = "op", slot = "value" } },
 
     { id           = "cond_money",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.35, 0.65, 0.72 },
       label        = "money",
@@ -536,7 +536,7 @@ return {
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id           = "cond_counter",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.55, 0.38, 0.80 },
       label        = "counter",
@@ -597,7 +597,7 @@ return {
       evaluator    = "this_vehicle_idle" },
 
     { id           = "cond_this_vehicle_speed",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.28, 0.72, 0.58 },
       label        = "this vehicle speed",
@@ -606,7 +606,7 @@ return {
       evaluator    = "this_vehicle_speed" },
 
     { id           = "cond_this_vehicle_trips",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.28, 0.72, 0.58 },
       label        = "this vehicle trips completed",
@@ -621,7 +621,7 @@ return {
 -- ── Trip mutation ─────────────────────────────────────────────────────────
 
     { id           = "effect_set_payout",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "set payout to",
@@ -630,7 +630,7 @@ return {
       evaluator    = "set_payout" },
 
     { id           = "effect_add_bonus",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "add bonus",
@@ -641,7 +641,7 @@ return {
 -- ── Economy ───────────────────────────────────────────────────────────────
 
     { id           = "effect_add_money",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.85, 0.40, 0.20 },
       label        = "add money",
@@ -650,7 +650,7 @@ return {
       evaluator    = "add_money" },
 
     { id           = "effect_subtract_money",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.85, 0.40, 0.20 },
       label        = "subtract money",
@@ -659,7 +659,7 @@ return {
       evaluator    = "subtract_money" },
 
     { id           = "effect_trigger_rush_hour",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.85, 0.40, 0.20 },
       label        = "trigger rush hour",
@@ -668,7 +668,7 @@ return {
       evaluator    = "trigger_rush_hour" },
 
     { id           = "effect_end_rush_hour",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.85, 0.40, 0.20 },
       label        = "end rush hour",
@@ -677,7 +677,7 @@ return {
       evaluator    = "end_rush_hour" },
 
     { id           = "effect_pause_trip_gen",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.85, 0.40, 0.20 },
       label        = "pause trip gen",
@@ -686,7 +686,7 @@ return {
       evaluator    = "pause_trip_gen" },
 
     { id           = "effect_resume_trip_gen",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.85, 0.40, 0.20 },
       label        = "resume trip gen",
@@ -695,7 +695,7 @@ return {
       evaluator    = "resume_trip_gen" },
 
     { id           = "effect_set_trip_gen_rate",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.85, 0.40, 0.20 },
       label        = "set trip gen rate",
@@ -704,7 +704,7 @@ return {
       evaluator    = "set_trip_gen_rate" },
 
     { id           = "effect_counter_change",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.52, 0.28, 0.80 },
       label        = "counter",
@@ -713,7 +713,7 @@ return {
       evaluator    = "counter_change" },
 
     { id           = "effect_counter_reset",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.52, 0.28, 0.80 },
       label        = "reset counter",
@@ -722,7 +722,7 @@ return {
       evaluator    = "counter_reset" },
 
     { id           = "effect_flag_set",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.52, 0.28, 0.80 },
       label        = "set flag",
@@ -731,7 +731,7 @@ return {
       evaluator    = "flag_set" },
 
     { id           = "effect_flag_clear",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.52, 0.28, 0.80 },
       label        = "clear flag",
@@ -740,7 +740,7 @@ return {
       evaluator    = "flag_clear" },
 
     { id           = "effect_set_counter",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.52, 0.28, 0.80 },
       label        = "set counter",
@@ -749,7 +749,7 @@ return {
       evaluator    = "set_counter" },
 
     { id           = "effect_reset_all_counters",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.52, 0.28, 0.80 },
       label        = "reset all counters",
@@ -758,7 +758,7 @@ return {
       evaluator    = "reset_all_counters" },
 
     { id           = "effect_toggle_flag",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.52, 0.28, 0.80 },
       label        = "toggle flag",
@@ -767,7 +767,7 @@ return {
       evaluator    = "toggle_flag" },
 
     { id           = "effect_swap_counters",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "counter" },
       color        = { 0.52, 0.28, 0.80 },
       label        = "swap counters",
@@ -781,7 +781,7 @@ return {
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id           = "action_prioritize",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "prioritize trip",
@@ -790,7 +790,7 @@ return {
       evaluator    = "prioritize_trip" },
 
     { id           = "action_deprioritize",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "trip" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "deprioritize trip",
@@ -799,7 +799,7 @@ return {
       evaluator    = "deprioritize_trip" },
 
     { id           = "action_sort_queue",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "trip", "game" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "sort queue by",
@@ -808,7 +808,7 @@ return {
       evaluator    = "sort_queue" },
 
     { id           = "action_cancel_all_scope",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "trip", "game" },
       color        = { 0.62, 0.18, 0.18 },
       label        = "cancel all scope",
@@ -818,7 +818,7 @@ return {
       terminal     = true },
 
     { id           = "action_cancel_all_wait",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "trip", "game" },
       color        = { 0.62, 0.18, 0.18 },
       label        = "cancel all waited",
@@ -880,7 +880,7 @@ return {
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id           = "action_stop_rule",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.40, 0.40, 0.45 },
       label        = "stop this rule",
@@ -889,7 +889,7 @@ return {
       evaluator    = "stop_rule" },
 
     { id           = "action_stop_all",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.40, 0.40, 0.45 },
       label        = "stop all rules",
@@ -902,7 +902,7 @@ return {
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id             = "action_assign_type",
-      category       = "stack",
+      category       = "legacy",
       tags           = { "trip", "vehicle" },
       color          = { 0.28, 0.45, 0.88 },
       label          = "assign to",
@@ -913,7 +913,7 @@ return {
       constraint     = "vehicle_covers_trip_scope" },
 
     { id             = "action_assign_any",
-      category       = "stack",
+      category       = "legacy",
       tags           = { "trip", "vehicle" },
       color          = { 0.28, 0.45, 0.88 },
       label          = "assign to any",
@@ -922,7 +922,7 @@ return {
       evaluator      = "assign_any" },
 
     { id             = "action_assign_nearest",
-      category       = "stack",
+      category       = "legacy",
       tags           = { "trip", "vehicle" },
       color          = { 0.28, 0.45, 0.88 },
       label          = "nearest",
@@ -933,23 +933,23 @@ return {
       constraint     = "vehicle_covers_trip_scope" },
 
     { id             = "action_cancel",
-      category       = "stack",
+      category       = "legacy",
       tags           = { "trip" },
-      color          = { 0.62, 0.18, 0.18 },
-      label          = "cancel trip",
-      tooltip        = "Action: removes the trip from the queue without assigning it. Use to drop low-value or undesired trips.",
-      slots          = {},
+      color        = { 0.62, 0.18, 0.18 },
+      label        = "cancel trip",
+      tooltip      = "Action: removes the trip from the queue without assigning it. Use to drop low-value or undesired trips.",
+      slots        = {},
       evaluator      = "cancel_trip",
       terminal       = true,
       max_per_rule   = 1 },
 
     { id             = "action_skip",
-      category       = "stack",
+      category       = "legacy",
       tags           = { "trip" },
-      color          = { 0.72, 0.22, 0.22 },
-      label          = "skip (hold)",
-      tooltip        = "Action: holds the trip in the pending queue for this tick without assigning it. It will be re-evaluated next tick.",
-      slots          = {},
+      color        = { 0.72, 0.22, 0.22 },
+      label        = "skip (hold)",
+      tooltip      = "Action: holds the trip in the pending queue for this tick without assigning it. It will be re-evaluated next tick.",
+      slots        = {},
       evaluator      = "skip",
       terminal       = true,
       max_per_rule   = 1 },
@@ -959,7 +959,7 @@ return {
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id           = "action_unassign_vehicle",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle", "trip" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "unassign this vehicle",
@@ -968,7 +968,7 @@ return {
       evaluator    = "unassign_vehicle" },
 
     { id           = "action_send_to_depot",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "send to depot",
@@ -977,7 +977,7 @@ return {
       evaluator    = "send_to_depot" },
 
     { id           = "action_set_speed_mult",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "set speed multiplier",
@@ -986,7 +986,7 @@ return {
       evaluator    = "set_speed_mult" },
 
     { id           = "action_fire_vehicle",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.28, 0.45, 0.88 },
       label        = "fire this vehicle",
@@ -1023,7 +1023,7 @@ return {
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id           = "effect_set_text_var",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.82, 0.78, 0.15 },
       label        = "set text var",
@@ -1033,7 +1033,7 @@ return {
       evaluator    = "set_text_var" },
 
     { id           = "effect_append_text_var",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.82, 0.78, 0.15 },
       label        = "append to text var",
@@ -1043,7 +1043,7 @@ return {
       evaluator    = "append_text_var" },
 
     { id           = "effect_clear_text_var",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.82, 0.78, 0.15 },
       label        = "clear text var",
@@ -1348,6 +1348,7 @@ return {
       color        = { 0.20, 0.55, 0.75 },
       label        = "repeat",
       tooltip      = "Runs the inner stack N times (maximum 100). Use 'break' to exit early.",
+      loop_handler = "ctrl_repeat_n",
       slots        = { { key="n", type="number", default=3, step=1, min=1 } } },
 
     { id           = "ctrl_repeat_until",
@@ -1356,6 +1357,7 @@ return {
       color        = { 0.20, 0.55, 0.75 },
       label        = "repeat until",
       tooltip      = "Repeats the inner stack until the condition becomes true (safety cap: 100 iterations). Drop a condition block into the slot.",
+      loop_handler = "ctrl_repeat_until",
       slots        = {} },
 
     { id           = "ctrl_for_each_vehicle",
@@ -1364,6 +1366,7 @@ return {
       color        = { 0.20, 0.55, 0.75 },
       label        = "for each vehicle",
       tooltip      = "Runs the inner stack once for each vehicle of the chosen type. Use 'this vehicle' blocks inside to act on each vehicle.",
+      loop_handler = "ctrl_for_each_vehicle",
       slots        = { VEHICLE_SLOT } },
 
     { id           = "ctrl_for_each_trip",
@@ -1372,10 +1375,11 @@ return {
       color        = { 0.20, 0.55, 0.75 },
       label        = "for each pending trip",
       tooltip      = "Runs the inner stack once for each trip in the pending queue. Trip blocks inside act on the iterated trip.",
+      loop_handler = "ctrl_for_each_trip",
       slots        = {} },
 
     { id           = "action_break",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.40, 0.40, 0.45 },
       label        = "break",
@@ -1384,7 +1388,7 @@ return {
       evaluator    = "action_break" },
 
     { id           = "action_continue",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.40, 0.40, 0.45 },
       label        = "continue",
@@ -1397,7 +1401,7 @@ return {
 -- ═══════════════════════════════════════════════════════════════════════════
 
     { id           = "action_set_vehicle_color",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "set vehicle color",
@@ -1408,7 +1412,7 @@ return {
       evaluator    = "set_vehicle_color" },
 
     { id           = "action_reset_vehicle_color",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "reset vehicle color",
@@ -1417,7 +1421,7 @@ return {
       evaluator    = "reset_vehicle_color" },
 
     { id           = "action_set_vehicle_icon",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "set vehicle icon",
@@ -1426,7 +1430,7 @@ return {
       evaluator    = "set_vehicle_icon" },
 
     { id           = "action_show_speech_bubble",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "show speech bubble",
@@ -1436,7 +1440,7 @@ return {
       evaluator    = "show_speech_bubble" },
 
     { id           = "action_flash_vehicle",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "flash vehicle",
@@ -1445,7 +1449,7 @@ return {
       evaluator    = "flash_vehicle" },
 
     { id           = "action_show_label",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "show label",
@@ -1454,7 +1458,7 @@ return {
       evaluator    = "show_vehicle_label" },
 
     { id           = "action_hide_label",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "hide label",
@@ -1463,7 +1467,7 @@ return {
       evaluator    = "hide_vehicle_label" },
 
     { id           = "action_show_vehicle",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "show vehicle",
@@ -1472,7 +1476,7 @@ return {
       evaluator    = "show_vehicle" },
 
     { id           = "action_hide_vehicle",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "hide vehicle",
@@ -1481,7 +1485,7 @@ return {
       evaluator    = "hide_vehicle" },
 
     { id           = "action_zoom_to_vehicle",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "pan camera to vehicle",
@@ -1490,7 +1494,7 @@ return {
       evaluator    = "zoom_to_vehicle" },
 
     { id           = "action_pan_to_depot",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "vehicle" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "pan camera to depot",
@@ -1499,7 +1503,7 @@ return {
       evaluator    = "pan_to_depot" },
 
     { id           = "action_set_zoom",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "set zoom",
@@ -1508,7 +1512,7 @@ return {
       evaluator    = "set_zoom" },
 
     { id           = "action_shake_screen",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "game" },
       color        = { 0.65, 0.30, 0.75 },
       label        = "shake screen",
@@ -1520,7 +1524,7 @@ return {
     -- ── Sound ─────────────────────────────────────────────────────────────────
 
     { id           = "action_play_sound",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "sound" },
       color        = { 0.75, 0.30, 0.65 },
       label        = "play sound",
@@ -1529,7 +1533,7 @@ return {
       evaluator    = "play_sound" },
 
     { id           = "action_stop_all_sounds",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "sound" },
       color        = { 0.75, 0.30, 0.65 },
       label        = "stop all sounds",
@@ -1538,7 +1542,7 @@ return {
       evaluator    = "stop_all_sounds" },
 
     { id           = "action_set_volume",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "sound" },
       color        = { 0.75, 0.30, 0.65 },
       label        = "set volume",
@@ -1549,7 +1553,7 @@ return {
     -- ── UI Notifications ──────────────────────────────────────────────────────
 
     { id           = "action_show_toast",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "ui" },
       color        = { 0.25, 0.65, 0.85 },
       label        = "show toast",
@@ -1560,7 +1564,7 @@ return {
       evaluator    = "show_toast" },
 
     { id           = "action_show_alert",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "ui" },
       color        = { 0.25, 0.65, 0.85 },
       label        = "show alert",
@@ -1569,7 +1573,7 @@ return {
       evaluator    = "show_alert" },
 
     { id           = "action_add_to_log",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "ui" },
       color        = { 0.25, 0.65, 0.85 },
       label        = "add to log",
@@ -1589,7 +1593,7 @@ return {
       evaluator    = "depot_open" },
 
     { id           = "cond_depot_vehicle_count",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "depot", "vehicle" },
       color        = { 0.55, 0.38, 0.18 },
       label        = "depot vehicle count",
@@ -1601,7 +1605,7 @@ return {
       evaluator    = "depot_vehicle_count" },
 
     { id           = "action_open_depot",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "depot" },
       color        = { 0.55, 0.38, 0.18 },
       label        = "open depot",
@@ -1610,7 +1614,7 @@ return {
       evaluator    = "open_depot" },
 
     { id           = "action_close_depot",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "depot" },
       color        = { 0.55, 0.38, 0.18 },
       label        = "close depot",
@@ -1619,7 +1623,7 @@ return {
       evaluator    = "close_depot" },
 
     { id           = "action_rename_depot",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "depot" },
       color        = { 0.55, 0.38, 0.18 },
       label        = "rename depot to",
@@ -1628,7 +1632,7 @@ return {
       evaluator    = "rename_depot" },
 
     { id           = "action_set_depot_capacity",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "depot" },
       color        = { 0.55, 0.38, 0.18 },
       label        = "set depot capacity",
@@ -1637,7 +1641,7 @@ return {
       evaluator    = "set_depot_capacity" },
 
     { id           = "action_send_vehicles_to_depot",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "depot", "vehicle" },
       color        = { 0.55, 0.38, 0.18 },
       label        = "send to depot",
@@ -1657,6 +1661,17 @@ return {
       slots        = { { key="name", type="string", default="my block" } },
       evaluator    = nil },
 
+    { id           = "block_call",
+      category     = "stack",
+      tags         = { "logic" },
+      color        = { 0.50, 0.50, 0.50 },
+      label        = "Call",
+      tooltip      = "Generic action caller. Pick an action from the list.",
+      evaluator    = "block_call",
+      slots        = {
+          { key="action", type="enum", options = "dynamic" },
+      } },
+
     { id           = "action_call",
       category     = "stack",
       tags         = { "logic" },
@@ -1669,7 +1684,7 @@ return {
     -- ── Client management ─────────────────────────────────────────────────────
 
     { id           = "cond_client_count",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "client" },
       color        = { 0.30, 0.60, 0.50 },
       label        = "client count",
@@ -1680,7 +1695,7 @@ return {
       evaluator    = "client_count" },
 
     { id           = "cond_active_client_count",
-      category     = "boolean",
+      category     = "legacy",
       tags         = { "client" },
       color        = { 0.30, 0.60, 0.50 },
       label        = "active client count",
@@ -1690,7 +1705,7 @@ return {
       evaluator    = "active_client_count" },
 
     { id           = "action_pause_all_clients",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "client" },
       color        = { 0.30, 0.60, 0.50 },
       label        = "pause all clients",
@@ -1699,7 +1714,7 @@ return {
       evaluator    = "pause_all_clients" },
 
     { id           = "action_resume_all_clients",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "client" },
       color        = { 0.30, 0.60, 0.50 },
       label        = "resume all clients",
@@ -1708,7 +1723,7 @@ return {
       evaluator    = "resume_all_clients" },
 
     { id           = "action_set_client_freq",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "client" },
       color        = { 0.30, 0.60, 0.50 },
       label        = "set client frequency",
@@ -1717,7 +1732,7 @@ return {
       evaluator    = "set_client_freq" },
 
     { id           = "action_add_client",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "client" },
       color        = { 0.30, 0.60, 0.50 },
       label        = "add client",
@@ -1726,7 +1741,7 @@ return {
       evaluator    = "add_client" },
 
     { id           = "action_remove_client",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "client" },
       color        = { 0.30, 0.60, 0.50 },
       label        = "remove client",
@@ -1737,7 +1752,7 @@ return {
     -- ── Utility / exotic ──────────────────────────────────────────────────────
 
     { id           = "action_comment",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.50, 0.50, 0.50 },
       label        = "//",
@@ -1746,7 +1761,7 @@ return {
       evaluator    = "action_comment" },
 
     { id           = "action_set_rule_name",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.50, 0.50, 0.50 },
       label        = "name this rule",
@@ -1755,7 +1770,7 @@ return {
       evaluator    = "set_rule_name" },
 
     { id           = "action_benchmark",
-      category     = "stack",
+      category     = "legacy",
       tags         = { "logic" },
       color        = { 0.50, 0.50, 0.50 },
       label        = "benchmark",
@@ -1829,13 +1844,13 @@ return {
                        { key="sort_by", type="enum", default="speed",
                          options={"speed","capacity","idle_time","none"} } } },
 
-    { id           = "action_assign_ctx",
-      category     = "stack",
-      tags         = { "trip", "vehicle", "logic" },
-      color        = { 0.85, 0.50, 0.15 },
-      label        = "assign trip to vehicle",
-      tooltip      = "Assigns ctx.trip to ctx.vehicle. Use inside nested 'find trip' + 'find vehicle' blocks.",
-      slots        = {},
-      evaluator    = "assign_ctx" },
+    { id             = "action_assign_ctx",
+      category       = "legacy",
+      tags           = { "trip", "vehicle", "logic" },
+      color          = { 0.85, 0.50, 0.15 },
+      label          = "assign trip to vehicle",
+      tooltip        = "Assigns ctx.trip to ctx.vehicle. Use inside nested 'find trip' + 'find vehicle' blocks.",
+      slots          = {},
+      evaluator      = "assign_ctx" },
 
 }

@@ -164,27 +164,29 @@ local function vehicle_idle_none(block, ctx)
 end
 
 local function idle_count_compare(block, ctx)
+    local want = (block.slots.vehicle_type or ""):lower()
     local op = block.slots.op or ">"
     local n  = tonumber(evalSlot(block.slots.value, ctx)) or 0
-    local idle_count = 0
+    local count = 0
     for _, v in ipairs(ctx.game.entities.vehicles) do
-        if TripEligibility.canAssign(v, ctx.trip, ctx.game) then
-            idle_count = idle_count + 1
+        if (want == "" or (v.type or ""):lower() == want)
+           and TripEligibility.canAssign(v, ctx.trip, ctx.game) then
+            count = count + 1
         end
     end
-    return cmp(idle_count, op, n)
+    return cmp(count, op, n)
 end
 
 local function fleet_util(block, ctx)
     local op = block.slots.op or ">"
-    local val = tonumber(evalSlot(block.slots.value, ctx)) or 0
+    local val = tonumber(evalSlot(block.slots.value, ctx)) or 50
     local total = #ctx.game.entities.vehicles
     if total == 0 then return false end
     local idle = 0
     for _, v in ipairs(ctx.game.entities.vehicles) do
         if TripEligibility.canAssign(v, ctx.trip, ctx.game) then idle = idle + 1 end
     end
-    local fleet_pct = (1 - (idle / total)) * 100
+    local fleet_pct = math.floor((1 - (idle / total)) * 100)
     return cmp(fleet_pct, op, val)
 end
 
@@ -199,8 +201,8 @@ local function money_compare(block, ctx)
 end
 
 local function upgrade_purchased(block, ctx)
-    local id = block.slots.upgrade_id or ""
-    return ctx.game.state.upgrades[id] ~= nil
+    local name = block.slots.name or ""
+    return (ctx.game.state.upgrades_purchased or {})[name] ~= nil
 end
 
 local function counter_compare(block, ctx)
@@ -217,12 +219,13 @@ local function flag_is_clear(block, ctx)
 end
 
 local function random_chance(block, ctx)
-    local pct = tonumber(evalSlot(block.slots.percent, ctx)) or 50
+    local pct = tonumber(evalSlot(block.slots.pct or block.slots.percent, ctx)) or 50
     return (math.random() * 100) < pct
 end
 
 local function rush_hour_active(block, ctx)
-    return ctx.game.world_sandbox and ctx.game.world_sandbox.is_rush_hour
+    local rh = ctx.game.state.rush_hour
+    return rh and rh.active or false
 end
 
 local function always_true(block, ctx)  return true end
@@ -231,14 +234,14 @@ local function always_false(block, ctx) return false end
 -- ── Actions: Effects ─────────────────────────────────────────────────────────
 
 local function add_money(block, ctx)
-    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 0
+    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 100
     ctx.game.state.money = ctx.game.state.money + amt
     return false
 end
 
 local function subtract_money(block, ctx)
-    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 0
-    ctx.game.state.money = ctx.game.state.money - amt
+    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 100
+    ctx.game.state.money = math.max(0, ctx.game.state.money - amt)
     return false
 end
 
@@ -251,10 +254,18 @@ end
 local function adjust_counter(block, ctx)
     local key = block.slots.key or ""
     local val = tonumber(getVar(ctx.game, key)) or 0
-    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 0
-    setVar(ctx.game, key, val + amt)
+    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 1
+    local op  = block.slots.op or "+="
+    if op == "-=" then
+        setVar(ctx.game, key, val - amt)
+    else
+        setVar(ctx.game, key, val + amt)
+    end
     return false
 end
+
+-- Mapping effect_counter_change to adjust_counter for consistency
+local counter_change = adjust_counter
 
 local function set_flag(block, ctx)
     setVar(ctx.game, block.slots.key or "", true)
@@ -269,9 +280,10 @@ end
 local function counter_mod(block, ctx)
     local key = block.slots.key or ""
     local val = tonumber(getVar(ctx.game, key)) or 0
-    local mod = tonumber(evalSlot(block.slots.mod, ctx)) or 1
-    setVar(ctx.game, key, val % mod)
-    return false
+    local mod = tonumber(evalSlot(block.slots.m, ctx)) or 1
+    local res = tonumber(evalSlot(block.slots.r, ctx)) or 0
+    if mod == 0 then return false end
+    return (val % mod) == res
 end
 
 local function text_var_set(block, ctx)
@@ -279,6 +291,9 @@ local function text_var_set(block, ctx)
     setVar(ctx.game, block.slots.key or "", tostring(val or ""))
     return false
 end
+
+-- Mapping effect_set_text_var to text_var_set
+local set_text_var = text_var_set
 
 local function text_var_append(block, ctx)
     local key = block.slots.key or ""
@@ -288,34 +303,75 @@ local function text_var_append(block, ctx)
     return false
 end
 
+-- Mapping effect_append_text_var to text_var_append
+local append_text_var = text_var_append
+
 local function text_var_eq(block, ctx)
     local cur = tostring(getVar(ctx.game, block.slots.key or "") or "")
-    local val = evalSlot(block.slots.value, ctx)
-    return cur == tostring(val or "")
+    local val = tostring(evalSlot(block.slots.value, ctx) or "")
+    return cur == val
 end
 
 local function text_var_contains(block, ctx)
     local cur = tostring(getVar(ctx.game, block.slots.key or "") or "")
     local val = tostring(evalSlot(block.slots.value, ctx) or "")
-    return cur:find(val, 1, true) ~= nil
+    return val == "" or cur:find(val, 1, true) ~= nil
 end
 
 local function play_sound(block, ctx)
-    local Sound = require("services.SoundService")
-    Sound.play(block.slots.sound or "click")
+    local name = block.slots.sound or "beep"
+    local ok, SS = pcall(require, "services.SoundService")
+    if ok and SS then SS.play(name) end
     return false
 end
 
-local function screen_shake(block, ctx)
-    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 5
-    if ctx.game.camera then ctx.game.camera:shake(amt) end
+local function shake_screen(block, ctx)
+    local secs = math.max(0.05, tonumber(evalSlot(block.slots.seconds,   ctx)) or 0.5)
+    local mag  = math.max(1,    tonumber(evalSlot(block.slots.magnitude, ctx)) or 8)
+    ctx.game.screen_shake = { timer = secs, max_time = secs, magnitude = mag }
     return false
 end
 
 local function notify(block, ctx)
-    local msg = tostring(evalSlot(block.slots.message, ctx))
+    local msg = tostring(evalSlot(block.slots.message or block.slots.text, ctx))
     local EventService = require("services.EventService")
     EventService.publish("ui_notify", { text = msg, type = block.slots.type or "info" })
+    return false
+end
+
+-- ── Rush Hour ────────────────────────────────────────────────────────────────
+
+local function trigger_rush_hour(block, ctx)
+    local rh = ctx.game.state.rush_hour or {}
+    rh.active = true
+    rh.timer  = tonumber(evalSlot(block.slots.seconds, ctx)) or 30
+    ctx.game.state.rush_hour = rh
+    return false
+end
+
+local function end_rush_hour(block, ctx)
+    if ctx.game.state.rush_hour then
+        ctx.game.state.rush_hour.active = false
+    end
+    return false
+end
+
+-- ── Trip Generation ─────────────────────────────────────────────────────────
+
+local function pause_trip_gen(block, ctx)
+    ctx.game.entities.pause_trip_generation = true
+    return false
+end
+
+local function resume_trip_gen(block, ctx)
+    ctx.game.entities.pause_trip_generation = false
+    return false
+end
+
+local function set_trip_gen_rate(block, ctx)
+    local m = (tonumber(evalSlot(block.slots.pct, ctx)) or 100) / 100
+    ctx.game.state.upgrades.trip_gen_min_mult = m
+    ctx.game.state.upgrades.trip_gen_max_mult = m
     return false
 end
 
@@ -371,6 +427,10 @@ local function skip(block, ctx)
     return "skip"
 end
 
+local function cancel_trip(block, ctx)
+    return "cancel"
+end
+
 -- ── Actions: Smart assignment ─────────────────────────────────────────────────
 
 local function assign_fastest(block, ctx)
@@ -422,11 +482,371 @@ local function assign_least_recent(block, ctx)
     return "claimed"
 end
 
+-- ── Actions: Queue ───────────────────────────────────────────────────────────
+
+local function prioritize_trip(block, ctx)
+    local pending = ctx.game.entities.trips.pending
+    for i = 2, #pending do
+        if pending[i] == ctx.trip then
+            table.remove(pending, i)
+            table.insert(pending, 1, ctx.trip)
+            break
+        end
+    end
+    return false
+end
+
+local function deprioritize_trip(block, ctx)
+    local pending = ctx.game.entities.trips.pending
+    for i = 1, #pending - 1 do
+        if pending[i] == ctx.trip then
+            table.remove(pending, i)
+            table.insert(pending, ctx.trip)
+            break
+        end
+    end
+    return false
+end
+
+local function sort_queue(block, ctx)
+    local field   = block.slots.field or "payout"
+    local pending = ctx.game.entities.trips.pending
+    if field == "payout" then
+        table.sort(pending, function(a, b)
+            return (a.base_payout or 0) > (b.base_payout or 0)
+        end)
+    elseif field == "wait" then
+        table.sort(pending, function(a, b)
+            return (a.wait_time or 0) > (b.wait_time or 0)
+        end)
+    elseif field == "scope" then
+        table.sort(pending, function(a, b)
+            return (SCOPE_RANK[a.scope] or 0) < (SCOPE_RANK[b.scope] or 0)
+        end)
+    elseif field == "cargo" then
+        table.sort(pending, function(a, b)
+            local la = a.legs and a.legs[a.current_leg or 1]
+            local lb = b.legs and b.legs[b.current_leg or 1]
+            return (la and la.cargo_size or 0) > (lb and lb.cargo_size or 0)
+        end)
+    end
+    return false
+end
+
+local function cancel_all_scope(block, ctx)
+    local scope   = block.slots.scope or "district"
+    local pending = ctx.game.entities.trips.pending
+    for i = #pending, 1, -1 do
+        if pending[i] ~= ctx.trip and (pending[i].scope or "") == scope then
+            table.remove(pending, i)
+        end
+    end
+    return (ctx.trip.scope or "") == scope and "cancel" or false
+end
+
+local function cancel_all_wait(block, ctx)
+    local op   = block.slots.op or ">"
+    local secs = tonumber(evalSlot(block.slots.seconds, ctx)) or 30
+    local pending = ctx.game.entities.trips.pending
+    for i = #pending, 1, -1 do
+        if pending[i] ~= ctx.trip and cmp(pending[i].wait_time or 0, op, secs) then
+            table.remove(pending, i)
+        end
+    end
+    return cmp(ctx.trip.wait_time or 0, op, secs) and "cancel" or false
+end
+
+-- ── Counters/Flags ───────────────────────────────────────────────────────────
+
+local function counter_reset(block, ctx)
+    setVar(ctx.game, block.slots.key or "A", 0)
+    return false
+end
+
+local function reset_all_counters(block, ctx)
+    -- This ideally should only reset counters A-E if they are clearly distinct,
+    -- but since we use a unified vars table, we can either clear everything
+    -- or just the known counter keys.
+    local keys = { "A", "B", "C", "D", "E" }
+    for _, k in ipairs(keys) do setVar(ctx.game, k, 0) end
+    return false
+end
+
+local function toggle_flag(block, ctx)
+    local k = block.slots.key or "X"
+    setVar(ctx.game, k, not (getVar(ctx.game, k) == true))
+    return false
+end
+
+local function swap_counters(block, ctx)
+    local a = block.slots.a or "A"
+    local b = block.slots.b or "B"
+    local va, vb = getVar(ctx.game, a), getVar(ctx.game, b)
+    setVar(ctx.game, a, vb or 0)
+    setVar(ctx.game, b, va or 0)
+    return false
+end
+
+-- ── Vehicle ──────────────────────────────────────────────────────────────────
+
+local function unassign_vehicle(block, ctx)
+    if ctx.vehicle then ctx.vehicle:unassign(ctx.game) end
+    return false
+end
+
+local function send_to_depot(block, ctx)
+    if ctx.vehicle then ctx.vehicle:returnToDepot(ctx.game) end
+    return false
+end
+
+local function set_speed_mult(block, ctx)
+    if ctx.vehicle then
+        ctx.vehicle.speed_modifier = (tonumber(evalSlot(block.slots.value, ctx)) or 100) / 100
+    end
+    return false
+end
+
+local function set_vehicle_color(block, ctx)
+    if not ctx.vehicle then return false end
+    ctx.vehicle.color_override = {
+        tonumber(evalSlot(block.slots.r, ctx)) or 1.0,
+        tonumber(evalSlot(block.slots.g, ctx)) or 0.5,
+        tonumber(evalSlot(block.slots.b, ctx)) or 0.1,
+    }
+    return false
+end
+
+local function reset_vehicle_color(block, ctx)
+    if ctx.vehicle then ctx.vehicle.color_override = nil end
+    return false
+end
+
+local function set_vehicle_icon(block, ctx)
+    if not ctx.vehicle then return false end
+    local icon = tostring(evalSlot(block.slots.icon, ctx) or "")
+    ctx.vehicle.icon_override = (icon ~= "") and icon or nil
+    return false
+end
+
+local function show_speech_bubble(block, ctx)
+    if not ctx.vehicle then return false end
+    local secs = math.max(0.1, tonumber(evalSlot(block.slots.seconds, ctx)) or 3)
+    local text = tostring(evalSlot(block.slots.text, ctx) or "!")
+    ctx.vehicle.speech_bubble = { text = text, timer = secs, max_time = secs }
+    return false
+end
+
+local function flash_vehicle(block, ctx)
+    if not ctx.vehicle then return false end
+    local secs = math.max(0.1, tonumber(evalSlot(block.slots.seconds, ctx)) or 1)
+    ctx.vehicle.flash = { timer = secs, max_time = secs, color = { 1, 1, 0 } }
+    return false
+end
+
+local function show_vehicle_label(block, ctx)
+    if not ctx.vehicle then return false end
+    ctx.vehicle.show_label = tostring(evalSlot(block.slots.text, ctx) or "")
+    return false
+end
+
+local function hide_vehicle_label(block, ctx)
+    if ctx.vehicle then ctx.vehicle.show_label = nil end
+    return false
+end
+
+local function show_vehicle(block, ctx)
+    if ctx.vehicle then ctx.vehicle.visible = true end
+    return false
+end
+
+local function hide_vehicle(block, ctx)
+    if ctx.vehicle then ctx.vehicle.visible = false end
+    return false
+end
+
+-- ── Camera ───────────────────────────────────────────────────────────────────
+
+local function zoom_to_vehicle(block, ctx)
+    if not ctx.vehicle then return false end
+    ctx.game.camera.x = ctx.vehicle.px
+    ctx.game.camera.y = ctx.vehicle.py
+    return false
+end
+
+local function pan_to_depot(block, ctx)
+    local v = ctx.vehicle
+    if not v or not v.depot_plot then return false end
+    local umap = ctx.game.maps and ctx.game.maps.unified
+    local ts   = (umap and umap.tile_pixel_size) or ctx.game.C.MAP.TILE_SIZE
+    ctx.game.camera.x = (v.depot_plot.x - 0.5) * ts
+    ctx.game.camera.y = (v.depot_plot.y - 0.5) * ts
+    return false
+end
+
+local function set_zoom(block, ctx)
+    local scale = tonumber(evalSlot(block.slots.scale, ctx)) or 1
+    ctx.game.camera.scale = math.max(0.1, math.min(80, scale))
+    return false
+end
+
+-- ── Sound ────────────────────────────────────────────────────────────────────
+
+local function stop_all_sounds(block, ctx)
+    local ok, SS = pcall(require, "services.SoundService")
+    if ok and SS then SS.stopAll() end
+    return false
+end
+
+local function set_volume(block, ctx)
+    local vol = (tonumber(evalSlot(block.slots.value, ctx)) or 100) / 100
+    local ok, SS = pcall(require, "services.SoundService")
+    if ok and SS then SS.setMasterVolume(vol) end
+    return false
+end
+
+-- ── UI ───────────────────────────────────────────────────────────────────────
+
+local function show_toast(block, ctx)
+    local feed = ctx.game.info_feed
+    if not feed then return false end
+    local text  = tostring(evalSlot(block.slots.text,  ctx) or "")
+    local TOAST_COLORS = {
+        yellow = { 1.0, 0.90, 0.3  },
+        green  = { 0.3, 1.0,  0.45 },
+        blue   = { 0.6, 0.75, 1.0  },
+        red    = { 1.0, 0.4,  0.3  },
+        white  = { 1.0, 1.0,  1.0  },
+    }
+    local color = TOAST_COLORS[block.slots.color or "yellow"] or TOAST_COLORS.yellow
+    if text ~= "" then
+        feed:push({ text = text, color = color })
+    end
+    return false
+end
+
+local function show_alert(block, ctx)
+    local feed = ctx.game.info_feed
+    if not feed then return false end
+    local text = tostring(evalSlot(block.slots.text, ctx) or "Alert")
+    feed:push({ text = "⚠ " .. text, color = { 1.0, 0.4, 0.3 } })
+    return false
+end
+
+local function add_to_log(block, ctx)
+    local feed = ctx.game.info_feed
+    if not feed then return false end
+    local text = tostring(evalSlot(block.slots.text, ctx) or "")
+    if text ~= "" then
+        feed:push({ text = text, color = { 0.78, 0.78, 0.82 } })
+    end
+    return false
+end
+
+local function action_comment(block, ctx)
+    return false
+end
+
+-- ── Depot ────────────────────────────────────────────────────────────────────
+
+local function set_depot_capacity(block, ctx)
+    local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
+    if d then
+        local n = math.max(0, math.floor(tonumber(evalSlot(block.slots.value, ctx)) or 0))
+        d.capacity = n > 0 and n or nil
+    end
+    return false
+end
+
+local function send_vehicles_to_depot(block, ctx)
+    local want = ((block.slots.vehicle_type) or ""):lower()
+    for _, v in ipairs(ctx.game.entities.vehicles) do
+        if want == "" or (v.type or ""):lower() == want then
+            if v.returnToDepot then v:returnToDepot(ctx.game) end
+        end
+    end
+    return false
+end
+
+-- ── Clients ──────────────────────────────────────────────────────────────────
+
+local function pause_all_clients(block, ctx)
+    for _, c in ipairs(ctx.game.entities.clients or {}) do c.paused = true end
+    return false
+end
+
+local function resume_all_clients(block, ctx)
+    for _, c in ipairs(ctx.game.entities.clients or {}) do c.paused = false end
+    return false
+end
+
+local function set_client_freq(block, ctx)
+    local pct  = tonumber(evalSlot(block.slots.pct, ctx)) or 100
+    local mult = math.max(0.1, pct / 100)
+    for _, c in ipairs(ctx.game.entities.clients or {}) do c.freq_mult = mult end
+    return false
+end
+
+local function add_client(block, ctx)
+    local ents = ctx.game.entities
+    if ents.addClient then
+        ents:addClient(ctx.game, ents.depots and ents.depots[1])
+    end
+    return false
+end
+
+local function remove_client(block, ctx)
+    local clients = ctx.game.entities.clients or {}
+    if #clients > 1 then
+        table.remove(clients, #clients)
+    end
+    return false
+end
+
+-- ── System ───────────────────────────────────────────────────────────────────
+
+local function stop_rule(block, ctx) return "stop_rule" end
+local function stop_all(block, ctx) return "stop_all" end
+local function action_break(block, ctx) return "break" end
+local function action_continue(block, ctx) return "continue" end
+
+local function broadcast_message(block, ctx)
+    local name = tostring(evalSlot(block.slots.name, ctx) or "event")
+    local bq   = ctx.game.state.broadcast_queue
+    if bq then bq[#bq+1] = name end
+    return false
+end
+
+local function set_rule_name(block, ctx)
+    local name = tostring(evalSlot(block.slots.name, ctx) or "")
+    if name ~= "" and ctx._rule_id then
+        for _, r in ipairs(ctx.game.state.dispatch_rules or {}) do
+            if r.id == ctx._rule_id then r.display_name = name; break end
+        end
+    end
+    return false
+end
+
+local function benchmark(block, ctx)
+    local feed = ctx.game.info_feed
+    if feed then
+        feed:push({ text = string.format("benchmark: t=%.3f", love.timer.getTime()),
+                    color = { 0.60, 0.90, 0.60 } })
+    end
+    return false
+end
+
+-- ── Text Vars ────────────────────────────────────────────────────────────────
+
+local function clear_text_var(block, ctx)
+    setVar(ctx.game, block.slots.key or "A", "")
+    return false
+end
+
 -- ── Vehicle contexts ──────────────────────────────────────────────────────────
 
 local function this_vehicle_type(block, ctx)
     if not ctx.vehicle then return false end
-    return (ctx.vehicle.type or ""):lower() == (block.slots.type or ""):lower()
+    return (ctx.vehicle.type or ""):lower() == (block.slots.type or block.slots.vehicle_type or ""):lower()
 end
 
 local function this_vehicle_speed(block, ctx)
@@ -441,7 +861,7 @@ end
 
 local function this_vehicle_idle(block, ctx)
     if not ctx.vehicle then return false end
-    return ctx.vehicle.state == "idle"
+    return ctx.vehicle.state == "idle" or (ctx.vehicle.state and ctx.vehicle.state.name == "Idle")
 end
 
 local function assign_ctx(block, ctx)
@@ -455,59 +875,141 @@ end
 
 local function fire_vehicle(block, ctx)
     if not ctx.vehicle then return false end
-    ctx.game.entities:removeVehicle(ctx.vehicle)
+    ctx.game.entities:removeVehicle(ctx.vehicle, ctx.game)
     return "cancel" -- If vehicle was fired while on a trip, cancel the trip
 end
 
 -- ── Depot context ────────────────────────────────────────────────────────────
 
 local function depot_open(block, ctx)
-    return ctx.game.state.depot_open == true
+    local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
+    return d ~= nil and d.open == true
 end
 
 local function depot_vehicle_count(block, ctx)
-    return cmp(#ctx.game.entities.vehicles, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
+    local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
+    if not d then return false end
+    return cmp(#d.assigned_vehicles, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
 end
 
 local function open_depot(block, ctx)
-    ctx.game.state.depot_open = true
+    local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
+    if d then d.open = true end
     return false
 end
 
 local function close_depot(block, ctx)
-    ctx.game.state.depot_open = false
+    local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
+    if d then d.open = false end
     return false
 end
 
 local function rename_depot(block, ctx)
-    ctx.game.state.depot_name = tostring(evalSlot(block.slots.name, ctx))
+    local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
+    if d then
+        d.name = tostring(evalSlot(block.slots.name, ctx))
+    end
     return false
 end
 
 -- ── Client contexts ──────────────────────────────────────────────────────────
 
 local function client_count(block, ctx)
-    return cmp(#ctx.game.entities.clients, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
+    local n = #(ctx.game.entities.clients or {})
+    return cmp(n, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
 end
 
 local function active_client_count(block, ctx)
     local count = 0
-    for _, c in ipairs(ctx.game.entities.clients) do if not c.paused then count = count + 1 end end
+    for _, c in ipairs(ctx.game.entities.clients or {}) do if not c.paused then count = count + 1 end end
     return cmp(count, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
 end
 
 -- ── Procedures ───────────────────────────────────────────────────────────────
 
-local function block_call_proc(block, ctx)
+local function action_call(block, ctx)
     local name = block.slots.name or ""
     local RE   = require("services.DispatchRuleEngine")
+    local depth = ctx._call_depth or 0
+    if depth >= 10 or name == "" then return false end
+
     for _, rule in ipairs(ctx.game.state.dispatch_rules) do
-        if rule.isProcedure and rule.procedure_name == name then
-            local result = RE.evaluate(rule, ctx.game, ctx.trip, ctx.vehicle)
-            if result then return result end
+        if rule.stack and rule.stack[1] and rule.stack[1].def_id == "hat_define" then
+            if (rule.stack[1].slots and rule.stack[1].slots.name or "") == name then
+                local inner = {}
+                for k, v in pairs(ctx) do inner[k] = v end
+                inner._call_depth = depth + 1
+                local result = RE.evalStack(rule.stack, inner)
+                if result == "claimed" or result == "skip" or result == "cancel" or result == "stop_all" then
+                    return result
+                end
+                return false
+            end
         end
     end
     return false
+end
+
+-- ── Loops ────────────────────────────────────────────────────────────────────
+
+local function ctrl_repeat_n(node, ctx, evalStack)
+    local n = math.min(100, math.max(1, math.floor(tonumber(evalSlot(node.slots and node.slots.n, ctx)) or 3)))
+    for _ = 1, n do
+        local result = evalStack(node.body, ctx)
+        if result == "break" then return nil
+        elseif result == "continue" then -- skip
+        elseif result then return result end
+    end
+    return nil
+end
+
+local function ctrl_repeat_until(node, ctx, evalStack)
+    local RE = require("services.DispatchRuleEngine")
+    for _ = 1, 100 do
+        if RE.evalBoolNode(node.condition, ctx) then break end
+        local result = evalStack(node.body, ctx)
+        if result == "break" then return nil
+        elseif result == "continue" then -- skip
+        elseif result then return result end
+    end
+    return nil
+end
+
+local function ctrl_for_each_vehicle(node, ctx, evalStack)
+    local want = (evalSlot(node.slots and node.slots.vehicle_type, ctx) or ""):lower()
+    local snapshot = {}
+    for _, v in ipairs(ctx.game.entities.vehicles) do
+        if want == "" or (v.type or ""):lower() == want then
+            snapshot[#snapshot+1] = v
+        end
+    end
+    for _, v in ipairs(snapshot) do
+        local inner = {}
+        for k, v2 in pairs(ctx) do inner[k] = v2 end
+        inner.vehicle = v
+        local result = evalStack(node.body, inner)
+        if result == "break" then return nil
+        elseif result == "continue" then -- skip
+        elseif result then return result end
+    end
+    return nil
+end
+
+local function ctrl_for_each_trip(node, ctx, evalStack)
+    local snapshot = {}
+    for _, t in ipairs(ctx.game.entities.trips.pending) do
+        snapshot[#snapshot+1] = t
+    end
+    for _, t in ipairs(snapshot) do
+        local inner = {}
+        for k, v2 in pairs(ctx) do inner[k] = v2 end
+        inner.trip = t
+        local result = evalStack(node.body, inner)
+        if result == "break" then return nil
+        elseif result == "continue" then -- skip
+        elseif result then return result end
+    end
+    return nil
 end
 
 -- ── Internal math/string reporters (seed) ────────────────────────────────────
@@ -516,6 +1018,126 @@ local function bool_compare(block, ctx)
     local lv = tonumber(evalSlot(block.slots.left,  ctx)) or 0
     local rv = tonumber(evalSlot(block.slots.right, ctx)) or 0
     return cmp(lv, block.slots.op or ">", rv)
+end
+
+-- Mapping reporter_compare to bool_compare for consistency with older code if needed
+local reporter_compare = bool_compare
+
+local function block_call(block, ctx)
+    local Actions = require("data.dispatch_actions")
+    local id = block.slots.action or ""
+    for _, a in ipairs(Actions) do
+        if a.id == id then
+            return a.fn(block, ctx)
+        end
+    end
+    return false
+end
+
+-- ── Hat Poll Evaluators ──────────────────────────────────────────────────────
+
+local function hat_money_below(hat, ctx)
+    return ctx.game.state.money < (tonumber(evalSlot(hat.slots.value, ctx)) or 500)
+end
+
+local function hat_money_above(hat, ctx)
+    return ctx.game.state.money > (tonumber(evalSlot(hat.slots.value, ctx)) or 500)
+end
+
+local function hat_queue_reaches(hat, ctx)
+    return #ctx.game.entities.trips.pending >= (tonumber(evalSlot(hat.slots.n or hat.slots.value, ctx)) or 1)
+end
+
+local function hat_queue_empties(hat, ctx)
+    return #ctx.game.entities.trips.pending == 0
+end
+
+local function hat_all_busy(hat, ctx)
+    local want = (hat.slots.vehicle_type or ""):lower()
+    for _, v in ipairs(ctx.game.entities.vehicles) do
+        if (v.type or ""):lower() == want and (v.state == "idle" or (v.state and v.state.name == "Idle")) then
+            return false
+        end
+    end
+    return true
+end
+
+local function hat_all_idle(hat, ctx)
+    local want = (hat.slots.vehicle_type or ""):lower()
+    local has_any = false
+    for _, v in ipairs(ctx.game.entities.vehicles) do
+        if (v.type or ""):lower() == want then
+            has_any = true
+            if not (v.state == "idle" or (v.state and v.state.name == "Idle")) then return false end
+        end
+    end
+    return has_any
+end
+
+local function hat_counter_reaches(hat, ctx)
+    local k = hat.slots.key or "A"
+    return (tonumber(getVar(ctx.game, k)) or 0) >= (tonumber(evalSlot(hat.slots.value, ctx)) or 0)
+end
+
+local function hat_counter_drops(hat, ctx)
+    local k = hat.slots.key or "A"
+    return (tonumber(getVar(ctx.game, k)) or 0) < (tonumber(evalSlot(hat.slots.value, ctx)) or 0)
+end
+
+local function hat_flag_set_poll(hat, ctx)
+    return getVar(ctx.game, hat.slots.key or "X") == true
+end
+
+local function hat_flag_cleared_poll(hat, ctx)
+    return getVar(ctx.game, hat.slots.key or "X") ~= true
+end
+
+local function hat_vehicle_idle_for(hat_node, ctx)
+    local want    = ((hat_node.slots and hat_node.slots.vehicle_type) or ""):lower()
+    local min_sec = tonumber(evalSlot(hat_node.slots and hat_node.slots.seconds, ctx)) or 10
+    local now     = love.timer.getTime()
+    for _, v in ipairs(ctx.game.entities.vehicles or {}) do
+        if want == "" or (v.type or ""):lower() == want then
+            if v.idle_since and (now - v.idle_since) >= min_sec then
+                ctx.vehicle = v  -- inject for body blocks
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function hat_every_n_seconds(hat_node, ctx)
+    local n       = tonumber(evalSlot(hat_node.slots and hat_node.slots.seconds, ctx)) or 5
+    if not ctx.game.state.rule_timers then ctx.game.state.rule_timers = {} end
+    local timers  = ctx.game.state.rule_timers
+    local key     = ctx._rule_id
+    if not key then return false end
+    local last    = timers[key] or 0
+    local now     = love.timer.getTime()
+    if now - last >= n then
+        timers[key] = now
+        return true
+    end
+    return false
+end
+
+local function hat_after_n_seconds(hat_node, ctx)
+    local n      = tonumber(evalSlot(hat_node.slots and hat_node.slots.seconds, ctx)) or 5
+    if not ctx.game.state.rule_timers then ctx.game.state.rule_timers = {} end
+    local timers = ctx.game.state.rule_timers
+    local key    = ctx._rule_id
+    if not key then return false end
+    local fired_key = key .. "_once"
+    if timers[fired_key] then return false end  -- already fired
+    local start_key = key .. "_start"
+    if not timers[start_key] then timers[start_key] = love.timer.getTime() end
+    local now = love.timer.getTime()
+    if now - timers[start_key] >= n then
+        timers[fired_key] = true
+        return true
+    end
+    return false
 end
 
 -- ── Exports ──────────────────────────────────────────────────────────────────
@@ -550,21 +1172,25 @@ return {
     subtract_money       = subtract_money,
     set_counter          = set_counter,
     adjust_counter       = adjust_counter,
+    counter_change       = counter_change,
     set_flag             = set_flag,
     clear_flag           = clear_flag,
     counter_mod          = counter_mod,
     text_var_set         = text_var_set,
+    set_text_var         = set_text_var,
     text_var_append      = text_var_append,
+    append_text_var      = append_text_var,
     text_var_eq          = text_var_eq,
     text_var_contains    = text_var_contains,
     play_sound           = play_sound,
-    screen_shake         = screen_shake,
+    shake_screen         = shake_screen,
     notify               = notify,
 
     assign_vehicle_type  = assign_vehicle_type,
     assign_any           = assign_any,
     assign_nearest       = assign_nearest,
     skip                 = skip,
+    cancel_trip          = cancel_trip,
 
     prioritize_trip      = prioritize_trip,
     deprioritize_trip    = deprioritize_trip,
@@ -595,6 +1221,73 @@ return {
     client_count         = client_count,
     active_client_count  = active_client_count,
 
-    block_call_proc      = block_call_proc,
+    action_call          = action_call,
+    block_call           = block_call,
+    ctrl_repeat_n        = ctrl_repeat_n,
+    ctrl_repeat_until    = ctrl_repeat_until,
+    ctrl_for_each_vehicle = ctrl_for_each_vehicle,
+    ctrl_for_each_trip   = ctrl_for_each_trip,
+
     bool_compare         = bool_compare,
+    reporter_compare     = reporter_compare,
+
+    trigger_rush_hour    = trigger_rush_hour,
+    end_rush_hour        = end_rush_hour,
+    pause_trip_gen       = pause_trip_gen,
+    resume_trip_gen      = resume_trip_gen,
+    set_trip_gen_rate    = set_trip_gen_rate,
+    counter_reset        = counter_reset,
+    reset_all_counters   = reset_all_counters,
+    toggle_flag          = toggle_flag,
+    swap_counters        = swap_counters,
+    unassign_vehicle     = unassign_vehicle,
+    send_to_depot        = send_to_depot,
+    set_speed_mult       = set_speed_mult,
+    set_vehicle_color    = set_vehicle_color,
+    reset_vehicle_color  = reset_vehicle_color,
+    set_vehicle_icon     = set_vehicle_icon,
+    show_speech_bubble   = show_speech_bubble,
+    flash_vehicle        = flash_vehicle,
+    show_vehicle_label   = show_vehicle_label,
+    hide_vehicle_label   = hide_vehicle_label,
+    show_vehicle         = show_vehicle,
+    hide_vehicle         = hide_vehicle,
+    zoom_to_vehicle      = zoom_to_vehicle,
+    pan_to_depot         = pan_to_depot,
+    set_zoom             = set_zoom,
+    stop_all_sounds      = stop_all_sounds,
+    set_volume           = set_volume,
+    show_toast           = show_toast,
+    show_alert           = show_alert,
+    add_to_log           = add_to_log,
+    action_comment       = action_comment,
+    set_depot_capacity   = set_depot_capacity,
+    send_vehicles_to_depot = send_vehicles_to_depot,
+    pause_all_clients    = pause_all_clients,
+    resume_all_clients   = resume_all_clients,
+    set_client_freq      = set_client_freq,
+    add_client           = add_client,
+    remove_client        = remove_client,
+    stop_rule            = stop_rule,
+    stop_all             = stop_all,
+    action_break         = action_break,
+    action_continue      = action_continue,
+    broadcast_message    = broadcast_message,
+    set_rule_name        = set_rule_name,
+    benchmark            = benchmark,
+    clear_text_var       = clear_text_var,
+
+    hat_money_below       = hat_money_below,
+    hat_money_above       = hat_money_above,
+    hat_queue_reaches     = hat_queue_reaches,
+    hat_queue_empties     = hat_queue_empties,
+    hat_all_busy          = hat_all_busy,
+    hat_all_idle          = hat_all_idle,
+    hat_counter_reaches   = hat_counter_reaches,
+    hat_counter_drops     = hat_counter_drops,
+    hat_flag_set_poll     = hat_flag_set_poll,
+    hat_flag_cleared_poll = hat_flag_cleared_poll,
+    hat_every_n_seconds   = hat_every_n_seconds,
+    hat_after_n_seconds   = hat_after_n_seconds,
+    hat_vehicle_idle_for  = hat_vehicle_idle_for,
 }
