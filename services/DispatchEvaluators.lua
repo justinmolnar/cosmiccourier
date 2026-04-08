@@ -114,29 +114,8 @@ local function scope_not_equals(block, ctx)
     return ctx.trip.scope ~= (block.slots.scope or "district")
 end
 
-local function payout_compare(block, ctx)
-    return cmp(ctx.trip.base_payout, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
-end
-
-local function wait_compare(block, ctx)
-    return cmp(ctx.trip.wait_time or 0, block.slots.op or ">", evalSlot(block.slots.seconds, ctx) or 0)
-end
-
 local function is_multi_leg(block, ctx)
     return #ctx.trip.legs > 1
-end
-
-local function leg_count(block, ctx)
-    return cmp(#ctx.trip.legs, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 1)
-end
-
-local function cargo_size(block, ctx)
-    local leg = ctx.trip.legs[ctx.trip.current_leg or 1]
-    return cmp(leg and leg.cargo_size or 1, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 1)
-end
-
-local function trip_bonus(block, ctx)
-    return cmp(ctx.trip.speed_bonus or 0, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
 end
 
 -- ── Conditions: Vehicle availability ────────────────────────────────────────
@@ -163,51 +142,11 @@ local function vehicle_idle_none(block, ctx)
     return true
 end
 
-local function idle_count_compare(block, ctx)
-    local want = (block.slots.vehicle_type or ""):lower()
-    local op = block.slots.op or ">"
-    local n  = tonumber(evalSlot(block.slots.value, ctx)) or 0
-    local count = 0
-    for _, v in ipairs(ctx.game.entities.vehicles) do
-        if (want == "" or (v.type or ""):lower() == want)
-           and TripEligibility.canAssign(v, ctx.trip, ctx.game) then
-            count = count + 1
-        end
-    end
-    return cmp(count, op, n)
-end
-
-local function fleet_util(block, ctx)
-    local op = block.slots.op or ">"
-    local val = tonumber(evalSlot(block.slots.value, ctx)) or 50
-    local total = #ctx.game.entities.vehicles
-    if total == 0 then return false end
-    local idle = 0
-    for _, v in ipairs(ctx.game.entities.vehicles) do
-        if TripEligibility.canAssign(v, ctx.trip, ctx.game) then idle = idle + 1 end
-    end
-    local fleet_pct = math.floor((1 - (idle / total)) * 100)
-    return cmp(fleet_pct, op, val)
-end
-
 -- ── Conditions: Game state ───────────────────────────────────────────────────
-
-local function queue_compare(block, ctx)
-    return cmp(#ctx.game.entities.trips.pending, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
-end
-
-local function money_compare(block, ctx)
-    return cmp(ctx.game.state.money, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
-end
 
 local function upgrade_purchased(block, ctx)
     local name = block.slots.name or ""
     return (ctx.game.state.upgrades_purchased or {})[name] ~= nil
-end
-
-local function counter_compare(block, ctx)
-    local val = getVar(ctx.game, block.slots.key or "") or 0
-    return cmp(tonumber(val) or 0, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
 end
 
 local function flag_is_set(block, ctx)
@@ -230,6 +169,48 @@ end
 
 local function always_true(block, ctx)  return true end
 local function always_false(block, ctx) return false end
+
+-- ── Actions: Trip mutation ───────────────────────────────────────────────────
+
+local function set_payout(block, ctx)
+    if ctx.trip then
+        ctx.trip.base_payout = tonumber(evalSlot(block.slots.value, ctx)) or 0
+    end
+    return false
+end
+
+local function add_bonus(block, ctx)
+    if ctx.trip then
+        local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 0
+        ctx.trip.speed_bonus = (ctx.trip.speed_bonus or 0) + amt
+    end
+    return false
+end
+
+-- ── Actions: Counter/var mutations (new-style, match dispatch_actions.lua) ───
+
+local function counter_inc(block, ctx)
+    local key = block.slots.var or ""
+    local val = tonumber(getVar(ctx.game, key)) or 0
+    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 1
+    setVar(ctx.game, key, val + amt)
+    return false
+end
+
+local function counter_dec(block, ctx)
+    local key = block.slots.var or ""
+    local val = tonumber(getVar(ctx.game, key)) or 0
+    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 1
+    setVar(ctx.game, key, val - amt)
+    return false
+end
+
+local function counter_set(block, ctx)
+    local key = block.slots.var or ""
+    local val = tonumber(evalSlot(block.slots.value, ctx)) or 0
+    setVar(ctx.game, key, val)
+    return false
+end
 
 -- ── Actions: Effects ─────────────────────────────────────────────────────────
 
@@ -849,16 +830,6 @@ local function this_vehicle_type(block, ctx)
     return (ctx.vehicle.type or ""):lower() == (block.slots.type or block.slots.vehicle_type or ""):lower()
 end
 
-local function this_vehicle_speed(block, ctx)
-    if not ctx.vehicle then return false end
-    return cmp(ctx.vehicle:getSpeed(), block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
-end
-
-local function this_vehicle_trips(block, ctx)
-    if not ctx.vehicle then return false end
-    return cmp(ctx.vehicle.trips_completed or 0, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
-end
-
 local function this_vehicle_idle(block, ctx)
     if not ctx.vehicle then return false end
     return ctx.vehicle.state == "idle" or (ctx.vehicle.state and ctx.vehicle.state.name == "Idle")
@@ -1145,28 +1116,24 @@ end
 return {
     scope_equals         = scope_equals,
     scope_not_equals     = scope_not_equals,
-    payout_compare       = payout_compare,
-    wait_compare         = wait_compare,
     is_multi_leg         = is_multi_leg,
-    leg_count            = leg_count,
-    cargo_size           = cargo_size,
-    trip_bonus           = trip_bonus,
 
     vehicle_idle_any     = vehicle_idle_any,
     vehicle_idle_none    = vehicle_idle_none,
-    idle_count_compare   = idle_count_compare,
-    fleet_util           = fleet_util,
 
-    queue_compare        = queue_compare,
-    money_compare        = money_compare,
     upgrade_purchased    = upgrade_purchased,
-    counter_compare      = counter_compare,
     flag_is_set          = flag_is_set,
     flag_is_clear        = flag_is_clear,
     random_chance        = random_chance,
     rush_hour_active     = rush_hour_active,
     always_true          = always_true,
     always_false         = always_false,
+
+    set_payout           = set_payout,
+    add_bonus            = add_bonus,
+    counter_inc          = counter_inc,
+    counter_dec          = counter_dec,
+    counter_set          = counter_set,
 
     add_money            = add_money,
     subtract_money       = subtract_money,
@@ -1206,8 +1173,6 @@ return {
     find_match           = find_match,
 
     this_vehicle_type    = this_vehicle_type,
-    this_vehicle_speed   = this_vehicle_speed,
-    this_vehicle_trips   = this_vehicle_trips,
     this_vehicle_idle    = this_vehicle_idle,
     assign_ctx           = assign_ctx,
     fire_vehicle         = fire_vehicle,

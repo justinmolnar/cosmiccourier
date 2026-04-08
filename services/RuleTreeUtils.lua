@@ -226,6 +226,20 @@ function RuleTreeUtils.defaultSlots(def, game)
     return slots
 end
 
+-- ── Prefabs ───────────────────────────────────────────────────────────────────
+
+-- Returns the full prefab registry.
+function RuleTreeUtils.getPrefabs()
+    return require("data.dispatch_prefabs")
+end
+
+-- Instantiate a prefab with the given params, returning a deep copy of its tree.
+-- params: key→value table matching the prefab's params list.
+function RuleTreeUtils.instantiatePrefab(prefab, params)
+    local node = prefab.build(params or {})
+    return RuleTreeUtils.deepCopy(node)
+end
+
 -- ── Migration: old flat format → new tree format ──────────────────────────────
 -- Converts rule.blocks (flat array) to rule.stack (tree).
 -- Preserves evaluation semantics exactly (left-associative AND/OR/NOT).

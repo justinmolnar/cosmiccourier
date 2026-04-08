@@ -74,4 +74,24 @@ return {
           end
           return total > 0 and math.floor(non_idle / total * 100) or 0
       end },
+
+    -- ── source: depot ─────────────────────────────────────────────────────────
+    { source="depot", key="vehicle_count", type="number", read = function(ctx)
+          local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
+          return d and #(d.assigned_vehicles or {}) or 0
+      end },
+    { source="depot", key="open",          type="string", read = function(ctx)
+          local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
+          return d and (d.open and "true" or "false") or "false"
+      end },
+
+    -- ── source: client ────────────────────────────────────────────────────────
+    { source="client", key="count",        type="number", read = function(ctx)
+          return #(ctx.game.entities.clients or {})
+      end },
+    { source="client", key="active_count", type="number", read = function(ctx)
+          local n = 0
+          for _, c in ipairs(ctx.game.entities.clients or {}) do if not c.paused then n = n + 1 end end
+          return n
+      end },
 }

@@ -12,7 +12,6 @@ local Dropdown  = require("views.components.Dropdown")
 -- ── Visual constants ──────────────────────────────────────────────────────────
 
 -- ── Filter / search constants ─────────────────────────────────────────────────
-local LEGACY_TOGGLE_H = 20  -- height of the "Show Legacy" toggle pill
 local TAG_PILL_H   = 20   -- height of each topic-tag filter pill
 local TAG_PILL_PAD = 7    -- horizontal padding inside each pill
 local TAG_GAP      = 5    -- gap between pills
@@ -63,7 +62,6 @@ local state = {
         active_tags    = {},    -- map tag_id → true when active
         search         = "",
         search_focused = false,
-        show_legacy    = false, -- when true, legacy blocks appear in their own section
     },
     -- New componentized inputs
     search_input = nil,
@@ -75,7 +73,7 @@ local state = {
     drop_targets         = {},
     palette_rects        = {},
     palette_filter_rects = {},  -- array of { tag=id, x,y,w,h }
-    palette_legacy_rect  = nil, -- rect for the "Show Legacy" toggle pill
+    palette_prefab_rects = nil, -- rects for prefab palette entries
     palette_search_rect  = nil,
     rule_card_tops       = {},
     rule_card_bots       = {},
@@ -1751,16 +1749,11 @@ end
 
 -- Returns the subset of `all` that passes the current tag + search filters.
 -- Multi-tag: a block passes only if it has ALL active tags (AND semantics).
--- Legacy blocks are excluded unless filter.show_legacy is true.
 local function filterDefs(all, filter)
     local has_tags   = next(filter.active_tags) ~= nil
     local search     = filter.search:lower()
-    local show_legacy = filter.show_legacy or false
     local result     = {}
     for _, def in ipairs(all) do
-        -- Hide legacy blocks unless toggle is on
-        if def.category == "legacy" and not show_legacy then goto continue end
-
         -- Tag: must have every active tag
         local tag_ok = true
         if has_tags then
@@ -1779,14 +1772,13 @@ local function filterDefs(all, filter)
             or (def.label   and def.label:lower():find(search, 1, true))
             or (def.tooltip and def.tooltip:lower():find(search, 1, true))
         if tag_ok and search_ok then result[#result+1] = def end
-        ::continue::
     end
     return result
 end
 
 -- Groups a flat list of defs by category, sorted by hue within each group.
 -- Returns an array of { cat, defs } in the canonical category order.
-local CAT_ORDER = { "hat", "control", "loop", "find", "boolean", "reporter", "stack", "legacy" }
+local CAT_ORDER = { "hat", "control", "loop", "find", "boolean", "reporter", "stack" }
 
 local function rgbHue(r, g, b)
     local mx = math.max(r, g, b)
@@ -1844,7 +1836,7 @@ local function calcFilterHeaderH(font, pw, pad)
     -- Clear-all pill — check if it wraps (treated as another pill)
     local clear_w = font:getWidth("✕ clear") + TAG_PILL_PAD * 2
     if cx + clear_w > pw - pad and cx > pad then rows = rows + 1 end
-    return rows * (TAG_PILL_H + TAG_GAP) + PAL_GAP + SEARCH_H + PAL_GAP + LEGACY_TOGGLE_H + PAL_GAP
+    return rows * (TAG_PILL_H + TAG_GAP) + PAL_GAP + SEARCH_H + PAL_GAP
 end
 
 -- ── Palette component ─────────────────────────────────────────────────────────
@@ -1859,14 +1851,28 @@ local function makePalette(rule_i, panel_w)
         return (cat == "stack") and (PAL_BLOCK_H + NOTCH_H) or PAL_BLOCK_H
     end
 
+    local function calcPrefabSectionH(font, pw, prefabs)
+        if #prefabs == 0 then return 0 end
+        local cy = CAT_HDR_H
+        local cx = pad
+        for _, pf in ipairs(prefabs) do
+            local bw = math.max(70, font:getWidth(pf.label or "") + 24)
+            if cx + bw > pw - pad and cx > pad then cx = pad; cy = cy + PAL_BLOCK_H + PAL_GAP end
+            cx = cx + bw + PAL_GAP
+        end
+        return cy + PAL_BLOCK_H + PAL_GAP + 6
+    end
+
     local function calcPaletteH(pw)
         local font     = love.graphics.getFont()
         local filter_h = calcFilterHeaderH(font, pw, pad)
+        local prefabs  = require("data.dispatch_prefabs")
+        local pref_h   = calcPrefabSectionH(font, pw, prefabs)
         local groups   = groupDefs(filterDefs(all, state.palette_filter))
         if #groups == 0 then
-            return pad + filter_h + 40 + pad
+            return pad + filter_h + pref_h + 40 + pad
         end
-        local cy = pad + filter_h
+        local cy = pad + filter_h + pref_h
         for _, g in ipairs(groups) do
             cy = cy + CAT_HDR_H  -- section header
             local cx = pad
@@ -1980,29 +1986,68 @@ local function makePalette(rule_i, panel_w)
 
             state.palette_search_rect = { x=sf_x, y=sf_y, w=sf_w, h=sf_h }
 
-            -- ── Legacy toggle pill ───────────────────────────────────────────
-            local lt_y   = sf_y + sf_h + PAL_GAP
-            local lt_lbl = filter.show_legacy and "⊠ Legacy ON" or "⊞ Legacy OFF"
-            local lt_w   = font:getWidth(lt_lbl) + TAG_PILL_PAD * 2
-            if filter.show_legacy then
-                love.graphics.setColor(0.40, 0.20, 0.65, 1.0)
-                love.graphics.rectangle("fill", sf_x, lt_y, lt_w, LEGACY_TOGGLE_H, 3, 3)
-                love.graphics.setColor(0.72, 0.52, 1.0, 1.0)
-            else
-                love.graphics.setColor(0.14, 0.12, 0.22, 1.0)
-                love.graphics.rectangle("fill", sf_x, lt_y, lt_w, LEGACY_TOGGLE_H, 3, 3)
-                love.graphics.setColor(0.40, 0.38, 0.55, 1.0)
-                -- coloured left accent
-                love.graphics.rectangle("fill", sf_x, lt_y, 3, LEGACY_TOGGLE_H, 3, 3)
-                love.graphics.setColor(0.50, 0.48, 0.68, 1.0)
+            -- ── Prefabs section ──────────────────────────────────────────────
+            local prefabs  = require("data.dispatch_prefabs")
+            local prects   = {}
+            local cy       = sf_y + sf_h + PAL_GAP
+
+            if #prefabs > 0 then
+                -- Section header
+                love.graphics.setFont(font)
+                love.graphics.setColor(0.75, 0.60, 0.25)
+                love.graphics.print("PREFABS", px + pad, cy)
+                cy = cy + CAT_HDR_H
+
+                local cx = px + pad
+                local pfab_rects = {}
+                for _, pf in ipairs(prefabs) do
+                    local bw = math.max(70, font:getWidth(pf.label or "") + 24)
+                    if cx + bw > px + pw - pad and cx > px + pad then
+                        cx = px + pad
+                        cy = cy + PAL_BLOCK_H + PAL_GAP
+                    end
+
+                    local c = pf.color or { 0.75, 0.60, 0.25 }
+                    -- Drop shadow
+                    love.graphics.setColor(0, 0, 0, 0.25)
+                    if pf.kind == "bool" then
+                        love.graphics.polygon("fill", polyBool(cx+1, cy+2, bw, PAL_BLOCK_H))
+                    else
+                        love.graphics.polygon("fill", polyStack(cx+1, cy+2, bw, PAL_BLOCK_H - NOTCH_H))
+                    end
+                    -- Shape fill
+                    love.graphics.setColor(c[1], c[2], c[3], 1.0)
+                    if pf.kind == "bool" then
+                        love.graphics.polygon("fill", polyBool(cx, cy, bw, PAL_BLOCK_H))
+                    else
+                        love.graphics.polygon("fill", polyStack(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
+                    end
+                    -- Border
+                    love.graphics.setColor(1, 1, 1, 0.18)
+                    love.graphics.setLineWidth(1)
+                    if pf.kind == "bool" then
+                        love.graphics.polygon("line", polyBool(cx, cy, bw, PAL_BLOCK_H))
+                    else
+                        love.graphics.polygon("line", polyStack(cx, cy, bw, PAL_BLOCK_H - NOTCH_H))
+                    end
+                    -- Label
+                    love.graphics.setColor(1, 1, 1, 1.0)
+                    local lbl_h = (pf.kind == "bool") and PAL_BLOCK_H or (PAL_BLOCK_H - NOTCH_H)
+                    love.graphics.printf(pf.label or pf.id, cx, cy + (lbl_h - fh) / 2, bw, "center")
+                    -- Star marker
+                    love.graphics.setColor(1.0, 0.90, 0.40, 0.7)
+                    love.graphics.circle("fill", cx + bw - 5, cy + 5, 2)
+
+                    pfab_rects[pf.id] = { x=cx, y=cy, w=bw, h=lbl_h, pf=pf }
+                    cx = cx + bw + PAL_GAP
+                end
+                state.palette_prefab_rects = pfab_rects
+                cy = cy + PAL_BLOCK_H + PAL_GAP + 6
             end
-            love.graphics.print(lt_lbl, sf_x + TAG_PILL_PAD, lt_y + (LEGACY_TOGGLE_H - fh) / 2)
-            state.palette_legacy_rect = { x=sf_x, y=lt_y, w=lt_w, h=LEGACY_TOGGLE_H }
 
             -- ── Block list (filtered + grouped by category) ──────────────────
             local groups = groupDefs(filterDefs(all, filter))
-            local cy     = lt_y + LEGACY_TOGGLE_H + PAL_GAP
-            local prects = {}
+            local bprects = {}
 
             if #groups == 0 then
                 love.graphics.setFont(font)
@@ -2080,7 +2125,7 @@ local function makePalette(rule_i, panel_w)
                             love.graphics.circle("fill", cx + bw - 5, cy + 5, 2)
                         end
 
-                        prects[def.id] = { x=cx, y=cy, w=bw, h=lbl_h, def=def, valid=ok }
+                        bprects[def.id] = { x=cx, y=cy, w=bw, h=lbl_h, def=def, valid=ok }
                         cx = cx + bw + PAL_GAP
                     end
 
@@ -2088,7 +2133,7 @@ local function makePalette(rule_i, panel_w)
                 end
             end
 
-            state.palette_rects = prects
+            state.palette_rects = bprects
             love.graphics.setColor(1, 1, 1)
         end,
 
@@ -2107,10 +2152,12 @@ local function makePalette(rule_i, panel_w)
             if sr and mx >= sr.x and mx <= sr.x + sr.w and my >= sr.y and my <= sr.y + sr.h then
                 return { id = "dispatch_palette_search_focus", data = {} }
             end
-            -- 3. Legacy toggle
-            local lr = state.palette_legacy_rect
-            if lr and mx >= lr.x and mx <= lr.x + lr.w and my >= lr.y and my <= lr.y + lr.h then
-                return { id = "dispatch_palette_toggle_legacy", data = {} }
+            -- 3. Prefab entries
+            for pf_id, r in pairs(state.palette_prefab_rects or {}) do
+                if mx >= r.x and mx <= r.x + r.w and my >= r.y and my <= r.y + r.h then
+                    return { id = "dispatch_palette_prefab_press",
+                             data = { rule_i = rule_i, prefab_id = pf_id } }
+                end
             end
             -- 4. Block pills
             for def_id, r in pairs(state.palette_rects or {}) do
@@ -2133,9 +2180,10 @@ function DispatchTab.build(game, ui_manager)
     local comps = {}
     local rules = game.state.dispatch_rules or {}
     local pw    = ui_manager and ui_manager.panel and ui_manager.panel.w or 300
-    state.rule_card_tops = {}
-    state.rule_card_bots = {}
-    state.palette_rects  = state.palette_rects or {}
+    state.rule_card_tops     = {}
+    state.rule_card_bots     = {}
+    state.palette_rects      = state.palette_rects or {}
+    state.palette_prefab_rects = state.palette_prefab_rects or {}
 
     table.insert(comps, { type = "label", style = "heading", h = 26, text = "Dispatch Rules" })
     table.insert(comps, {

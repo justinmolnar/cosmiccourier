@@ -93,4 +93,23 @@ return {
     { id = "set_rule_name",    fn = E.set_rule_name,    params = { { key="name", type="string", default="New Name" } }, tags = {"logic"} },
     { id = "benchmark",        fn = E.benchmark,        params = {},                                     tags = {"logic"} },
     { id = "assign_ctx",       fn = E.assign_ctx,       params = {},                                     tags = {"logic"} },
+
+    -- Trip flow
+    { id = "skip",             fn = E.skip,             params = {},                                     tags = {"trip"} },
+
+    -- Text variables
+    { id = "set_text_var",     fn = E.set_text_var,     params = { { key="key", type="string", default="my_text" }, { key="value", type="reporter", default="" } }, tags = {"counter"} },
+    { id = "append_text_var",  fn = E.append_text_var,  params = { { key="key", type="string", default="my_text" }, { key="value", type="reporter", default="" } }, tags = {"counter"} },
+    { id = "clear_text_var",   fn = E.clear_text_var,   params = { { key="key", type="string", default="my_text" } },                                               tags = {"counter"} },
+
+    -- Screen effects
+    { id = "shake_screen",     fn = E.shake_screen,     params = { { key="seconds", type="number", default=0.5 }, { key="magnitude", type="number", default=8 } },  tags = {"ui"} },
+
+    -- Vehicles (additional)
+    { id = "fire_vehicle",     fn = E.fire_vehicle,     params = {},                                     tags = {"vehicle"} },
+
+    -- Depot
+    { id = "open_depot",       fn = E.open_depot,       params = {},                                     tags = {"depot"} },
+    { id = "close_depot",      fn = E.close_depot,      params = {},                                     tags = {"depot"} },
+    { id = "rename_depot",     fn = E.rename_depot,     params = { { key="name", type="string", default="My Depot" } },                                             tags = {"depot"} },
 }

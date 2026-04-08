@@ -257,10 +257,25 @@ function UIController:handleMouseDown(x, y, button)
         f.search         = ""
         f.search_focused = false
 
-    elseif id == "dispatch_palette_toggle_legacy" then
-        local DT = require("views.tabs.DispatchTab")
-        local f = DT.getState().palette_filter
-        f.show_legacy = not (f.show_legacy or false)
+    elseif id == "dispatch_palette_prefab_press" then
+        local DT  = require("views.tabs.DispatchTab")
+        local RTU = require("services.RuleTreeUtils")
+        local prefabs = RTU.getPrefabs()
+        local pf = nil
+        for _, p in ipairs(prefabs) do
+            if p.id == data.prefab_id then pf = p; break end
+        end
+        if pf then
+            local slot_type = (pf.kind == "bool") and "boolean" or "stack"
+            DT.getState().drag = {
+                type      = "palette",
+                rule_i    = data.rule_i,
+                def_id    = pf.id,
+                node      = RTU.instantiatePrefab(pf, {}),
+                slot_type = slot_type,
+                sx = x, sy = y, cx = x, cy = y, active = false,
+            }
+        end
 
     elseif id == "_noop" then
         -- swallowed click (e.g. invalid palette block) — do nothing
