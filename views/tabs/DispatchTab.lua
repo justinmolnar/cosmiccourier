@@ -128,8 +128,8 @@ local function polyBool(x, y, w, h)
     return { x+a, y,  x+w-a, y,  x+w, y+h/2,  x+w-a, y+h,  x+a, y+h,  x, y+h/2 }
 end
 
-local function polyCBlock(x, y, w, body_h)
-    local SH, CH, NH, CI = STACK_H, CAP_H, NOTCH_H, C_INDENT
+local function polyCBlock(x, y, w, body_h, sh)
+    local SH, CH, NH, CI = sh or STACK_H, CAP_H, NOTCH_H, C_INDENT
     local NX, NW = NOTCH_X, NOTCH_W
     local r  = x + w
     local th = SH + body_h + CH
@@ -152,8 +152,8 @@ local function polyCBlock(x, y, w, body_h)
     }
 end
 
-local function polyCElseBlock(x, y, w, body_h, else_h)
-    local SH, CH, NH, CI = STACK_H, CAP_H, NOTCH_H, C_INDENT
+local function polyCElseBlock(x, y, w, body_h, else_h, sh)
+    local SH, CH, NH, CI = sh or STACK_H, CAP_H, NOTCH_H, C_INDENT
     local NX, NW = NOTCH_X, NOTCH_W
     local r   = x + w
     local mid = y + SH + body_h + CH
@@ -420,7 +420,9 @@ local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rect
             slot_rects_out[#slot_rects_out+1] = {
                 key      = outer_key,
                 x        = inner_x,
+                y        = py + 2,
                 w        = vpw,
+                h        = 12,
                 sd_type  = "rep_inner",
                 rep_node = rep_node,
                 rep_key  = sd.key,
@@ -469,7 +471,9 @@ local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rect
                 slot_rects_out[#slot_rects_out+1] = {
                     key      = outer_key,
                     x        = inner_x,
+                    y        = py + 2,
                     w        = vpw,
+                    h        = 12,
                     sd_type  = "rep_inner",
                     rep_node = rep_node,
                     rep_key  = psd.key,
@@ -484,7 +488,9 @@ local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rect
     slot_rects_out[#slot_rects_out+1] = {
         key     = outer_key,
         x       = x,
+        y       = py,
         w       = total_w,
+        h       = 16,
         sd_type = outer_sd_type,
     }
 
@@ -563,8 +569,12 @@ local function stackNaturalW(node, font)
     return math.max(160, math.min(STACK_W_MAX, w))
 end
 
-local function controlNaturalW(node, font)
-    local cond_w = node.condition and boolNodeW(node.condition, font) or 80
+local function controlNaturalW(node, font, panel_w)
+    local cond_w = 80
+    if node.condition then
+        local cw, _ = boolNodeSize(node.condition, font, panel_w)
+        cond_w = cw
+    end
     -- If the control block itself has slots (like loop nodes), measure them too
     local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
@@ -582,12 +592,16 @@ local function controlNaturalW(node, font)
     return math.max(220, C_INDENT + 16 + cond_w + 16 + slots_w)
 end
 
-local function loopNaturalW(node, font)
+local function loopNaturalW(node, font, panel_w)
     if node.def_id == "ctrl_repeat_until" then
-        local cond_w = node.condition and boolNodeW(node.condition, font) or 70
+        local cond_w = 70
+        if node.condition then
+            local cw, _ = boolNodeSize(node.condition, font, panel_w)
+            cond_w = cw
+        end
         return math.max(200, 8 + font:getWidth("repeat until") + 8 + cond_w + 8)
     end
-    return controlNaturalW(node, font)
+    return controlNaturalW(node, font, panel_w)
 end
 
 -- ── Forward declarations ──────────────────────────────────────────────────────
@@ -694,6 +708,20 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
         love.graphics.printf(lbl, op_x, op_y + (BOOL_H - fh) / 2, lbl_w, "center")
         drawBoolNode(node.right, next_x, next_y, game, nrects, dtargets, appendPath(path, "right"), warn_map, alpha)
 
+        -- Register occupied slots as drop targets
+        if dtargets and path then
+            local lw, lh = boolNodeSize(node.left, font, panel_w)
+            dtargets[#dtargets+1] = {
+                parent_path = path, slot = "left", accepts = "boolean",
+                x = lx, y = y, w = lw, h = lh
+            }
+            local rw, rh = boolNodeSize(node.right, font, panel_w)
+            dtargets[#dtargets+1] = {
+                parent_path = path, slot = "right", accepts = "boolean",
+                x = next_x, y = next_y, w = rw, h = rh
+            }
+        end
+
         if nrects and path then
             nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=h, slot_rects={} }
         end
@@ -718,7 +746,17 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
         love.graphics.setColor(1, 1, 1, alpha)
         local lbl_x = x + BOOL_ANGLE
         love.graphics.printf("not", lbl_x, y + (BOOL_H - fh) / 2, lbl_w, "center")
-        drawBoolNode(node.operand, lbl_x + lbl_w, y, game, nrects, dtargets, appendPath(path, "operand"), warn_map, alpha)
+        local op_x = lbl_x + lbl_w
+        drawBoolNode(node.operand, op_x, y, game, nrects, dtargets, appendPath(path, "operand"), warn_map, alpha)
+
+        -- Register occupied slot as drop target
+        if dtargets and path then
+            local ow, oh = boolNodeSize(node.operand, font, panel_w)
+            dtargets[#dtargets+1] = {
+                parent_path = path, slot = "operand", accepts = "boolean",
+                x = op_x, y = y, w = ow, h = oh
+            }
+        end
 
         if nrects and path then
             nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=BOOL_H, slot_rects={} }
@@ -764,7 +802,7 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
             local val     = node.slots and node.slots[sd.key] or sd.default or ""
             local has_rep = type(val) == "table" and val.kind == "reporter"
             local is_foc  = not has_rep
-                            and (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+                            and (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum" or sd.type == "reporter")
                             and state.slot_input
                             and state.slot_input.node == node
                             and state.slot_input.slot_key == sd.key
@@ -774,7 +812,7 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
                 pw = drawInlineReporter(val, px, y, BOOL_H, font, alpha, slot_rects, sd.key, sd.type)
             else
                 pw = drawSlotPill(val, px, y, BOOL_H, font, alpha, is_foc)
-                slot_rects[#slot_rects+1] = { key = sd.key, x = pill_x, w = pw, sd_type = sd.type }
+                slot_rects[#slot_rects+1] = { key = sd.key, x = pill_x, y = y, w = pw, h = BOOL_H, sd_type = sd.type }
             end
             px = px + pw + 4
         end
@@ -820,7 +858,7 @@ local function drawHatNode(node, x, y, w, game, nrects, path, alpha)
         for i = #(def.slots or {}), 1, -1 do
             local sd      = def.slots[i]
             local val     = node.slots and node.slots[sd.key] or sd.default or ""
-            local is_foc  = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum")
+            local is_foc  = (sd.type == "number" or sd.type == "string" or sd.type == "text_var_enum" or sd.type == "reporter")
                             and state.slot_input
                             and state.slot_input.node == node
                             and state.slot_input.slot_key == sd.key
@@ -919,6 +957,13 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
     -- Fetch panel width for wrapping
     local panel_w = game.ui_manager and game.ui_manager.panel and game.ui_manager.panel.w or 400
 
+    local cond_h = BOOL_H
+    if node.condition then
+        local _, ch = boolNodeSize(node.condition, font, panel_w)
+        cond_h = ch
+    end
+    local header_h = math.max(STACK_H, cond_h + 10)
+
     local body_h = math.max(MIN_BODY_H, measureStack(node.body or {}, game, panel_w))
     local else_h = nil
     if node.def_id == "ctrl_if_else" and node.else_body then
@@ -930,16 +975,16 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
     -- Shadow
     love.graphics.setColor(0, 0, 0, 0.20 * alpha)
     if else_h then
-        love.graphics.polygon("fill", polyCElseBlock(x+2, y+2, w, body_h, else_h))
+        love.graphics.polygon("fill", polyCElseBlock(x+2, y+2, w, body_h, else_h, header_h))
     else
-        love.graphics.polygon("fill", polyCBlock(x+2, y+2, w, body_h))
+        love.graphics.polygon("fill", polyCBlock(x+2, y+2, w, body_h, header_h))
     end
 
     love.graphics.setColor(ctrl_c[1], ctrl_c[2], ctrl_c[3], alpha)
     if else_h then
-        love.graphics.polygon("fill", polyCElseBlock(x, y, w, body_h, else_h))
+        love.graphics.polygon("fill", polyCElseBlock(x, y, w, body_h, else_h, header_h))
     else
-        love.graphics.polygon("fill", polyCBlock(x, y, w, body_h))
+        love.graphics.polygon("fill", polyCBlock(x, y, w, body_h, header_h))
     end
 
     if warn_map and warn_map[node] then
@@ -950,36 +995,36 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
         love.graphics.setLineWidth(1)
     end
     if else_h then
-        love.graphics.polygon("line", polyCElseBlock(x, y, w, body_h, else_h))
+        love.graphics.polygon("line", polyCElseBlock(x, y, w, body_h, else_h, header_h))
     else
-        love.graphics.polygon("line", polyCBlock(x, y, w, body_h))
+        love.graphics.polygon("line", polyCBlock(x, y, w, body_h, header_h))
     end
     love.graphics.setLineWidth(1)
 
     -- Inner body background
     love.graphics.setColor(0, 0, 0, 0.20 * alpha)
-    love.graphics.rectangle("fill", x + C_INDENT, y + STACK_H, w - C_INDENT, body_h)
+    love.graphics.rectangle("fill", x + C_INDENT, y + header_h, w - C_INDENT, body_h)
     if else_h then
-        local else_start = y + STACK_H + body_h + CAP_H
+        local else_start = y + header_h + body_h + CAP_H
         love.graphics.rectangle("fill", x + C_INDENT, else_start, w - C_INDENT, else_h)
     end
 
     love.graphics.setFont(font)
     love.graphics.setColor(1, 1, 1, alpha)
-    love.graphics.print("if", x + 8, y + (STACK_H - fh) / 2)
+    love.graphics.print("if", x + 8, y + (header_h - fh) / 2)
 
     -- Condition slot
     local cond_x  = x + C_INDENT + 8
-    local cond_y  = y + (STACK_H - BOOL_H) / 2
+    local cond_y  = y + (header_h - cond_h) / 2
     local cond_path = appendPath(path, "condition")
 
     if node.condition then
         drawBoolNode(node.condition, cond_x, cond_y, game, nrects, dtargets, cond_path, warn_map, alpha)
         if dtargets and path then
-            local cw = boolNodeW(node.condition, font)
+            local cw, ch = boolNodeSize(node.condition, font, panel_w)
             dtargets[#dtargets+1] = {
                 parent_path = path, slot = "condition", accepts = "boolean",
-                x = cond_x, y = cond_y, w = cw, h = BOOL_H
+                x = cond_x, y = cond_y, w = cw, h = ch
             }
         end
     else
@@ -1002,7 +1047,7 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
 
     -- Body
     local body_x   = x + C_INDENT
-    local body_y   = y + STACK_H
+    local body_y   = y + header_h
     local body_w   = w - C_INDENT
     local body_path = appendPath(path, "body")
 
@@ -1021,10 +1066,10 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
 
     -- Else body
     if else_h then
-        local else_start = y + STACK_H + body_h + CAP_H
+        local else_start = y + header_h + body_h + CAP_H
         love.graphics.setFont(font)
         love.graphics.setColor(1, 1, 1, alpha * 0.80)
-        love.graphics.print("else", x + 8, y + STACK_H + body_h + (CAP_H - fh) / 2)
+        love.graphics.print("else", x + 8, y + header_h + body_h + (CAP_H - fh) / 2)
 
         local else_path = appendPath(path, "else_body")
         if #(node.else_body or {}) == 0 then
@@ -1059,46 +1104,53 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     -- Fetch panel width for wrapping
     local panel_w = game.ui_manager and game.ui_manager.panel and game.ui_manager.panel.w or 400
 
+    local cond_h = BOOL_H
+    if node.condition then
+        local _, ch = boolNodeSize(node.condition, font, panel_w)
+        cond_h = ch
+    end
+    local header_h = math.max(STACK_H, cond_h + 10)
+
     local body_h  = math.max(MIN_BODY_H, measureStack(node.body or {}, game, panel_w))
     local loop_c  = { 0.20, 0.55, 0.75 }
 
     -- Shadow
     love.graphics.setColor(0, 0, 0, 0.20 * alpha)
-    love.graphics.polygon("fill", polyCBlock(x+2, y+2, w, body_h))
+    love.graphics.polygon("fill", polyCBlock(x+2, y+2, w, body_h, header_h))
 
     -- Fill
     love.graphics.setColor(loop_c[1], loop_c[2], loop_c[3], alpha)
-    love.graphics.polygon("fill", polyCBlock(x, y, w, body_h))
+    love.graphics.polygon("fill", polyCBlock(x, y, w, body_h, header_h))
 
     -- Outline
     love.graphics.setColor(1, 1, 1, 0.15 * alpha)
     love.graphics.setLineWidth(1)
-    love.graphics.polygon("line", polyCBlock(x, y, w, body_h))
+    love.graphics.polygon("line", polyCBlock(x, y, w, body_h, header_h))
     love.graphics.setLineWidth(1)
 
     -- Inner body background
     love.graphics.setColor(0, 0, 0, 0.20 * alpha)
-    love.graphics.rectangle("fill", x + C_INDENT, y + STACK_H, w - C_INDENT, body_h)
+    love.graphics.rectangle("fill", x + C_INDENT, y + header_h, w - C_INDENT, body_h)
 
     -- Header content
     love.graphics.setFont(font)
     love.graphics.setColor(1, 1, 1, alpha)
     local lbl    = (def and def.label) or node.def_id
-    local lbl_y  = y + (STACK_H - fh) / 2
+    local lbl_y  = y + (header_h - fh) / 2
 
     if node.def_id == "ctrl_repeat_until" then
         -- Label then condition slot
         love.graphics.print(lbl, x + 8, lbl_y)
         local cond_x    = x + 8 + font:getWidth(lbl) + 6
-        local cond_y    = y + (STACK_H - BOOL_H) / 2
+        local cond_y    = y + (header_h - cond_h) / 2
         local cond_path = appendPath(path, "condition")
         if node.condition then
             drawBoolNode(node.condition, cond_x, cond_y, game, nrects, dtargets, cond_path, warn_map, alpha)
             if dtargets and path then
-                local cw = boolNodeW(node.condition, font)
+                local cw, ch = boolNodeSize(node.condition, font, panel_w)
                 dtargets[#dtargets+1] = {
                     parent_path = path, slot = "condition", accepts = "boolean",
-                    x = cond_x, y = cond_y, w = cw, h = BOOL_H
+                    x = cond_x, y = cond_y, w = cw, h = ch
                 }
             end
         else
@@ -1136,19 +1188,19 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
                                 and state.slot_input.slot_key == sd.key
                 local pw  = pillWidth(val, font, is_foc)
                 px        = px - pw
-                drawSlotPill(val, px, y, STACK_H, font, alpha, is_foc)
+                drawSlotPill(val, px, y, header_h, font, alpha, is_foc)
                 slot_rects[#slot_rects+1] = { key = sd.key, x = px, w = pw, sd_type = sd.type }
                 px = px - 4
             end
         end
         if nrects and path then
-            nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=STACK_H, slot_rects=slot_rects }
+            nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=header_h, slot_rects=slot_rects }
         end
     end
 
     -- Body
     local body_x    = x + C_INDENT
-    local body_y    = y + STACK_H
+    local body_y    = y + header_h
     local body_w    = w - C_INDENT
     local body_path = appendPath(path, "body")
 
@@ -1172,7 +1224,7 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
             if r.node == node then already = true; break end
         end
         if not already then
-            nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=measureNode(node), slot_rects={} }
+            nrects[#nrects+1] = { node=node, path=path, x=x, y=y, w=w, h=measureNode(node, game, panel_w), slot_rects={} }
         end
     end
 end
@@ -1190,21 +1242,28 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     -- Fetch panel width for wrapping
     local panel_w = game.ui_manager and game.ui_manager.panel and game.ui_manager.panel.w or 400
 
+    local cond_h = BOOL_H
+    if node.condition then
+        local _, ch = boolNodeSize(node.condition, font, panel_w)
+        cond_h = ch
+    end
+    local header_h = math.max(STACK_H, cond_h + 10)
+
     local body_h  = math.max(MIN_BODY_H, measureStack(node.body or {}, game, panel_w))
     local find_c  = { 0.20, 0.55, 0.75 }
     -- Shadow + fill
     love.graphics.setColor(0, 0, 0, 0.20 * alpha)
-    love.graphics.polygon("fill", polyCBlock(x+2, y+2, w, body_h))
+    love.graphics.polygon("fill", polyCBlock(x+2, y+2, w, body_h, header_h))
     love.graphics.setColor(find_c[1], find_c[2], find_c[3], alpha)
-    love.graphics.polygon("fill", polyCBlock(x, y, w, body_h))
+    love.graphics.polygon("fill", polyCBlock(x, y, w, body_h, header_h))
     love.graphics.setColor(1, 1, 1, 0.15 * alpha)
     love.graphics.setLineWidth(1)
-    love.graphics.polygon("line", polyCBlock(x, y, w, body_h))
+    love.graphics.polygon("line", polyCBlock(x, y, w, body_h, header_h))
     love.graphics.setLineWidth(1)
 
     -- Inner body background
     love.graphics.setColor(0, 0, 0, 0.20 * alpha)
-    love.graphics.rectangle("fill", x + C_INDENT, y + STACK_H, w - C_INDENT, body_h)
+    love.graphics.rectangle("fill", x + C_INDENT, y + header_h, w - C_INDENT, body_h)
 
     -- ── Header: left-to-right  [label] [sort pills] [where] [condition] ──────
     love.graphics.setFont(font)
@@ -1214,7 +1273,7 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
 
     -- Label
     love.graphics.setColor(1, 1, 1, alpha)
-    love.graphics.print(lbl, hx, y + (STACK_H - fh) / 2)
+    love.graphics.print(lbl, hx, y + (header_h - fh) / 2)
     hx = hx + font:getWidth(lbl) + 8
 
     -- Sort slots (left to right, no overlap)
@@ -1227,23 +1286,24 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
                        and state.slot_input.slot_key == sd.key
 
         local pw  = pillWidth(val, font, is_foc)
-        drawSlotPill(val, hx, y, STACK_H, font, alpha, is_foc)
+        drawSlotPill(val, hx, y, header_h, font, alpha, is_foc)
         slot_rects[#slot_rects+1] = { key = sd.key, x = hx, w = pw, sd_type = sd.type }
         hx = hx + pw + 4
     end
 
     -- "where" separator
     love.graphics.setColor(1, 1, 1, 0.50 * alpha)
-    love.graphics.print("where", hx, y + (STACK_H - fh) / 2)
+    love.graphics.print("where", hx, y + (header_h - fh) / 2)
     hx = hx + font:getWidth("where") + 6
 
     -- Condition slot
     local cond_path = path and appendPath(path, "condition") or nil
-    drawBoolNode(node.condition, hx, y + (STACK_H - BOOL_H) / 2, game, nrects, dtargets, cond_path, warn_map, alpha)
+    local cond_y    = y + (header_h - cond_h) / 2
+    drawBoolNode(node.condition, hx, cond_y, game, nrects, dtargets, cond_path, warn_map, alpha)
 
     -- ── Body ─────────────────────────────────────────────────────────────────
     local body_x    = x + C_INDENT
-    local body_y    = y + STACK_H
+    local body_y    = y + header_h
     local body_w    = w - C_INDENT
     local body_path = path and appendPath(path, "body") or nil
 
@@ -1296,11 +1356,11 @@ drawNodeList = function(stack, x, y, w, game, nrects, dtargets, path_prefix, war
         if node.kind == "hat" or node.kind == "stack" then
             nw = math.min(w, stackNaturalW(node, font))
         elseif node.kind == "control" then
-            nw = math.min(w, controlNaturalW(node, font))
+            nw = math.min(w, controlNaturalW(node, font, panel_w))
         elseif node.kind == "loop" then
-            nw = math.min(w, loopNaturalW(node, font))
+            nw = math.min(w, loopNaturalW(node, font, panel_w))
         elseif node.kind == "find" then
-            nw = math.min(w, controlNaturalW(node, font))
+            nw = math.min(w, controlNaturalW(node, font, panel_w))
         else
             nw = math.min(w, 200)
         end
@@ -1457,10 +1517,10 @@ local function makeRuleCard(rule_i, rule, game, panel_w)
             else
                 drawNodeList(stack, sx, sy, sw, game, nrects, dtargets, {}, warn_map, 1.0)
 
-                -- Register reporter drop targets from number/string slots in drawn nodes
+                -- Register reporter drop targets from slots in drawn nodes
                 for _, nr in ipairs(nrects) do
                     for _, sr in ipairs(nr.slot_rects or {}) do
-                        if sr.sd_type == "number" or sr.sd_type == "string" then
+                        if sr.sd_type == "number" or sr.sd_type == "string" or sr.sd_type == "reporter" then
                             dtargets[#dtargets+1] = {
                                 accepts     = "reporter",
                                 x           = sr.x,
@@ -1524,13 +1584,16 @@ local function makeRuleCard(rule_i, rule, game, panel_w)
             for _, r in ipairs(nrects) do
                 if mx >= r.x and mx <= r.x + r.w and my >= r.y and my <= r.y + r.h then
                     for _, sp in ipairs(r.slot_rects or {}) do
-                        if mx >= sp.x and mx <= sp.x + sp.w then
+                        -- Use precise vertical check if available, else fallback to node y/h
+                        local sy = sp.y or r.y
+                        local sh = sp.h or r.h
+                        if mx >= sp.x and mx <= sp.x + sp.w and my >= sy and my <= sy + sh then
                             -- Inner reporter sub-slot (cycle/edit the reporter node's own slot)
                             if sp.sd_type == "rep_inner" then
                                 return { id = "dispatch_cycle_rep_inner_slot",
                                          data = { rep_node = sp.rep_node, rep_key = sp.rep_key, rep_sd = sp.rep_sd } }
                             end
-                            if sp.sd_type == "number" or sp.sd_type == "string" then
+                            if sp.sd_type == "number" or sp.sd_type == "string" or sp.sd_type == "reporter" then
                                 return { id = "dispatch_focus_slot",
                                          data = { rule_i = rule_i, path = r.path,
                                                   slot_key = sp.key, node = r.node } }
@@ -2334,6 +2397,7 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
 
     for _, sd in ipairs(def.slots or {}) do
         if sd.key == slot_key then
+            local val = node.slots[slot_key]
             if sd.type == "enum" or sd.type == "vehicle_enum" then
                 local opts = sd.options or {}
                 if sd.type == "vehicle_enum" then
@@ -2347,48 +2411,44 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
                 local scroll_y = panel.scroll[panel.active_tab_id] and panel.scroll[panel.active_tab_id].scroll_y or 0
                 -- Find the rect for this slot in state.node_rects
                 local slot_rect = nil
-                local nr_list = state.node_rects[rule_i] or {}
+                local nr_ref    = nil
+                local nr_list   = state.node_rects[rule_i] or {}
                 for _, nr in ipairs(nr_list) do
                     if pathsEqual(nr.path, path) then
+                        nr_ref = nr
                         for _, sr in ipairs(nr.slot_rects or {}) do
                             if sr.key == slot_key then slot_rect = sr; break end
                         end
-                    end
-                end
-
-                local drop_x = slot_rect and (panel.x + slot_rect.x) or (love.mouse.getX() - 60)
-                local drop_y = slot_rect and (panel.content_y - scroll_y + nr_list[1].y + (slot_rect.y or 0) + 20) or love.mouse.getY()
-                -- (Note: nr_list[1].y is a simplification, we need the actual y for nr)
-                for _, nr in ipairs(nr_list) do
-                    if pathsEqual(nr.path, path) then
-                        drop_y = panel.content_y - scroll_y + nr.y + 20
                         break
                     end
                 end
 
-                state.active_dropdown = Dropdown:new(opts, node.slots[slot_key], function(val)
-                    node.slots[slot_key] = val
+                local drop_x = slot_rect and (panel.x + slot_rect.x) or (love.mouse.getX() - 60)
+                local drop_y = (slot_rect and nr_ref) and (panel.content_y - scroll_y + nr_ref.y + 20) or love.mouse.getY()
+
+                state.active_dropdown = Dropdown:new(opts, val, function(v)
+                    node.slots[slot_key] = v
                     state.active_dropdown = nil
                 end, game)
                 state.active_dropdown.x = drop_x
                 state.active_dropdown.y = drop_y
-            elseif sd.type == "text_var_enum" or sd.type == "string" then
-                local mode = "text"
+
+            elseif sd.type == "text_var_enum" or sd.type == "string" or (sd.type == "reporter" and type(val) == "string") then
                 state.slot_input = {
                     node     = node,
                     slot_key = slot_key,
-                    input    = TextInput:new("", node.slots[slot_key], mode, function(val)
-                        node.slots[slot_key] = val
+                    input    = TextInput:new("", val, "text", function(v)
+                        node.slots[slot_key] = v
                     end, game)
                 }
                 state.slot_input.input:focus()
-            elseif sd.type == "number" then
+            elseif sd.type == "number" or (sd.type == "reporter" and type(val) == "number") then
                 state.slot_input = {
                     node     = node,
                     slot_key = slot_key,
-                    input    = TextInput:new("", node.slots[slot_key], "number", function(val)
-                        if sd.min then val = math.max(sd.min, val) end
-                        node.slots[slot_key] = val
+                    input    = TextInput:new("", val, "number", function(v)
+                        if sd.min then v = math.max(sd.min, v) end
+                        node.slots[slot_key] = v
                     end, game)
                 }
                 state.slot_input.input:focus()

@@ -186,6 +186,7 @@ function UIController:handleMouseDown(x, y, button)
     elseif id == "dispatch_focus_slot" then
         local DT  = require("views.tabs.DispatchTab")
         local RE  = require("services.DispatchRuleEngine")
+        local TextInput = require("views.components.TextInput")
         local node = data.node  -- passed directly from hit_fn
         if node then
             local def = RE.getDefById(node.def_id)
@@ -199,16 +200,17 @@ function UIController:handleMouseDown(x, y, button)
                 node.slots[data.slot_key] = sd and sd.default
                 return true
             end
-            local st           = DT.getState()
-            local is_string_sd = sd and sd.type == "string"
-            local fallback     = is_string_sd and "" or "0"
-            st.input_focus = {
-                node_ref = node,
+            local st = DT.getState()
+            local mode = (sd and sd.type == "number") and "number" or "text"
+            st.slot_input = {
+                node     = node,
                 slot_key = data.slot_key,
-                text     = tostring(current or (sd and sd.default) or fallback),
-                original = current,
-                sd       = sd,
+                input    = TextInput:new("", current, mode, function(val)
+                    if sd and sd.type == "number" and sd.min then val = math.max(sd.min, val) end
+                    node.slots[data.slot_key] = val
+                end, Game)
             }
+            st.slot_input.input:focus()
         end
 
     elseif id == "dispatch_cycle_slot" then
@@ -306,8 +308,41 @@ function UIController:handleMouseUp(x, y, button, game)
             -- Click on a node = remove it
             local rule = game.state.dispatch_rules[drag.rule_i]
             if rule then
-                local _, new_stack = RTU.removeNodeAtPath(rule.stack, drag.path)
-                rule.stack = new_stack
+                -- Smart pruning: if we remove a child of a binary operator (AND/OR), 
+                -- replace the operator itself with the other child instead of leaving a hole.
+                if #drag.path > 0 then
+                    local parent_path = {}
+                    for i=1, #drag.path-1 do parent_path[#parent_path+1] = drag.path[i] end
+                    local parent = RTU.getNodeAtPath(rule.stack, parent_path)
+                    local last_key = drag.path[#drag.path]
+
+                    if parent and (parent.def_id == "bool_and" or parent.def_id == "bool_or") then
+                        local other_key = (last_key == "left") and "right" or "left"
+                        local remaining = parent[other_key]
+                        -- Replace parent with remaining child
+                        rule.stack = RTU.insertNodeAtPath(rule.stack, parent_path, "", remaining)
+                        -- The insertNodeAtPath above using "" as slot is a hack to replace the node at parent_path.
+                        -- Actually, resolveParent and direct set is cleaner if we have it.
+                        -- Let's use a cleaner way:
+                        local new_stack = RTU.deepCopy(rule.stack)
+                        local gp, p_key = {}, nil
+                        if #parent_path > 0 then
+                            local gpath = {}
+                            for i=1, #parent_path-1 do gpath[#gpath+1] = parent_path[i] end
+                            local gnode = (#gpath == 0) and new_stack or RTU.getNodeAtPath(new_stack, gpath)
+                            gnode[parent_path[#parent_path]] = RTU.deepCopy(remaining)
+                        else
+                            -- Parent was the root of the stack? (impossible for bool_and)
+                        end
+                        rule.stack = new_stack
+                    else
+                        local _, new_stack = RTU.removeNodeAtPath(rule.stack, drag.path)
+                        rule.stack = new_stack
+                    end
+                else
+                    local _, new_stack = RTU.removeNodeAtPath(rule.stack, drag.path)
+                    rule.stack = new_stack
+                end
             end
 
         elseif drag.type == "palette" then
@@ -385,8 +420,8 @@ function UIController:handleMouseUp(x, y, button, game)
                             -- NOT dropped: wrap existing as operand
                             node.operand = existing
                         else
-                            -- Leaf condition dropped: wrap with AND(existing, new)
-                            node = RTU.newBoolBinary("bool_and", existing, node)
+                            -- Leaf condition dropped: replace existing (default behavior)
+                            -- No change to 'node', it will overwrite 'existing' in insertNodeAtPath below.
                         end
                     end
                 end
