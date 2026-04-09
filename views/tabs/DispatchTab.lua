@@ -5,10 +5,11 @@
 
 local DispatchTab = {}
 
-local Validator = require("services.DispatchValidator")
-local RTU       = require("services.RuleTreeUtils")
-local TextInput = require("views.components.TextInput")
-local Dropdown  = require("views.components.Dropdown")
+local Validator      = require("services.DispatchValidator")
+local RTU            = require("services.RuleTreeUtils")
+local PaletteService = require("services.DispatchPaletteService")
+local TextInput      = require("views.components.TextInput")
+local Dropdown       = require("views.components.Dropdown")
 
 -- ── Visual constants ──────────────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ local state = {
         active_tags    = {},    -- map tag_id → true when active
         search         = "",
         search_focused = false,
+        show_prefabs   = false, -- prefab section hidden unless toggled on
     },
     -- New componentized inputs
     search_input = nil,
@@ -1715,78 +1717,7 @@ local function makeRuleCard(rule_i, rule, game, panel_w)
     }
 end
 
--- ── Palette filter helpers ────────────────────────────────────────────────────
-
--- Returns the subset of `all` that passes the current tag + search filters.
--- Multi-tag: a block passes only if it has ALL active tags (AND semantics).
-local function filterDefs(all, filter)
-    local has_tags   = next(filter.active_tags) ~= nil
-    local search     = filter.search:lower()
-    local result     = {}
-    for _, def in ipairs(all) do
-        -- Tag: must have every active tag
-        local tag_ok = true
-        if has_tags then
-            for t in pairs(filter.active_tags) do
-                local found = false
-                if def.tags then
-                    for _, dt in ipairs(def.tags) do
-                        if dt == t then found = true; break end
-                    end
-                end
-                if not found then tag_ok = false; break end
-            end
-        end
-        -- Search: pass if empty or matches label or tooltip text
-        local search_ok = search == ""
-            or (def.label   and def.label:lower():find(search, 1, true))
-            or (def.tooltip and def.tooltip:lower():find(search, 1, true))
-        if tag_ok and search_ok then result[#result+1] = def end
-    end
-    return result
-end
-
--- Groups a flat list of defs by category, sorted by hue within each group.
--- Returns an array of { cat, defs } in the canonical category order.
-local CAT_ORDER = { "hat", "control", "loop", "find", "boolean", "reporter", "stack" }
-
-local function rgbHue(r, g, b)
-    local mx = math.max(r, g, b)
-    local mn = math.min(r, g, b)
-    local d  = mx - mn
-    if d < 0.001 then return 0 end  -- achromatic
-    local h
-    if mx == r then     h = (g - b) / d % 6
-    elseif mx == g then h = (b - r) / d + 2
-    else                h = (r - g) / d + 4
-    end
-    return h / 6  -- 0–1
-end
-
-local function groupDefs(visible)
-    local by_cat  = {}
-    local seen    = {}
-    for _, def in ipairs(visible) do
-        local c = def.category
-        if not by_cat[c] then by_cat[c] = {}; seen[#seen+1] = c end
-        by_cat[c][#by_cat[c]+1] = def
-    end
-    -- Sort each group by hue so same-coloured blocks cluster together
-    for _, defs in pairs(by_cat) do
-        table.sort(defs, function(a, b)
-            local ca, cb = a.color or {0.5,0.5,0.5}, b.color or {0.5,0.5,0.5}
-            return rgbHue(ca[1],ca[2],ca[3]) < rgbHue(cb[1],cb[2],cb[3])
-        end)
-    end
-    local groups = {}
-    for _, c in ipairs(CAT_ORDER) do
-        if by_cat[c] then groups[#groups+1] = { cat=c, defs=by_cat[c] }; by_cat[c]=nil end
-    end
-    for _, c in ipairs(seen) do
-        if by_cat[c] then groups[#groups+1] = { cat=c, defs=by_cat[c] } end
-    end
-    return groups
-end
+-- Palette filter/group helpers live in DispatchPaletteService
 
 -- Returns tooltip text for a def (plain, no tags — tags rendered as pills separately).
 local function defTooltip(def)
@@ -1803,6 +1734,10 @@ local function calcFilterHeaderH(font, pw, pad)
         if cx + pill_w > pw - pad and cx > pad then rows = rows + 1; cx = pad end
         cx = cx + pill_w + TAG_GAP
     end
+    -- Prefabs toggle pill
+    local pref_w = font:getWidth("★ Prefabs") + TAG_PILL_PAD * 2
+    if cx + pref_w > pw - pad and cx > pad then rows = rows + 1; cx = pad end
+    cx = cx + pref_w + TAG_GAP
     -- Clear-all pill — check if it wraps (treated as another pill)
     local clear_w = font:getWidth("✕ clear") + TAG_PILL_PAD * 2
     if cx + clear_w > pw - pad and cx > pad then rows = rows + 1 end
@@ -1836,9 +1771,11 @@ local function makePalette(rule_i, panel_w)
     local function calcPaletteH(pw)
         local font     = love.graphics.getFont()
         local filter_h = calcFilterHeaderH(font, pw, pad)
-        local prefabs  = require("data.dispatch_prefabs")
+        local all_prefabs = require("data.dispatch_prefabs")
+        local prefabs  = state.palette_filter.show_prefabs
+                         and PaletteService.filter(all_prefabs, state.palette_filter) or {}
         local pref_h   = calcPrefabSectionH(font, pw, prefabs)
-        local groups   = groupDefs(filterDefs(all, state.palette_filter))
+        local groups   = PaletteService.group(PaletteService.filter(all, state.palette_filter))
         if #groups == 0 then
             return pad + filter_h + pref_h + 40 + pad
         end
@@ -1912,6 +1849,31 @@ local function makePalette(rule_i, panel_w)
                 fcx = fcx + pill_w + TAG_GAP
             end
 
+            -- Prefabs toggle pill
+            do
+                local pref_w = font:getWidth("★ Prefabs") + TAG_PILL_PAD * 2
+                if fcx + pref_w > px + pw - pad and fcx > px + pad then
+                    fcx = px + pad
+                    fcy = fcy + TAG_PILL_H + TAG_GAP
+                end
+                if filter.show_prefabs then
+                    love.graphics.setColor(0.75, 0.60, 0.25, 1.0)
+                    love.graphics.rectangle("fill", fcx, fcy, pref_w, TAG_PILL_H, 3, 3)
+                    love.graphics.setColor(1, 1, 1, 0.20)
+                    love.graphics.rectangle("line", fcx, fcy, pref_w, TAG_PILL_H, 3, 3)
+                    love.graphics.setColor(1, 1, 1, 1.0)
+                else
+                    love.graphics.setColor(0.14, 0.14, 0.22, 1.0)
+                    love.graphics.rectangle("fill", fcx, fcy, pref_w, TAG_PILL_H, 3, 3)
+                    love.graphics.setColor(0.75, 0.60, 0.25, 0.75)
+                    love.graphics.rectangle("fill", fcx, fcy, 3, TAG_PILL_H, 3, 3)
+                    love.graphics.setColor(0.55, 0.55, 0.70, 1.0)
+                end
+                love.graphics.printf("★ Prefabs", fcx, fcy + (TAG_PILL_H - fh) / 2, pref_w, "center")
+                frects[#frects+1] = { tag="_prefabs", x=fcx, y=fcy, w=pref_w, h=TAG_PILL_H }
+                fcx = fcx + pref_w + TAG_GAP
+            end
+
             -- Clear-all pill (only when a filter is active)
             if has_any_filter then
                 local cpill_w = font:getWidth("✕ clear") + TAG_PILL_PAD * 2
@@ -1957,7 +1919,9 @@ local function makePalette(rule_i, panel_w)
             state.palette_search_rect = { x=sf_x, y=sf_y, w=sf_w, h=sf_h }
 
             -- ── Prefabs section ──────────────────────────────────────────────
-            local prefabs  = require("data.dispatch_prefabs")
+            local all_prefabs = require("data.dispatch_prefabs")
+            local prefabs  = filter.show_prefabs
+                             and PaletteService.filter(all_prefabs, filter) or {}
             local prects   = {}
             local cy       = sf_y + sf_h + PAL_GAP
 
@@ -2013,10 +1977,12 @@ local function makePalette(rule_i, panel_w)
                 end
                 state.palette_prefab_rects = pfab_rects
                 cy = cy + PAL_BLOCK_H + PAL_GAP + 6
+            else
+                state.palette_prefab_rects = {}  -- hidden or filtered to empty
             end
 
             -- ── Block list (filtered + grouped by category) ──────────────────
-            local groups = groupDefs(filterDefs(all, filter))
+            local groups = PaletteService.group(PaletteService.filter(all, filter))
             local bprects = {}
 
             if #groups == 0 then
@@ -2270,6 +2236,19 @@ function DispatchTab.updateHover(dt, mx, my, game)
         end
     end
 
+    -- Check prefab palette rects (content space)
+    if not found_id then
+        for pf_id, r in pairs(state.palette_prefab_rects or {}) do
+            if content_x >= r.x and content_x <= r.x + r.w
+               and content_y >= r.y and content_y <= r.y + r.h then
+                found_id   = "pal_pref_" .. pf_id
+                found_text = r.pf and (r.pf.tip or r.pf.tooltip) or nil
+                found_tags = r.pf and r.pf.tags
+                break
+            end
+        end
+    end
+
     -- Check node rects (content space)
     if not found_id then
         for rule_i, nrects in pairs(state.node_rects or {}) do
@@ -2504,7 +2483,9 @@ end
 
 function DispatchTab.toggleFilterTag(tag_id)
     local f = state.palette_filter
-    if f.active_tags[tag_id] then
+    if tag_id == "_prefabs" then
+        f.show_prefabs = not f.show_prefabs
+    elseif f.active_tags[tag_id] then
         f.active_tags[tag_id] = nil
     else
         f.active_tags[tag_id] = true
