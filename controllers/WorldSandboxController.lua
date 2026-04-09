@@ -7,6 +7,9 @@ local Biomes = require("data.biomes")
 local WorldGenUtils        = require("utils.WorldGenUtils")
 local CityPlacementService = require("services.CityPlacementService")
 local HighwayService       = require("services.HighwayService")
+local CityBoundsService    = require("services.CityBoundsService")
+local CityDistrictService  = require("services.CityDistrictService")
+local CityStreetService    = require("services.CityStreetService")
 
 -- Bilinear interpolation of a 2-D array map[y][x] at fractional position (fy, fx).
 local function bilinear2d(map, fy, fx, W, H)
@@ -2472,31 +2475,17 @@ end
 -- Regenerates city_bounds and city_pois for all currently placed cities.
 function WorldSandboxController:_gen_all_bounds()
     if not self.city_locations then return end
-    local new_bounds      = {}
-    local new_bounds_list = {}
-    local new_pois        = {}
-    local new_pois_list   = {}
-    for idx, city in ipairs(self.city_locations) do
-        local claimed, pois = self:_gen_bounds_for_city(city)
-        new_bounds_list[idx] = claimed or {}
-        new_pois_list[idx]   = pois or {}
-        if claimed then
-            for ci in pairs(claimed) do new_bounds[ci] = true end
-        end
-        if pois then
-            for _, poi in ipairs(pois) do
-                new_pois[#new_pois+1] = poi
-                if poi.type == "downtown" then
-                    city.x = poi.x
-                    city.y = poi.y
-                end
-            end
-        end
-    end
-    self.city_bounds_list = new_bounds_list
-    self.city_pois_list   = new_pois_list
-    self.city_bounds = new_bounds
-    self.city_pois   = new_pois
+    local bounds_list, pois_list, all_bounds, all_pois, border, fringe =
+        CityBoundsService.genAllBounds(
+            self.city_locations, self.region_map, self.heightmap, self.biome_data,
+            self.suitability_scores, self.world_w, self.world_h, self.params, self.math_fns
+        )
+    self.city_bounds_list = bounds_list
+    self.city_pois_list   = pois_list
+    self.city_bounds      = all_bounds
+    self.city_pois        = all_pois
+    self.city_border      = border
+    self.city_fringe      = fringe
     -- Invalidate subsystem maps so sendToGame() or regen_bounds() regenerates them fresh
     self.city_district_maps  = nil
     self.city_district_types = nil
@@ -2504,46 +2493,6 @@ function WorldSandboxController:_gen_all_bounds()
     self.city_street_maps    = nil
     self.city_zone_grids     = nil
     self.city_zone_offsets   = nil
-
-    local w, h = self.world_w, self.world_h
-
-    -- Border: claimed cells with at least one non-claimed cardinal neighbor
-    local border = {}
-    for ci in pairs(new_bounds) do
-        local cx = (ci-1) % w
-        local cy = math.floor((ci-1) / w)
-        for _, m in ipairs({{1,0},{-1,0},{0,1},{0,-1}}) do
-            local nx2 = cx + m[1]
-            local ny2 = cy + m[2]
-            if nx2 < 0 or nx2 >= w or ny2 < 0 or ny2 >= h then
-                border[ci] = true; break
-            else
-                local ni = ny2 * w + nx2 + 1
-                if not new_bounds[ni] then border[ci] = true; break end
-            end
-        end
-    end
-    self.city_border = border
-
-    -- Fringe: noise-based expansion 1 cell beyond bounds for sub-tile soft edge
-    local fringe = {}
-    for ci in pairs(new_bounds) do
-        local cx = (ci-1) % w
-        local cy = math.floor((ci-1) / w)
-        for _, m in ipairs({{1,0},{-1,0},{0,1},{0,-1},{1,1},{-1,1},{1,-1},{-1,-1}}) do
-            local nx2 = cx + m[1]
-            local ny2 = cy + m[2]
-            if nx2 >= 0 and nx2 < w and ny2 >= 0 and ny2 < h then
-                local ni = ny2 * w + nx2 + 1
-                if not new_bounds[ni] then
-                    local nv = love.math.noise(nx2 * 4.3 + 0.5, ny2 * 3.7 + 0.5)
-                    if nv > 0.40 then fringe[ni] = true end
-                end
-            end
-        end
-    end
-    self.city_fringe = fringe
-
 end
 
 -- ── Sub-cell elevation ────────────────────────────────────────────────────────
@@ -2587,20 +2536,13 @@ local DISTRICT_PALETTE = {
 }
 
 function WorldSandboxController:_gen_all_districts()
-    local maps   = {}
-    local colors = {}
-    for idx = 1, #(self.city_locations or {}) do
-        maps[idx], colors[idx] = self:_gen_districts_for_city(idx)
-    end
-    self.city_district_maps   = maps
-    self.city_district_colors = colors
+    self.city_district_maps, self.city_district_colors = CityDistrictService.genAllDistricts(
+        self.city_locations, self.city_bounds_list, self.city_pois_list,
+        self.heightmap, self.biome_data, self.world_w, self.world_h, self.params, self.math_fns
+    )
 end
 
--- Multi-source Dijkstra at sub-cell resolution (3×3 per world cell).
--- Sub-cell elevations come from subcell_elev_at(), which adds noise on top of
--- the world-cell baseline. This gives genuine intra-cell elevation variation,
--- so the flood-fill can draw district boundaries that meander through sub-cells.
--- Returns district_map ([sub_cell_idx] = poi_idx) and color table ([poi_idx] = {r,g,b}).
+-- (kept for reference during Batch C extraction — body replaced by CityDistrictService)
 function WorldSandboxController:_gen_districts_for_city(city_idx)
     local bounds = self.city_bounds_list and self.city_bounds_list[city_idx]
     local pois   = self.city_pois_list   and self.city_pois_list[city_idx]
@@ -3304,11 +3246,10 @@ function WorldSandboxController:_gen_streets_for_city(city_idx)
 end
 
 function WorldSandboxController:_gen_all_streets()
-    local maps = {}
-    for idx = 1, #(self.city_locations or {}) do
-        maps[idx] = self:_gen_streets_for_city(idx)
-    end
-    self.city_street_maps = maps
+    self.city_street_maps = CityStreetService.genAllStreets(
+        self.city_locations, self.city_bounds_list, self.city_pois_list,
+        self.city_district_maps, self.world_w, self.world_h
+    )
 end
 
 function WorldSandboxController:regen_bounds()
