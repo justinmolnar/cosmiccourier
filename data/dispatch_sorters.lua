@@ -1,6 +1,8 @@
 -- data/dispatch_sorters.lua
--- Registry of scoring metrics for the Find block.
+-- Registry of scoring metrics for the Find block (vehicles) and sort_queue action (trips).
 -- Agnostic: The engine calls 'score' for each item; lower (asc) or higher (desc) wins.
+
+local SCOPE_RANK = { district=1, city=2, region=3, continent=4, world=5 }
 
 return {
     -- ── Vehicle sorters ──────────────────────────────────────────────────────
@@ -56,13 +58,28 @@ return {
             return item.base_payout or 0 
         end 
     },
-    { 
+    {
         id       = "longest_wait",
         label    = "Longest Wait",
         for_type = "pending_trips",
         order    = "desc",
-        score    = function(item, ctx) 
-            return item.wait_time or 0 
-        end 
+        score    = function(item, ctx)
+            return item.wait_time or 0
+        end
     },
+
+    -- ── Queue sort metrics (used by sort_queue action block) ─────────────────
+    { id="payout", label="Highest Payout",  for_type="pending_trips", order="desc",
+      score = function(item, ctx) return item.base_payout or 0 end },
+    { id="wait",   label="Longest Wait",    for_type="pending_trips", order="desc",
+      score = function(item, ctx) return item.wait_time or 0 end },
+    { id="bonus",  label="Highest Bonus",   for_type="pending_trips", order="desc",
+      score = function(item, ctx) return item.speed_bonus or 0 end },
+    { id="scope",  label="Scope (nearest)", for_type="pending_trips", order="asc",
+      score = function(item, ctx) return SCOPE_RANK[item.scope] or 0 end },
+    { id="cargo",  label="Cargo Size",      for_type="pending_trips", order="desc",
+      score = function(item, ctx)
+          local leg = item.legs and item.legs[item.current_leg or 1]
+          return leg and leg.cargo_size or 0
+      end },
 }

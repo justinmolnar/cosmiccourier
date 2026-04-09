@@ -29,7 +29,7 @@ return {
     -- Queue Management
     { id = "prioritize_trip",  fn = E.prioritize_trip,  params = {},                                     tags = {"game"} },
     { id = "deprioritize_trip",fn = E.deprioritize_trip,params = {},                                     tags = {"game"} },
-    { id = "sort_queue",       fn = E.sort_queue,       params = { { key="metric", type="enum", options={"payout","wait","bonus"} } }, tags = {"game"} },
+    { id = "sort_queue",       fn = E.sort_queue,       params = { { key="metric", type="enum", options={"payout","wait","bonus","scope","cargo"} } }, tags = {"game"} },
     { id = "cancel_all_scope", fn = E.cancel_all_scope, params = { { key="scope",  type="enum", options={"district","neighborhood","city"} } }, tags = {"game"} },
     { id = "cancel_all_wait",  fn = E.cancel_all_wait,  params = { { key="seconds",type="reporter", default=60 } }, tags = {"game"} },
 

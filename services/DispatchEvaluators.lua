@@ -104,8 +104,6 @@ end
 
 -- ── Conditions: Trip ─────────────────────────────────────────────────────────
 
-local SCOPE_RANK = { district=1, city=2, region=3, continent=4, world=5 }
-
 local function scope_equals(block, ctx)
     return ctx.trip.scope == (block.slots.scope or "district")
 end
@@ -362,25 +360,21 @@ local function deprioritize_trip(block, ctx)
 end
 
 local function sort_queue(block, ctx)
-    local field   = block.slots.field or "payout"
+    local SORTERS = require("data.dispatch_sorters")
+    local metric  = block.slots.metric or "payout"
+    local sorter  = nil
+    for _, s in ipairs(SORTERS) do
+        if s.for_type == "pending_trips" and s.id == metric then sorter = s; break end
+    end
+    if not sorter then return false end
     local pending = ctx.game.entities.trips.pending
-    if field == "payout" then
+    if sorter.order == "desc" then
         table.sort(pending, function(a, b)
-            return (a.base_payout or 0) > (b.base_payout or 0)
+            return (sorter.score(a, ctx) or 0) > (sorter.score(b, ctx) or 0)
         end)
-    elseif field == "wait" then
+    else
         table.sort(pending, function(a, b)
-            return (a.wait_time or 0) > (b.wait_time or 0)
-        end)
-    elseif field == "scope" then
-        table.sort(pending, function(a, b)
-            return (SCOPE_RANK[a.scope] or 0) < (SCOPE_RANK[b.scope] or 0)
-        end)
-    elseif field == "cargo" then
-        table.sort(pending, function(a, b)
-            local la = a.legs and a.legs[a.current_leg or 1]
-            local lb = b.legs and b.legs[b.current_leg or 1]
-            return (la and la.cargo_size or 0) > (lb and lb.cargo_size or 0)
+            return (sorter.score(a, ctx) or 0) < (sorter.score(b, ctx) or 0)
         end)
     end
     return false
