@@ -171,11 +171,6 @@ function WorldSandboxSidebarManager:new(wsc, game)
     inst.btn_view_conts   = { x = 0, y = 0, w = 0, h = 32 }
     inst.btn_view_regions   = { x = 0, y = 0, w = 0, h = 32 }
     inst.btn_view_districts = { x = 0, y = 0, w = 0, h = 32 }
-    inst.btn_scope_world    = { x = 0, y = 0, w = 0, h = 30 }
-    inst.btn_scope_cont     = { x = 0, y = 0, w = 0, h = 30 }
-    inst.btn_scope_region   = { x = 0, y = 0, w = 0, h = 30 }
-    inst.btn_scope_city     = { x = 0, y = 0, w = 0, h = 30 }
-    inst.btn_scope_downtown = { x = 0, y = 0, w = 0, h = 30 }
     inst.btn_place_cities   = { x = 0, y = 0, w = 0, h = 34 }
     inst.btn_build_highways = { x = 0, y = 0, w = 0, h = 34 }
     inst.btn_gen_city       = { x = 0, y = 0, w = 0, h = 34 }
@@ -203,11 +198,10 @@ function WorldSandboxSidebarManager:_doLayout()
             for _, w in ipairs(self.visual_sliders) do total_h = total_h + w.h end
             total_h = total_h + self.btn_vq_apply.h + 8
         elseif i == 11 then
-            -- Actions: randomize + generate + view grid (2-col ×2 + 2-col regions/districts) + scope row + place cities + build highways + gen city
+            -- Actions: randomize + generate + view grid (2-col ×2 + 2-col regions/districts) + place cities + build highways + gen city
             total_h = self.btn_randomize.h + self.btn_generate.h
                     + self.btn_view_height.h + self.btn_view_suit.h   -- two 2-col rows
                     + self.btn_view_regions.h                          -- regions|districts row
-                    + self.btn_scope_world.h                           -- scope row
                     + self.btn_place_cities.h + self.btn_build_highways.h
                     + self.btn_gen_city.h + self.btn_send_to_game.h + 150
         else
@@ -279,17 +273,7 @@ function WorldSandboxSidebarManager:_doLayout()
     local view_y3 = view_y2 + self.btn_view_suit.h + 4
     self.btn_view_regions.x   = bx;              self.btn_view_regions.y   = view_y3; self.btn_view_regions.w   = half_w
     self.btn_view_districts.x = bx + half_w + 4; self.btn_view_districts.y = view_y3; self.btn_view_districts.w = half_w
-    -- Scope buttons row 1: World | Continent | Region | City
-    local scope_y = view_y3 + self.btn_view_regions.h + 8
-    local qtr_w   = math.floor((ww - 12) / 4)
-    self.btn_scope_world.x  = bx;                 self.btn_scope_world.y  = scope_y; self.btn_scope_world.w  = qtr_w
-    self.btn_scope_cont.x   = bx + qtr_w + 4;    self.btn_scope_cont.y   = scope_y; self.btn_scope_cont.w   = qtr_w
-    self.btn_scope_region.x = bx + 2*(qtr_w+4);  self.btn_scope_region.y = scope_y; self.btn_scope_region.w = qtr_w
-    self.btn_scope_city.x   = bx + 3*(qtr_w+4);  self.btn_scope_city.y   = scope_y; self.btn_scope_city.w   = qtr_w
-    -- Scope buttons row 2: Downtown (full width, sub-scope of city)
-    local scope_y2 = scope_y + self.btn_scope_world.h + 4
-    self.btn_scope_downtown.x = bx; self.btn_scope_downtown.y = scope_y2; self.btn_scope_downtown.w = ww
-    local city_y = scope_y2 + self.btn_scope_downtown.h + 8
+    local city_y = view_y3 + self.btn_view_regions.h + 8
     self.btn_place_cities.x   = bx; self.btn_place_cities.y   = city_y;                               self.btn_place_cities.w   = ww
     self.btn_build_highways.x = bx; self.btn_build_highways.y = city_y + self.btn_place_cities.h + 4; self.btn_build_highways.w = ww
     self.btn_gen_city.x       = bx; self.btn_gen_city.y       = self.btn_build_highways.y + self.btn_build_highways.h + 8; self.btn_gen_city.w = ww
@@ -354,13 +338,6 @@ function WorldSandboxSidebarManager:draw()
                 draw_button(self.btn_view_conts,     "Continents",  self.wsc.view_mode == "continents",  game)
                 draw_button(self.btn_view_regions,    "Regions",     self.wsc.view_mode == "regions",     game)
                 draw_button(self.btn_view_districts,  "Districts",   self.wsc.view_mode == "districts",   game)
-                local sc = self.wsc.view_scope
-                local sm = self.wsc.scope_mode
-                draw_button(self.btn_scope_world,    "World",    sc == "world",                                          game)
-                draw_button(self.btn_scope_cont,     "Cont",     sc == "continent" or sm == "picking_continent",         game)
-                draw_button(self.btn_scope_region,   "Region",   sc == "region"    or sm == "picking_region",            game)
-                draw_button(self.btn_scope_city,     "City",     sc == "city"      or sm == "picking_city",              game)
-                draw_button(self.btn_scope_downtown, "Downtown", sc == "downtown",                                       game)
                 local has_suit = self.wsc.suitability_scores ~= nil
                 draw_button(self.btn_place_cities,   "Place Cities",   has_suit and self.wsc.city_locations ~= nil, game)
                 draw_button(self.btn_build_highways, "Build Highways", self.wsc.highway_map ~= nil, game)
@@ -484,26 +461,6 @@ function WorldSandboxSidebarManager:handle_mouse_down(x, y, button)
         end
         if point_in_rect(x, sy, self.btn_send_to_game) and self.wsc.city_bounds_list then
             self.wsc:sendToGame()
-            return true
-        end
-        if point_in_rect(x, sy, self.btn_scope_world) then
-            self.wsc:set_scope_world()
-            return true
-        end
-        if point_in_rect(x, sy, self.btn_scope_cont) and self.wsc.continent_map then
-            self.wsc:enter_scope_pick("picking_continent")
-            return true
-        end
-        if point_in_rect(x, sy, self.btn_scope_region) and self.wsc.region_map then
-            self.wsc:enter_scope_pick("picking_region")
-            return true
-        end
-        if point_in_rect(x, sy, self.btn_scope_city) and self.wsc.city_bounds_list then
-            self.wsc:enter_scope_pick("picking_city")
-            return true
-        end
-        if point_in_rect(x, sy, self.btn_scope_downtown) and self.wsc.selected_city_idx then
-            self.wsc:_selectDowntown()
             return true
         end
     end
