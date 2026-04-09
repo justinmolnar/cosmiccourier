@@ -395,4 +395,21 @@ function RuleTreeUtils.walkBoolTree(node, fn, path)
     end
 end
 
+-- ── Path helpers ──────────────────────────────────────────────────────────────
+
+-- Returns true if two tree paths (arrays of keys) are equal.
+function RuleTreeUtils.pathsEqual(a, b)
+    if not a or not b or #a ~= #b then return false end
+    for i = 1, #a do if a[i] ~= b[i] then return false end end
+    return true
+end
+
+-- Returns a new path with key appended.
+function RuleTreeUtils.appendPath(base, key)
+    local p = {}
+    for _, k in ipairs(base or {}) do p[#p+1] = k end
+    p[#p+1] = key
+    return p
+end
+
 return RuleTreeUtils

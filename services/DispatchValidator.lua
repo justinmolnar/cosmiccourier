@@ -311,4 +311,23 @@ function Validator.getTreeWarnings(rule, game)
     return warnings
 end
 
+-- ── Slot visibility ───────────────────────────────────────────────────────────
+
+-- Returns a table of { [slot_key] = false } for any slots that should be hidden
+-- given the node's current slot values. Keys absent from the table are visible.
+-- Currently handles cascading visibility for rep_get_property.
+function Validator.getSlotVisibility(node)
+    local hidden = {}
+    if node and node.def_id == "rep_get_property" then
+        local slots = node.slots or {}
+        if slots.source == nil then
+            hidden["property"]     = false
+            hidden["vehicle_type"] = false
+        elseif slots.source ~= "fleet" or slots.property == nil then
+            hidden["vehicle_type"] = false
+        end
+    end
+    return hidden
+end
+
 return Validator

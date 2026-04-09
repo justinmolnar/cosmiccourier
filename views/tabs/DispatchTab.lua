@@ -6,6 +6,7 @@
 local DispatchTab = {}
 
 local Validator = require("services.DispatchValidator")
+local RTU       = require("services.RuleTreeUtils")
 local TextInput = require("views.components.TextInput")
 local Dropdown  = require("views.components.Dropdown")
 
@@ -295,18 +296,9 @@ local function inlineRepW(rep_node, font)
     local def = RE.getDefById(rep_node.def_id)
     if not def then return 40 end
     local w = 8 + font:getWidth(def.label or "?") + 6
+    local vis = Validator.getSlotVisibility(rep_node)
     for _, sd in ipairs(def.slots or {}) do
-        -- ── Cascading visibility for rep_get_property ────────────────────────
-        local visible = true
-        if rep_node.def_id == "rep_get_property" then
-            if sd.key == "property" then
-                visible = (rep_node.slots and rep_node.slots.source ~= nil)
-            elseif sd.key == "vehicle_type" then
-                visible = (rep_node.slots and rep_node.slots.source == "fleet" and rep_node.slots.property ~= nil)
-            end
-        end
-
-        if visible then
+        if vis[sd.key] ~= false then
             local v = rep_node.slots and rep_node.slots[sd.key]
             local is_foc = state.slot_input
                            and state.slot_input.node == rep_node
@@ -381,18 +373,9 @@ local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rect
 
     -- Inner slot sub-pills
     local inner_x = lbl_x + font:getWidth(lbl) + 6
+    local vis2 = Validator.getSlotVisibility(rep_node)
     for _, sd in ipairs(def.slots or {}) do
-        -- ── Cascading visibility for rep_get_property ────────────────────────
-        local visible = true
-        if rep_node.def_id == "rep_get_property" then
-            if sd.key == "property" then
-                visible = (rep_node.slots and rep_node.slots.source ~= nil)
-            elseif sd.key == "vehicle_type" then
-                visible = (rep_node.slots and rep_node.slots.source == "fleet" and rep_node.slots.property ~= nil)
-            end
-        end
-
-        if visible then
+        if vis2[sd.key] ~= false then
             local v = rep_node.slots and rep_node.slots[sd.key]
             local is_foc = state.slot_input
                            and state.slot_input.node == rep_node
@@ -672,20 +655,7 @@ local drawControlNode
 local drawLoopNode
 local drawFindNode
 
--- ── Path helpers ──────────────────────────────────────────────────────────────
-
-local function pathsEqual(a, b)
-    if not a or not b or #a ~= #b then return false end
-    for i = 1, #a do if a[i] ~= b[i] then return false end end
-    return true
-end
-
-local function appendPath(base, key)
-    local p = {}
-    for _, k in ipairs(base or {}) do p[#p+1] = k end
-    p[#p+1] = key
-    return p
-end
+-- Path helpers live in RuleTreeUtils (RTU.pathsEqual, RTU.appendPath)
 
 
 -- ── drawBoolNode ──────────────────────────────────────────────────────────────
@@ -748,7 +718,7 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
         love.graphics.setLineWidth(1)
 
         local lx = x + BOOL_ANGLE
-        drawBoolNode(node.left,  lx, y, game, nrects, dtargets, appendPath(path, "left"),  warn_map, alpha)
+        drawBoolNode(node.left,  lx, y, game, nrects, dtargets, RTU.appendPath(path, "left"),  warn_map, alpha)
         
         local op_x, op_y, next_x, next_y
         if should_wrap then
@@ -766,7 +736,7 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
         love.graphics.setFont(font)
         love.graphics.setColor(1, 1, 1, alpha)
         love.graphics.printf(lbl, op_x, op_y + (BOOL_H - fh) / 2, lbl_w, "center")
-        drawBoolNode(node.right, next_x, next_y, game, nrects, dtargets, appendPath(path, "right"), warn_map, alpha)
+        drawBoolNode(node.right, next_x, next_y, game, nrects, dtargets, RTU.appendPath(path, "right"), warn_map, alpha)
 
         -- Register occupied slots as drop targets
         if dtargets and path then
@@ -807,7 +777,7 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
         local lbl_x = x + BOOL_ANGLE
         love.graphics.printf("not", lbl_x, y + (BOOL_H - fh) / 2, lbl_w, "center")
         local op_x = lbl_x + lbl_w
-        drawBoolNode(node.operand, op_x, y, game, nrects, dtargets, appendPath(path, "operand"), warn_map, alpha)
+        drawBoolNode(node.operand, op_x, y, game, nrects, dtargets, RTU.appendPath(path, "operand"), warn_map, alpha)
 
         -- Register occupied slot as drop target
         if dtargets and path then
@@ -1108,7 +1078,7 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
     -- Condition slot
     local cond_x  = x + C_INDENT + 8
     local cond_y  = y + (header_h - cond_h) / 2
-    local cond_path = appendPath(path, "condition")
+    local cond_path = RTU.appendPath(path, "condition")
 
     if node.condition then
         drawBoolNode(node.condition, cond_x, cond_y, game, nrects, dtargets, cond_path, warn_map, alpha)
@@ -1141,7 +1111,7 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
     local body_x   = x + C_INDENT
     local body_y   = y + header_h
     local body_w   = w - C_INDENT
-    local body_path = appendPath(path, "body")
+    local body_path = RTU.appendPath(path, "body")
 
     if #(node.body or {}) == 0 then
         love.graphics.setColor(0.35, 0.35, 0.50, 0.70 * alpha)
@@ -1163,7 +1133,7 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
         love.graphics.setColor(1, 1, 1, alpha * 0.80)
         love.graphics.print("else", x + 8, y + header_h + body_h + (CAP_H - fh) / 2)
 
-        local else_path = appendPath(path, "else_body")
+        local else_path = RTU.appendPath(path, "else_body")
         if #(node.else_body or {}) == 0 then
             love.graphics.setColor(0.35, 0.35, 0.50, 0.70 * alpha)
             love.graphics.printf("drop here", body_x, else_start + 10, body_w, "center")
@@ -1235,7 +1205,7 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
         love.graphics.print(lbl, x + 8, lbl_y)
         local cond_x    = x + 8 + font:getWidth(lbl) + 6
         local cond_y    = y + (header_h - cond_h) / 2
-        local cond_path = appendPath(path, "condition")
+        local cond_path = RTU.appendPath(path, "condition")
         if node.condition then
             drawBoolNode(node.condition, cond_x, cond_y, game, nrects, dtargets, cond_path, warn_map, alpha)
             if dtargets and path then
@@ -1294,7 +1264,7 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     local body_x    = x + C_INDENT
     local body_y    = y + header_h
     local body_w    = w - C_INDENT
-    local body_path = appendPath(path, "body")
+    local body_path = RTU.appendPath(path, "body")
 
     if #(node.body or {}) == 0 then
         love.graphics.setColor(0.35, 0.35, 0.50, 0.70 * alpha)
@@ -1429,7 +1399,7 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     hx = hx + font:getWidth("where") + 10
 
     -- Condition slot
-    local cond_path = path and appendPath(path, "condition") or nil
+    local cond_path = path and RTU.appendPath(path, "condition") or nil
     local cond_y    = hy + (row2_h - cond_h) / 2
     drawBoolNode(node.condition, hx, cond_y, game, nrects, dtargets, cond_path, warn_map, alpha)
 
@@ -1445,7 +1415,7 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     local body_x    = x + C_INDENT
     local body_y    = y + header_h
     local body_w    = w - C_INDENT
-    local body_path = path and appendPath(path, "body") or nil
+    local body_path = path and RTU.appendPath(path, "body") or nil
 
     if not node.body or #node.body == 0 then
         love.graphics.setColor(1, 1, 1, 0.18 * alpha)
@@ -1484,7 +1454,7 @@ drawNodeList = function(stack, x, y, w, game, nrects, dtargets, path_prefix, war
     local panel_w = game.ui_manager and game.ui_manager.panel and game.ui_manager.panel.w or 400
 
     for i, node in ipairs(stack or {}) do
-        local node_path = appendPath(path_prefix, i)
+        local node_path = RTU.appendPath(path_prefix, i)
         local nh = measureNode(node, game, panel_w)
         local nw
         if node.kind == "hat" or node.kind == "stack" then
@@ -2387,7 +2357,7 @@ function DispatchTab.drawDragGhost(panel, game)
             local targets = state.drop_targets[drag.drop_rule_i] or {}
             local t = nil
             for _, dt in ipairs(targets) do
-                if pathsEqual(dt.parent_path, drag.drop_parent_path) and dt.slot == drag.drop_slot then
+                if RTU.pathsEqual(dt.parent_path, drag.drop_parent_path) and dt.slot == drag.drop_slot then
                     t = dt; break
                 end
             end
@@ -2570,7 +2540,6 @@ end
 -- ── Cycle a slot value ────────────────────────────────────────────────────────
 
 function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
-    local RTU  = require("services.RuleTreeUtils")
     local RE   = require("services.DispatchRuleEngine")
     local rule = (game.state.dispatch_rules or {})[rule_i]
     if not rule then return end
@@ -2641,7 +2610,7 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
                 local nr_ref    = nil
                 local nr_list   = state.node_rects[rule_i] or {}
                 for _, nr in ipairs(nr_list) do
-                    if pathsEqual(nr.path, path) then
+                    if RTU.pathsEqual(nr.path, path) then
                         nr_ref = nr
                         for _, sr in ipairs(nr.slot_rects or {}) do
                             if sr.key == slot_key then slot_rect = sr; break end
