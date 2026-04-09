@@ -48,8 +48,11 @@ function State:new(C, game)
             id      = "rule_default",
             enabled = true,
             stack   = {
-                { kind = "hat",   def_id = "trigger_trip",      slots = {} },
-                { kind = "stack", def_id = "action_assign_any", slots = {} },
+                { kind = "hat",  def_id = "trigger_trip", slots = {} },
+                { kind = "find", def_id = "find_match",
+                  slots = { collection = "vehicles", sorter = "nearest" },
+                  condition = nil,
+                  body = { { kind = "stack", def_id = "block_call", slots = { action = "assign_ctx" } } } },
             },
         },
     }

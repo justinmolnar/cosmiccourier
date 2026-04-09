@@ -226,28 +226,6 @@ local function subtract_money(block, ctx)
     return false
 end
 
-local function set_counter(block, ctx)
-    local val = tonumber(evalSlot(block.slots.value, ctx)) or 0
-    setVar(ctx.game, block.slots.key or "", val)
-    return false
-end
-
-local function adjust_counter(block, ctx)
-    local key = block.slots.key or ""
-    local val = tonumber(getVar(ctx.game, key)) or 0
-    local amt = tonumber(evalSlot(block.slots.amount, ctx)) or 1
-    local op  = block.slots.op or "+="
-    if op == "-=" then
-        setVar(ctx.game, key, val - amt)
-    else
-        setVar(ctx.game, key, val + amt)
-    end
-    return false
-end
-
--- Mapping effect_counter_change to adjust_counter for consistency
-local counter_change = adjust_counter
-
 local function set_flag(block, ctx)
     setVar(ctx.game, block.slots.key or "", true)
     return false
@@ -313,13 +291,6 @@ local function shake_screen(block, ctx)
     return false
 end
 
-local function notify(block, ctx)
-    local msg = tostring(evalSlot(block.slots.message or block.slots.text, ctx))
-    local EventService = require("services.EventService")
-    EventService.publish("ui_notify", { text = msg, type = block.slots.type or "info" })
-    return false
-end
-
 -- ── Rush Hour ────────────────────────────────────────────────────────────────
 
 local function trigger_rush_hour(block, ctx)
@@ -356,111 +327,12 @@ local function set_trip_gen_rate(block, ctx)
     return false
 end
 
--- ── Actions: Standard ─────────────────────────────────────────────────────────
-
-local function assign_vehicle_type(block, ctx)
-    local want = (block.slots.vehicle_type or ""):lower()
-    for _, v in ipairs(ctx.game.entities.vehicles) do
-        if (v.type or ""):lower() == want
-           and TripEligibility.canAssign(v, ctx.trip, ctx.game) then
-            v:assignTrip(ctx.trip, ctx.game)
-            return "claimed"
-        end
-    end
-    return false
-end
-
-local function assign_any(block, ctx)
-    for _, v in ipairs(ctx.game.entities.vehicles) do
-        if TripEligibility.canAssign(v, ctx.trip, ctx.game) then
-            v:assignTrip(ctx.trip, ctx.game)
-            return "claimed"
-        end
-    end
-    return false
-end
-
-local function assign_nearest(block, ctx)
-    local want = (block.slots.vehicle_type or ""):lower()
-    local leg  = ctx.trip.legs[ctx.trip.current_leg]
-    local sx   = leg and leg.start_plot and leg.start_plot.x or 0
-    local sy   = leg and leg.start_plot and leg.start_plot.y or 0
-
-    local best_v, best_d2 = nil, math.huge
-    for _, v in ipairs(ctx.game.entities.vehicles) do
-        if (v.type or ""):lower() == want
-           and TripEligibility.canAssign(v, ctx.trip, ctx.game) then
-            local ax = v.grid_anchor and v.grid_anchor.x or 0
-            local ay = v.grid_anchor and v.grid_anchor.y or 0
-            local d2 = (ax - sx)^2 + (ay - sy)^2
-            if d2 < best_d2 then best_d2 = d2; best_v = v end
-        end
-    end
-
-    if best_v then
-        best_v:assignTrip(ctx.trip, ctx.game)
-        return "claimed"
-    end
-    return false
-end
-
 local function skip(block, ctx)
     return "skip"
 end
 
 local function cancel_trip(block, ctx)
     return "cancel"
-end
-
--- ── Actions: Smart assignment ─────────────────────────────────────────────────
-
-local function assign_fastest(block, ctx)
-    local want = (block.slots.vehicle_type or ""):lower()
-    local eligible = {}
-    for _, v in ipairs(ctx.game.entities.vehicles) do
-        if (v.type or ""):lower() == want
-           and TripEligibility.canAssign(v, ctx.trip, ctx.game) then
-            eligible[#eligible+1] = v
-        end
-    end
-    if #eligible == 0 then return false end
-    table.sort(eligible, function(a, b) return a:getSpeed() > b:getSpeed() end)
-    eligible[1]:assignTrip(ctx.trip, ctx.game)
-    return "claimed"
-end
-
-local function assign_most_capacity(block, ctx)
-    local want = (block.slots.vehicle_type or ""):lower()
-    local eligible = {}
-    for _, v in ipairs(ctx.game.entities.vehicles) do
-        if (v.type or ""):lower() == want
-           and TripEligibility.canAssign(v, ctx.trip, ctx.game) then
-            eligible[#eligible+1] = v
-        end
-    end
-    if #eligible == 0 then return false end
-    table.sort(eligible, function(a, b)
-        return a:getEffectiveCapacity(ctx.game) > b:getEffectiveCapacity(ctx.game)
-    end)
-    eligible[1]:assignTrip(ctx.trip, ctx.game)
-    return "claimed"
-end
-
-local function assign_least_recent(block, ctx)
-    local want = (block.slots.vehicle_type or ""):lower()
-    local eligible = {}
-    for _, v in ipairs(ctx.game.entities.vehicles) do
-        if (v.type or ""):lower() == want
-           and TripEligibility.canAssign(v, ctx.trip, ctx.game) then
-            eligible[#eligible+1] = v
-        end
-    end
-    if #eligible == 0 then return false end
-    table.sort(eligible, function(a, b)
-        return (a.last_trip_end_time or 0) < (b.last_trip_end_time or 0)
-    end)
-    eligible[1]:assignTrip(ctx.trip, ctx.game)
-    return "claimed"
 end
 
 -- ── Actions: Queue ───────────────────────────────────────────────────────────
@@ -687,24 +559,6 @@ end
 
 -- ── UI ───────────────────────────────────────────────────────────────────────
 
-local function show_toast(block, ctx)
-    local feed = ctx.game.info_feed
-    if not feed then return false end
-    local text  = tostring(evalSlot(block.slots.text,  ctx) or "")
-    local TOAST_COLORS = {
-        yellow = { 1.0, 0.90, 0.3  },
-        green  = { 0.3, 1.0,  0.45 },
-        blue   = { 0.6, 0.75, 1.0  },
-        red    = { 1.0, 0.4,  0.3  },
-        white  = { 1.0, 1.0,  1.0  },
-    }
-    local color = TOAST_COLORS[block.slots.color or "yellow"] or TOAST_COLORS.yellow
-    if text ~= "" then
-        feed:push({ text = text, color = color })
-    end
-    return false
-end
-
 local function show_alert(block, ctx)
     local feed = ctx.game.info_feed
     if not feed then return false end
@@ -857,12 +711,6 @@ local function depot_open(block, ctx)
     return d ~= nil and d.open == true
 end
 
-local function depot_vehicle_count(block, ctx)
-    local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
-    if not d then return false end
-    return cmp(#d.assigned_vehicles, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
-end
-
 local function open_depot(block, ctx)
     local d = ctx.game.entities.depots and ctx.game.entities.depots[1]
     if d then d.open = true end
@@ -881,19 +729,6 @@ local function rename_depot(block, ctx)
         d.name = tostring(evalSlot(block.slots.name, ctx))
     end
     return false
-end
-
--- ── Client contexts ──────────────────────────────────────────────────────────
-
-local function client_count(block, ctx)
-    local n = #(ctx.game.entities.clients or {})
-    return cmp(n, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
-end
-
-local function active_client_count(block, ctx)
-    local count = 0
-    for _, c in ipairs(ctx.game.entities.clients or {}) do if not c.paused then count = count + 1 end end
-    return cmp(count, block.slots.op or ">", evalSlot(block.slots.value, ctx) or 0)
 end
 
 -- ── Procedures ───────────────────────────────────────────────────────────────
@@ -990,9 +825,6 @@ local function bool_compare(block, ctx)
     local rv = tonumber(evalSlot(block.slots.right, ctx)) or 0
     return cmp(lv, block.slots.op or ">", rv)
 end
-
--- Mapping reporter_compare to bool_compare for consistency with older code if needed
-local reporter_compare = bool_compare
 
 local function block_call(block, ctx)
     local Actions = require("data.dispatch_actions")
@@ -1137,25 +969,16 @@ return {
 
     add_money            = add_money,
     subtract_money       = subtract_money,
-    set_counter          = set_counter,
-    adjust_counter       = adjust_counter,
-    counter_change       = counter_change,
     set_flag             = set_flag,
     clear_flag           = clear_flag,
     counter_mod          = counter_mod,
-    text_var_set         = text_var_set,
     set_text_var         = set_text_var,
-    text_var_append      = text_var_append,
     append_text_var      = append_text_var,
     text_var_eq          = text_var_eq,
     text_var_contains    = text_var_contains,
     play_sound           = play_sound,
     shake_screen         = shake_screen,
-    notify               = notify,
 
-    assign_vehicle_type  = assign_vehicle_type,
-    assign_any           = assign_any,
-    assign_nearest       = assign_nearest,
     skip                 = skip,
     cancel_trip          = cancel_trip,
 
@@ -1165,11 +988,6 @@ return {
     cancel_all_scope     = cancel_all_scope,
     cancel_all_wait      = cancel_all_wait,
 
-    -- Actions: smart assignment
-    assign_fastest       = assign_fastest,
-    assign_most_capacity = assign_most_capacity,
-    assign_least_recent  = assign_least_recent,
-
     find_match           = find_match,
 
     this_vehicle_type    = this_vehicle_type,
@@ -1178,13 +996,9 @@ return {
     fire_vehicle         = fire_vehicle,
 
     depot_open           = depot_open,
-    depot_vehicle_count  = depot_vehicle_count,
     open_depot           = open_depot,
     close_depot          = close_depot,
     rename_depot         = rename_depot,
-
-    client_count         = client_count,
-    active_client_count  = active_client_count,
 
     action_call          = action_call,
     block_call           = block_call,
@@ -1194,7 +1008,6 @@ return {
     ctrl_for_each_trip   = ctrl_for_each_trip,
 
     bool_compare         = bool_compare,
-    reporter_compare     = reporter_compare,
 
     trigger_rush_hour    = trigger_rush_hour,
     end_rush_hour        = end_rush_hour,
@@ -1222,7 +1035,6 @@ return {
     set_zoom             = set_zoom,
     stop_all_sounds      = stop_all_sounds,
     set_volume           = set_volume,
-    show_toast           = show_toast,
     show_alert           = show_alert,
     add_to_log           = add_to_log,
     action_comment       = action_comment,
