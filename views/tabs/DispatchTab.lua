@@ -9,8 +9,14 @@ local Validator      = require("services.DispatchValidator")
 local RTU            = require("services.RuleTreeUtils")
 local PaletteService = require("services.DispatchPaletteService")
 local DLS            = require("services.DispatchLayoutService")
+local RE             = require("services.DispatchRuleEngine")
 local TextInput      = require("views.components.TextInput")
 local Dropdown       = require("views.components.Dropdown")
+local PREFABS        = require("data.dispatch_prefabs")
+local PROPS          = require("data.dispatch_properties")
+local ACTIONS        = require("data.dispatch_actions")
+local COLLECTIONS    = require("data.dispatch_collections")
+local SORTERS        = require("data.dispatch_sorters")
 
 -- ── Visual constants ──────────────────────────────────────────────────────────
 
@@ -209,7 +215,6 @@ boolNodeSize = function(node, font, panel_w)  return DLS.boolNodeSize(node, mkCt
 -- Convert a slot value to its display string (handles reporter nodes).
 local function slotStr(val)
     if type(val) == "table" and val.kind == "reporter" then
-        local RE  = require("services.DispatchRuleEngine")
         local def = RE.getDefById(val.node and val.node.def_id)
         return "[" .. (def and def.label or "?") .. "]"
     end
@@ -292,7 +297,6 @@ end
 -- Returns the total width drawn.
 local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rects_out, outer_key, outer_sd_type)
     local rep_node = rep_val.node
-    local RE  = require("services.DispatchRuleEngine")
     local def = rep_node and RE.getDefById(rep_node.def_id)
     if not def then
         local pw = drawSlotPill(rep_val, x, y, block_h, font, alpha, false, outer_key)
@@ -369,7 +373,6 @@ local function drawInlineReporter(rep_val, x, y, block_h, font, alpha, slot_rect
 
     -- ── Variadic params from registry ────────────────────────────────────────
     if rep_node.def_id == "rep_get_property" and rep_node.slots.source and rep_node.slots.property then
-        local PROPS = require("data.dispatch_properties")
         local entry = nil
         for _, p in ipairs(PROPS) do
             if p.source == rep_node.slots.source and p.key == rep_node.slots.property then
@@ -485,7 +488,6 @@ drawBoolNode = function(node, x, y, game, nrects, dtargets, path, warn_map, alph
         return w
     end
 
-    local RE  = require("services.DispatchRuleEngine")
     local id  = node.def_id
     local def = RE.getDefById(id)
     local w, h = boolNodeSize(node, font, panel_w)
@@ -657,7 +659,6 @@ local function drawHatNode(node, x, y, w, game, nrects, path, alpha)
     local fh   = font:getHeight()
     alpha = alpha or 1.0
 
-    local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
     local c   = (def and def.color) or { 0.85, 0.65, 0.10 }
 
@@ -707,7 +708,6 @@ local function drawStackNode(node, x, y, w, game, nrects, path, warn_map, alpha)
     local fh   = font:getHeight()
     alpha = alpha or 1.0
 
-    local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
     local c   = (def and def.color) or { 0.28, 0.45, 0.88 }
 
@@ -746,7 +746,6 @@ local function drawStackNode(node, x, y, w, game, nrects, path, warn_map, alpha)
         
         -- ── Variadic params for block_call ──────────────────────────────────
         if node.def_id == "block_call" and node.slots.action then
-            local ACTIONS = require("data.dispatch_actions")
             local action_def = nil
             for _, a in ipairs(ACTIONS) do
                 if a.id == node.slots.action then action_def = a; break end
@@ -808,7 +807,6 @@ drawControlNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map
     local fh   = font:getHeight()
     alpha = alpha or 1.0
 
-    local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
 
     -- Fetch panel width for wrapping
@@ -955,7 +953,6 @@ drawLoopNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     local fh   = font:getHeight()
     alpha = alpha or 1.0
 
-    local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
 
     -- Fetch panel width for wrapping
@@ -1093,7 +1090,6 @@ drawFindNode = function(node, x, y, w, game, nrects, dtargets, path, warn_map, a
     local fh   = font:getHeight()
     alpha = alpha or 1.0
 
-    local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(node.def_id)
 
     -- Fetch panel width for wrapping
@@ -1401,7 +1397,7 @@ local function makeRuleCard(rule_i, rule, game, panel_w)
 
             local warn_map = {}
             if #stack > 0 then
-                local ok, w = pcall(require("services.DispatchValidator").getTreeWarnings, rule, game)
+                local ok, w = pcall(Validator.getTreeWarnings, rule, game)
                 if ok then warn_map = w end
             end
 
@@ -1540,7 +1536,6 @@ end
 -- ── Palette component ─────────────────────────────────────────────────────────
 
 local function makePalette(rule_i, panel_w)
-    local RE  = require("services.DispatchRuleEngine")
     local all = RE.getAllDefs()
     local pad = PAL_PAD
 
@@ -1564,9 +1559,8 @@ local function makePalette(rule_i, panel_w)
     local function calcPaletteH(pw)
         local font     = love.graphics.getFont()
         local filter_h = calcFilterHeaderH(font, pw, pad)
-        local all_prefabs = require("data.dispatch_prefabs")
         local prefabs  = state.palette_filter.show_prefabs
-                         and PaletteService.filter(all_prefabs, state.palette_filter) or {}
+                         and PaletteService.filter(PREFABS,state.palette_filter) or {}
         local pref_h   = calcPrefabSectionH(font, pw, prefabs)
         local groups   = PaletteService.group(PaletteService.filter(all, state.palette_filter))
         if #groups == 0 then
@@ -1712,9 +1706,8 @@ local function makePalette(rule_i, panel_w)
             state.palette_search_rect = { x=sf_x, y=sf_y, w=sf_w, h=sf_h }
 
             -- ── Prefabs section ──────────────────────────────────────────────
-            local all_prefabs = require("data.dispatch_prefabs")
             local prefabs  = filter.show_prefabs
-                             and PaletteService.filter(all_prefabs, filter) or {}
+                             and PaletteService.filter(PREFABS,filter) or {}
             local prects   = {}
             local cy       = sf_y + sf_h + PAL_GAP
 
@@ -2048,7 +2041,6 @@ function DispatchTab.updateHover(dt, mx, my, game)
             for _, r in ipairs(nrects) do
                 if content_x >= r.x and content_x <= r.x + r.w
                    and content_y >= r.y and content_y <= r.y + r.h then
-                    local RE  = require("services.DispatchRuleEngine")
                     local def = RE.getDefById(r.node.def_id)
                     local path_str = tostring(rule_i)
                     for _, k in ipairs(r.path or {}) do path_str = path_str .. "/" .. tostring(k) end
@@ -2106,7 +2098,6 @@ function DispatchTab.drawDragGhost(panel, game)
     elseif drag.type == "node" or drag.type == "palette" then
         local node = drag.node
         if not node then return end
-        local RE  = require("services.DispatchRuleEngine")
         local def = RE.getDefById(node.def_id)
         if not def then return end
         local gw = 160
@@ -2314,7 +2305,6 @@ end
 -- ── Cycle a slot value ────────────────────────────────────────────────────────
 
 function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
-    local RE   = require("services.DispatchRuleEngine")
     local rule = (game.state.dispatch_rules or {})[rule_i]
     if not rule then return end
     local node = RTU.getNodeAtPath(rule.stack, path)
@@ -2327,7 +2317,6 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
     
     -- ── Check variadic params for block_call ───────────────────────────────
     if node.def_id == "block_call" and node.slots.action then
-        local ACTIONS = require("data.dispatch_actions")
         local action_def = nil
         for _, a in ipairs(ACTIONS) do
             if a.id == node.slots.action then action_def = a; break end
@@ -2349,12 +2338,10 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
                 if sd.options == "dynamic" then
                     if def.id == "find_match" then
                         if sd.key == "collection" then
-                            local COLLECTIONS = require("data.dispatch_collections")
                             opts = {}
                             for _, c in ipairs(COLLECTIONS) do opts[#opts+1] = c.id end
                             table.sort(opts)
                         elseif sd.key == "sorter" then
-                            local SORTERS = require("data.dispatch_sorters")
                             local col_id  = node.slots.collection or "vehicles"
                             opts = {}
                             for _, s in ipairs(SORTERS) do
@@ -2364,7 +2351,6 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
                         end
                     elseif def.id == "block_call" then
                         if sd.key == "action" then
-                            local ACTIONS = require("data.dispatch_actions")
                             opts = {}
                             for _, a in ipairs(ACTIONS) do opts[#opts+1] = a.id end
                             table.sort(opts)
@@ -2438,7 +2424,6 @@ end
 
 function DispatchTab.cycleRepInnerSlot(rep_node, rep_key, rep_sd, game)
     if not rep_node or not rep_key then return end
-    local RE  = require("services.DispatchRuleEngine")
     local def = RE.getDefById(rep_node.def_id)
     if not def then return end
 
@@ -2456,7 +2441,6 @@ function DispatchTab.cycleRepInnerSlot(rep_node, rep_key, rep_sd, game)
 
         -- ── Dynamic options for rep_get_property ─────────────────────────────
         if sd.options == "dynamic" and rep_node.def_id == "rep_get_property" then
-            local PROPS = require("data.dispatch_properties")
             if sd.key == "source" then
                 local seen = {}
                 opts = {}
@@ -2498,7 +2482,6 @@ function DispatchTab.cycleRepInnerSlot(rep_node, rep_key, rep_sd, game)
             
             -- ── Cascading reset for rep_get_property ─────────────────────────────
             if rep_node.def_id == "rep_get_property" and sd.key == "source" and val ~= old_val then
-                local PROPS = require("data.dispatch_properties")
                 for _, p in ipairs(PROPS) do
                     if p.source == val then
                         rep_node.slots.property = p.key
