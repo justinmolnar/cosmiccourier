@@ -1,6 +1,8 @@
 -- views/GameView.lua
 -- Updated to render edge-based streets between grid cells
 local FloatingTextSystem = require("services.FloatingTextSystem")
+local VehicleRenderer    = require("views.VehicleRenderer")
+local MapRenderer        = require("views.MapRenderer")
 
 -- Shader: desaturate + alpha the city zone image at draw time.
 -- `saturation` 1.0 = full colour, 0.0 = greyscale.  `alpha` controls overall opacity.
@@ -424,7 +426,7 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
     love.graphics.translate(sidebar_w + game_world_w / 2 + _shake_dx, screen_h / 2 + _shake_dy)
     love.graphics.scale(Game.camera.scale, Game.camera.scale)
     love.graphics.translate(-Game.camera.x, -Game.camera.y)
-    active_map:draw()
+    MapRenderer.draw(active_map)
     -- Fog outside downtown
     if cur_scale == S.DOWNTOWN then
         local map = active_map
@@ -485,7 +487,7 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
                 end
                 love.graphics.setColor(1, 1, 1)
             else
-                for i = 1, nv do _vis_vehicles[i]:draw(Game) end
+                for i = 1, nv do VehicleRenderer.draw(_vis_vehicles[i], Game) end
             end
             for i = 1, nv do _vis_vehicles[i] = nil end
         end
@@ -556,7 +558,7 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
         for _, vehicle in ipairs(Game.entities.vehicles) do
             if vehicle.visible and vehicle.px > fb_vp_left and vehicle.px < fb_vp_right
             and vehicle.py > fb_vp_top and vehicle.py < fb_vp_bot then
-                vehicle:drawDebug(Game)
+                VehicleRenderer.drawDebug(vehicle, Game)
             end
         end
     end
@@ -873,7 +875,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                     end
                     love.graphics.setColor(1, 1, 1)
                 else
-                    for i = 1, nv do _vis_vehicles[i]:draw(Game) end
+                    for i = 1, nv do VehicleRenderer.draw(_vis_vehicles[i], Game) end
                 end
 
                 -- Clear scratch list
@@ -886,7 +888,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
             for _, vehicle in ipairs(Game.entities.vehicles) do
                 if vehicle.visible
                 and vehicle.px > vp_left and vehicle.px < vp_right and vehicle.py > vp_top and vehicle.py < vp_bot then
-                    vehicle:drawDebug(Game)
+                    VehicleRenderer.drawDebug(vehicle, Game)
                 end
             end
         end
@@ -1801,7 +1803,7 @@ function GameView:prewarm()
             _buildCityOverlayCanvas(m, Game, RS)
         end
         if not m._tile_canvas then
-            m:buildTileCanvas()
+            MapRenderer.buildTileCanvas(m)
         end
     end
 end
