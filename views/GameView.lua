@@ -66,6 +66,10 @@ local OVERLAY_VECTOR_THRESHOLD = 5.0
 -- without allocating new tables each frame.
 local _vis_vehicles = {}
 
+-- View-private render caches — do not belong on the Game global.
+local _road_alpha         = 1.0   -- current frame road overlay opacity
+local _trip_preview_cache = nil   -- cached smoothed path for trip hover preview
+
 -- Traces the unique world highway road network from the highway cell map,
 -- producing one non-overlapping set of chains.  Multiple A* paths that share
 -- terrain corridor cells collapse into a single path here, eliminating the
@@ -302,7 +306,7 @@ local function _drawCityOverlayVectors(m, Game, RS, m_ox, m_oy)
     local m_tps = m.tile_pixel_size or Game.C.MAP.TILE_SIZE
     love.graphics.push()
     love.graphics.translate(m_ox, m_oy)
-    _renderCityOverlayContent(m, Game, RS, m_tps, Game._road_alpha or 1.0)
+    _renderCityOverlayContent(m, Game, RS, m_tps, _road_alpha or 1.0)
     love.graphics.pop()
 end
 
@@ -630,7 +634,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     if Game.world_highway_map and next(Game.world_highway_map) and not Game.overlay_only_mode then
         if not Game._world_highway_smooth then
             Game._world_highway_smooth, Game._world_highway_bounds = _buildWorldHighwayPaths(Game, ts)
-            Game._trip_preview_cache   = nil
+            _trip_preview_cache   = nil
             if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
         end
         local hpaths  = Game._world_highway_smooth
@@ -662,8 +666,8 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     end
 
     -- Compute zoom-driven overlay params once for this frame
-    local _road_alpha, _zone_alpha, _zone_sat = _cityOverlayParams(cs)
-    Game._road_alpha = _road_alpha  -- stored so _drawCityOverlayVectors can read it
+    local _ra, _zone_alpha, _zone_sat = _cityOverlayParams(cs)
+    _road_alpha = _ra  -- update module-level so _drawCityOverlayVectors can read it
 
     -- LAYER: City background images (tiled, culled)
     -- Drawn after highways so the opaque image hides the in-city highway portion.
@@ -717,7 +721,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                 local m_ox = (m.world_mn_x - 1) * ts
                 local m_oy = (m.world_mn_y - 1) * ts
                 if use_vectors then
-                    -- Vectors: always crisp, road_alpha applied inside via Game._road_alpha
+                    -- Vectors: always crisp, road_alpha applied inside via _road_alpha
                     _drawCityOverlayVectors(m, Game, RS, i * mpw + m_ox, m_oy)
                 else
                     if _cityCanvasStale(m, Game) then
@@ -738,7 +742,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     -- Rebuild snap lookup if city smooth paths were newly built this frame
     if Game.maps.unified and not Game.maps.unified._snap_lookup then
         require("services.PathSmoothingService").buildSnapLookup(Game)
-        Game._trip_preview_cache = nil
+        _trip_preview_cache = nil
     end
 
     -- LAYER: City-local debug overlays (building plots, road nodes — use city translate)
@@ -901,9 +905,9 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         local htrip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
         local leg   = htrip and htrip.legs and htrip.legs[htrip.current_leg]
         if leg then
-            local cache = Game._trip_preview_cache
+            local cache = _trip_preview_cache
             if not cache or cache.trip ~= htrip then
-                Game._trip_preview_cache = nil
+                _trip_preview_cache = nil
                 -- Pick the first vehicle config matching this leg's transport mode
                 local leg_mode = leg.transport_mode or "road"
                 local vp = nil
@@ -977,11 +981,11 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                     local PathUtils = require("lib.path_utils")
                     local smoothed  = PathUtils.chaikin(pixel_path, 3)
                     if #smoothed >= 4 then
-                        Game._trip_preview_cache = {trip = htrip, pts = smoothed}
+                        _trip_preview_cache = {trip = htrip, pts = smoothed}
                     end
                 end
             end
-            local cache2 = Game._trip_preview_cache
+            local cache2 = _trip_preview_cache
             if cache2 and cache2.pts then
                 local pts = cache2.pts
                 for i = tile_i0, tile_i1 do
@@ -1766,7 +1770,7 @@ function GameView:prewarm()
     -- Highway smooth paths (pure data, no GPU)
     if not Game._world_highway_smooth and Game.world_highway_map and next(Game.world_highway_map) then
         Game._world_highway_smooth, Game._world_highway_bounds = _buildWorldHighwayPaths(Game, ts)
-        Game._trip_preview_cache   = nil
+        _trip_preview_cache   = nil
         if Game.maps.unified then Game.maps.unified._snap_lookup = nil end
     end
 
@@ -1794,7 +1798,7 @@ function GameView:prewarm()
     -- Snap lookup (pure data, depends on smooth paths above)
     if Game.maps.unified and not Game.maps.unified._snap_lookup then
         require("services.PathSmoothingService").buildSnapLookup(Game)
-        Game._trip_preview_cache = nil
+        _trip_preview_cache = nil
     end
 
     -- Overlay canvases + tile canvases (GPU — must be called from draw context)
