@@ -680,7 +680,7 @@ end
 
 local function this_vehicle_idle(block, ctx)
     if not ctx.vehicle then return false end
-    return ctx.vehicle.state == "idle" or (ctx.vehicle.state and ctx.vehicle.state.name == "Idle")
+    return ctx.vehicle.state and ctx.vehicle.state.name == "Idle"
 end
 
 local function assign_ctx(block, ctx)
@@ -852,7 +852,7 @@ end
 local function hat_all_busy(hat, ctx)
     local want = (hat.slots.vehicle_type or ""):lower()
     for _, v in ipairs(ctx.game.entities.vehicles) do
-        if (v.type or ""):lower() == want and (v.state == "idle" or (v.state and v.state.name == "Idle")) then
+        if (v.type or ""):lower() == want and (v.state and v.state.name == "Idle") then
             return false
         end
     end
@@ -865,7 +865,7 @@ local function hat_all_idle(hat, ctx)
     for _, v in ipairs(ctx.game.entities.vehicles) do
         if (v.type or ""):lower() == want then
             has_any = true
-            if not (v.state == "idle" or (v.state and v.state.name == "Idle")) then return false end
+            if not (v.state and v.state.name == "Idle") then return false end
         end
     end
     return has_any
