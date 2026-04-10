@@ -9,6 +9,7 @@ local PathCacheService = require("services.PathCacheService")
 local _TILE_NAMES = {
     [0]="grass", [1]="road", [2]="downtown_road", [3]="arterial", [4]="highway",
     [5]="water",  [6]="mountain", [7]="river", [8]="plot", [9]="downtown_plot",
+    [10]="coastal_water", [11]="deep_water", [12]="open_ocean",
 }
 
 local PathfindingService = {}

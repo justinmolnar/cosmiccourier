@@ -53,9 +53,12 @@ The flood-fill runs once at map gen time, not at runtime. Cap distance at 6+ to 
 
 ---
 
-**Status:** Not started
-**Line count change:** —
-**Deviation from plan:** —
+**Status:** Complete — awaiting user test
+**Line count change:** +68 / −4
+**Deviation from plan:**
+- Plan said "Register the three water subtypes with costs/colors so they're visible in debug tile view." Costs will come from vehicle JSON in Phase 5. Colors are registered now via three new C.MAP.COLORS entries (COASTAL_WATER, DEEP_WATER, OPEN_OCEAN) and tile_palette.json entries.
+- Initial implementation used BFS shore-distance. Replaced with direct elevation classification: `h < deep_ocean_max` → open_ocean, midpoint → deep_water, `h < ocean_max` → coastal_water. The heightmap already encodes depth; BFS was redundant.
+- Discovered a fourth inline _TILE_NAMES table in GameView.lua and a C.TILE table in constants.lua — both updated to stay in sync. The comment in constants.lua also had a stale file reference (WorldSandboxController) which was corrected to GameBridgeService.
 
 ---
 

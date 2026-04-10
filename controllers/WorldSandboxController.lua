@@ -490,11 +490,13 @@ function WorldSandboxController:sendToGame()
         self.highway_map, self.city_bounds_list,
         self.region_map, self.continent_map,
         self.city_locations, self.highway_paths,
-        w, h
+        w, h,
+        self.water_tile_types
     )
 
     -- Free all generation-time scratch data. These fields are no longer needed once
     -- the game world is built. Game and map objects hold the only live references.
+    self.water_tile_types     = nil
     self.heightmap            = nil
     self.colormap             = nil
     self.biome_colormap       = nil
@@ -542,6 +544,7 @@ function WorldSandboxController:generate()
     end)
 
     if ok then
+        self.water_tile_types     = result.water_tile_types
         self.heightmap            = result.heightmap
         self.colormap             = result.colormap
         self.moisture_map         = result.moisture_map

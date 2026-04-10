@@ -13,6 +13,7 @@ local _ffi_cdef_done = false
 local TILE_INT = {
     grass=0, road=1, downtown_road=2, arterial=3, highway=4,
     water=5, mountain=6, river=7, plot=8, downtown_plot=9,
+    coastal_water=10, deep_water=11, open_ocean=12,
 }
 
 local GameBridgeService = {}
@@ -23,7 +24,8 @@ function GameBridgeService.wire(
     highway_map, city_bounds_list,
     region_map, continent_map,
     city_locations, highway_paths,
-    world_w, world_h
+    world_w, world_h,
+    water_tile_types
 )
     local C  = game.C
     local hw = highway_map or {}
@@ -41,6 +43,21 @@ function GameBridgeService.wire(
     local uw = ww * 3
     local uh = wh * 3
     local ffi_grid = ffi.new("CosmicTile[?]", uw * uh)
+
+    -- Stamp water tile subtypes (coastal_water=10, deep_water=11, open_ocean=12).
+    -- Each world cell maps to a 3×3 sub-cell block. City and highway tiles overwrite these.
+    if water_tile_types then
+        for ci, tile_type in pairs(water_tile_types) do
+            local wx = (ci - 1) % ww + 1
+            local wy = math.floor((ci - 1) / ww) + 1
+            for dy = 0, 2 do
+                local base = ((wy - 1) * 3 + dy) * uw + (wx - 1) * 3
+                for dx = 0, 2 do
+                    ffi_grid[base + dx].type = tile_type
+                end
+            end
+        end
+    end
 
     for _, cmap in ipairs(game.maps.all_cities) do
         local ox = (cmap.world_mn_x - 1) * 3

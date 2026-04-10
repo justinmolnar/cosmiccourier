@@ -1023,6 +1023,37 @@ local function detectContinentsAndRegions(w, h, p, heightmap, pre_ridge, painted
            region_colormap, region_map, regions_list
 end
 
+-- ── Phase 5: water tile subtype classification ────────────────────────────────
+-- Classifies ocean cells by elevation — the heightmap already encodes depth,
+-- no BFS needed. Lower elevation = deeper = further from shore.
+-- Uses the two existing ocean thresholds plus their midpoint as band boundaries:
+--   coastal_water (10): upper ocean band (deep_ocean_max..ocean_max) — near shore
+--   deep_water    (11): lower-mid ocean band — moderate depth
+--   open_ocean    (12): below deep_ocean_max — furthest from shore, most expensive
+-- Painted cells (rivers/lakes) are excluded — they have their own tile types.
+local COASTAL_WATER_TYPE = 10
+local DEEP_WATER_TYPE    = 11
+local OPEN_OCEAN_TYPE    = 12
+
+local function classifyWaterTiles(w, h, pre_ridge, painted, p)
+    local mid_ocean = (p.deep_ocean_max + p.ocean_max) / 2
+    local result = {}
+    for i = 1, w * h do
+        if not painted[i] then
+            local elev = pre_ridge[i]
+            if elev < p.deep_ocean_max then
+                result[i] = OPEN_OCEAN_TYPE
+            elseif elev < mid_ocean then
+                result[i] = DEEP_WATER_TYPE
+            elseif elev < p.ocean_max then
+                result[i] = COASTAL_WATER_TYPE
+            end
+            -- elev >= ocean_max: land/beach, no water subtype
+        end
+    end
+    return result
+end
+
 -- ── Public entry point ────────────────────────────────────────────────────────
 function WorldNoiseService.generate(w, h, p)
     local heightmap, colormap, pre_ridge, moisture_map =
@@ -1037,6 +1068,8 @@ function WorldNoiseService.generate(w, h, p)
     local continent_colormap, continent_map, continents,
           region_colormap, region_map, regions_list =
         detectContinentsAndRegions(w, h, p, heightmap, pre_ridge, painted)
+
+    local water_tile_types = classifyWaterTiles(w, h, pre_ridge, painted, p)
 
     return {
         heightmap            = heightmap,
@@ -1053,6 +1086,7 @@ function WorldNoiseService.generate(w, h, p)
         region_map           = region_map,
         regions_list         = regions_list,
         river_paths          = river_paths,
+        water_tile_types     = water_tile_types,
     }
 end
 

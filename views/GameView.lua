@@ -1023,7 +1023,8 @@ function GameView:_drawDeliveryDebug(umap, uts, tile_i0, tile_i1, mpw, cs)
     local fgw    = umap._w or 0
     local fgh    = umap._h or 0
     local _TNAMES= {[0]="grass",[1]="road",[2]="downtown_road",[3]="arterial",[4]="highway",
-                    [5]="water",[6]="mountain",[7]="river",[8]="plot",[9]="downtown_plot"}
+                    [5]="water",[6]="mountain",[7]="river",[8]="plot",[9]="downtown_plot",
+                    [10]="coastal_water",[11]="deep_water",[12]="open_ocean"}
 
     local function ttype(gx, gy)
         if fgi and gx >= 1 and gx <= fgw and gy >= 1 and gy <= fgh then

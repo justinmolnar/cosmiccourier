@@ -6,5 +6,8 @@
   "grass":         {"downtown": "DOWNTOWN_PLOT",  "city": "GRASS"},
   "water":         {"downtown": "DOWNTOWN_PLOT",  "city": "WATER"},
   "mountain":      {"downtown": "DOWNTOWN_PLOT",  "city": "MOUNTAIN"},
+  "coastal_water": {"downtown": "DOWNTOWN_PLOT",  "city": "COASTAL_WATER"},
+  "deep_water":    {"downtown": "DOWNTOWN_PLOT",  "city": "DEEP_WATER"},
+  "open_ocean":    {"downtown": "DOWNTOWN_PLOT",  "city": "OPEN_OCEAN"},
   "default":       {"downtown": "DOWNTOWN_PLOT",  "city": "PLOT"}
 }

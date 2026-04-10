@@ -46,6 +46,9 @@ local C = {
         DOWNTOWN_PLOT   = {0.85, 0.85, 0.8},
         DOWNTOWN_ROAD   = {0.3, 0.3, 0.35},
         WATER           = {0.2, 0.3, 0.8},
+        COASTAL_WATER   = {0.28, 0.48, 0.88},
+        DEEP_WATER      = {0.12, 0.22, 0.65},
+        OPEN_OCEAN      = {0.05, 0.10, 0.42},
         MOUNTAIN        = {0.5, 0.45, 0.4},
         DEBUG_NODE      = {0, 1, 0},
     },
@@ -189,19 +192,22 @@ local C = {
     },
 
     -- Integer tile type constants for the FFI unified grid.
-    -- Must match the TILE_INT table in WorldSandboxController and
-    -- the _TILE_NAMES table in PathfindingService.
+    -- Must match the TILE_INT table in GameBridgeService and
+    -- the _TILE_NAMES tables in PathfindingService, lib/pathfinder, and GameView.
     TILE = {
-        GRASS        = 0,
-        ROAD         = 1,
-        DOWNTOWN_ROAD= 2,
-        ARTERIAL     = 3,
-        HIGHWAY      = 4,
-        WATER        = 5,
-        MOUNTAIN     = 6,
-        RIVER        = 7,
-        PLOT         = 8,
-        DOWNTOWN_PLOT= 9,
+        GRASS         = 0,
+        ROAD          = 1,
+        DOWNTOWN_ROAD = 2,
+        ARTERIAL      = 3,
+        HIGHWAY       = 4,
+        WATER         = 5,
+        MOUNTAIN      = 6,
+        RIVER         = 7,
+        PLOT          = 8,
+        DOWNTOWN_PLOT = 9,
+        COASTAL_WATER = 10,
+        DEEP_WATER    = 11,
+        OPEN_OCEAN    = 12,
     },
 }
 
