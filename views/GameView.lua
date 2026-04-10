@@ -1660,15 +1660,17 @@ function GameView:_drawF3Overlay()
 
     local n_cities = 0
     local n_att_nodes = 0
-    if Game.hw_attachment_nodes then
-        for _, nodes in pairs(Game.hw_attachment_nodes) do
+    local road_hubs = Game.trunk_hubs and Game.trunk_hubs["road"]
+    if road_hubs then
+        for _, nodes in pairs(road_hubs) do
             n_cities = n_cities + 1
             n_att_nodes = n_att_nodes + #nodes
         end
     end
     local n_city_edges = 0
-    if Game.hw_city_edges then
-        for ca, row in pairs(Game.hw_city_edges) do
+    local road_trunks = Game.trunks and Game.trunks["road"]
+    if road_trunks then
+        for _, row in pairs(road_trunks) do
             for _ in pairs(row) do n_city_edges = n_city_edges + 1 end
         end
         n_city_edges = n_city_edges / 2  -- each edge stored in both directions

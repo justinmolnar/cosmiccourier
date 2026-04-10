@@ -29,8 +29,8 @@ local function _push_front(node)
     _head.next = node
 end
 
-function PathCacheService.get(sx, sy, ex, ey)
-    local key = sx .. "," .. sy .. ">" .. ex .. "," .. ey
+function PathCacheService.get(mode, sx, sy, ex, ey)
+    local key = mode .. ":" .. sx .. "," .. sy .. ">" .. ex .. "," .. ey
     local node = _map[key]
     if not node then return nil end
     -- Move to front (most recently used)
@@ -39,8 +39,8 @@ function PathCacheService.get(sx, sy, ex, ey)
     return node.path
 end
 
-function PathCacheService.put(sx, sy, ex, ey, path)
-    local key = sx .. "," .. sy .. ">" .. ex .. "," .. ey
+function PathCacheService.put(mode, sx, sy, ex, ey, path)
+    local key = mode .. ":" .. sx .. "," .. sy .. ">" .. ex .. "," .. ey
     if _map[key] then
         -- Update existing entry and move to front
         local node = _map[key]

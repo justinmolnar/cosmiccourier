@@ -92,9 +92,11 @@ This phase is a pure rename. If anything breaks it is a wiring error, not a logi
 
 ---
 
-**Status:** Not started
-**Line count change:** —
-**Deviation from plan:** —
+**Status:** Complete — awaiting user test
+**Line count change:** +14 / −10
+**Deviation from plan:**
+- `mode` variable introduced as a local at the top of the HPA* block in PathfindingService, assigned from `vehicle.transport_mode or "road"`. Used for both trunk lookup and all PathCacheService calls, avoiding repetition.
+- GameView debug overlay used a hardcoded `ca` variable name in the edges loop that was unused; replaced with `_` in the rename.
 
 ---
 

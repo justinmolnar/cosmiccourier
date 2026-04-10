@@ -174,8 +174,12 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
                                       or _cityOf(start_node.x, start_node.y, game)) or nil
     local end_city    = can_highway and _cityOf(end_plot.x, end_plot.y, game) or nil
 
-    if start_city and end_city and start_city ~= end_city and game.hw_city_edges then
-        local hops = _planCityRoute(start_city, end_city, game.hw_city_edges)
+    local mode         = vehicle.transport_mode or "road"
+    local mode_trunks  = game.trunks and game.trunks[mode]
+    local mode_bounds  = game.trunk_sc_bounds and game.trunk_sc_bounds[mode]
+
+    if start_city and end_city and start_city ~= end_city and mode_trunks then
+        local hops = _planCityRoute(start_city, end_city, mode_trunks)
 
         if hops and #hops > 0 then
             local full = {}
@@ -198,7 +202,7 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
             -- Tier 1: local out — snapped start → first attachment node.
             -- Bounded to the start city's sub-cell area to avoid exploring the full grid.
             local first_att = hops[1].edge.from
-            local bounds1 = game.hw_city_sc_bounds and game.hw_city_sc_bounds[start_city]
+            local bounds1 = mode_bounds and mode_bounds[start_city]
             local function tier1_cost(x, y)
                 if bounds1 and (x < bounds1.x1 or x > bounds1.x2
                              or y < bounds1.y1 or y > bounds1.y2) then
@@ -216,22 +220,22 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
                 local att_in  = hop.edge.to
 
                 -- Tier 2: trunk (cached highway segment, vehicle-agnostic cost).
-                local trunk = PathCacheService.get(att_out.ux, att_out.uy, att_in.ux, att_in.uy)
+                local trunk = PathCacheService.get(mode, att_out.ux, att_out.uy, att_in.ux, att_in.uy)
                 if not trunk then
                     trunk = game.pathfinder.findPath({},
                         {x=att_out.ux,y=att_out.uy}, {x=att_in.ux,y=att_in.uy}, trunk_cost, trunk_proxy)
-                    if trunk then PathCacheService.put(att_out.ux, att_out.uy, att_in.ux, att_in.uy, trunk) end
+                    if trunk then PathCacheService.put(mode, att_out.ux, att_out.uy, att_in.ux, att_in.uy, trunk) end
                 end
                 if trunk then for _, n in ipairs(trunk) do full[#full+1] = n end end
 
                 -- Tier 3: intra-city transit when more hops follow (also trunk cost).
                 if hi < #hops then
                     local next_att_out = hops[hi+1].edge.from
-                    local transit = PathCacheService.get(att_in.ux, att_in.uy, next_att_out.ux, next_att_out.uy)
+                    local transit = PathCacheService.get(mode, att_in.ux, att_in.uy, next_att_out.ux, next_att_out.uy)
                     if not transit then
                         transit = game.pathfinder.findPath({},
                             {x=att_in.ux,y=att_in.uy}, {x=next_att_out.ux,y=next_att_out.uy}, trunk_cost, trunk_proxy)
-                        if transit then PathCacheService.put(att_in.ux, att_in.uy, next_att_out.ux, next_att_out.uy, transit) end
+                        if transit then PathCacheService.put(mode, att_in.ux, att_in.uy, next_att_out.ux, next_att_out.uy, transit) end
                     end
                     if transit then for _, n in ipairs(transit) do full[#full+1] = n end end
                 end
@@ -240,11 +244,11 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
             -- Tier 4: local in — final attachment node → destination.
             -- Bounded to the end city's sub-cell area to avoid exploring the full grid.
             local last_in = hops[#hops].edge.to
-            local local_in = PathCacheService.get(last_in.ux, last_in.uy, end_plot.x, end_plot.y)
+            local local_in = PathCacheService.get(mode, last_in.ux, last_in.uy, end_plot.x, end_plot.y)
             if not local_in then
                 local end_node = end_candidates[1]
                 if end_node then
-                    local bounds4 = game.hw_city_sc_bounds and game.hw_city_sc_bounds[end_city]
+                    local bounds4 = mode_bounds and mode_bounds[end_city]
                     local function tier4_cost(x, y)
                         if bounds4 and (x < bounds4.x1 or x > bounds4.x2
                                      or y < bounds4.y1 or y > bounds4.y2) then
@@ -254,7 +258,7 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
                     end
                     local_in = game.pathfinder.findPath(path_grid or {},
                         {x=last_in.ux,y=last_in.uy}, end_node, tier4_cost, sandbox_proxy)
-                    if local_in then PathCacheService.put(last_in.ux, last_in.uy, end_plot.x, end_plot.y, local_in) end
+                    if local_in then PathCacheService.put(mode, last_in.ux, last_in.uy, end_plot.x, end_plot.y, local_in) end
                 end
             end
             if local_in then for _, n in ipairs(local_in) do full[#full+1] = n end end
@@ -269,7 +273,7 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     -- ── End HPA* ─────────────────────────────────────────────────────────────
 
     -- Cache lookup: key on snapped start + original end_plot
-    local cached = PathCacheService.get(start_sub.x, start_sub.y, end_plot.x, end_plot.y)
+    local cached = PathCacheService.get(mode, start_sub.x, start_sub.y, end_plot.x, end_plot.y)
     if cached then return cached end
 
     local best_path = nil
@@ -286,7 +290,7 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     end
 
     if #best_path > 0 then table.remove(best_path, 1) end
-    PathCacheService.put(start_sub.x, start_sub.y, end_plot.x, end_plot.y, best_path)
+    PathCacheService.put(mode, start_sub.x, start_sub.y, end_plot.x, end_plot.y, best_path)
     return best_path
 end
 

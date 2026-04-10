@@ -191,7 +191,7 @@ function GameBridgeService.wire(
             end
         end
     end
-    game.hw_attachment_nodes = attachment_nodes
+    game.trunk_hubs = { road = attachment_nodes }
 
     -- ── City edges via highway connected-component analysis ───────────────────
     local hw_comp = {}; local n_comp = 0
@@ -250,7 +250,7 @@ function GameBridgeService.wire(
             end
         end
     end
-    game.hw_city_edges = city_edges
+    game.trunks = { road = city_edges }
 
     -- ── City sub-cell bounding boxes ──────────────────────────────────────────
     local MARGIN        = 6
@@ -273,7 +273,7 @@ function GameBridgeService.wire(
             }
         end
     end
-    game.hw_city_sc_bounds = city_sc_bounds
+    game.trunk_sc_bounds = { road = city_sc_bounds }
 
     -- ── Vehicle / depot reset ─────────────────────────────────────────────────
     local States          = require("models.vehicles.vehicle_states")

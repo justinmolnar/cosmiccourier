@@ -383,8 +383,8 @@ end
 
 -- ── HPA* rebuild ─────────────────────────────────────────────────────────────
 
--- Rebuilds game.hw_attachment_nodes and game.hw_city_edges from current
--- world_highway_map and city map bounds. Mirrors WorldSandboxController:1494-1595.
+-- Rebuilds game.trunk_hubs["road"] and game.trunks["road"] from current
+-- world_highway_map and city map bounds. Mirrors GameBridgeService.wire().
 function InfrastructureService.rebuildHPAHierarchy(game)
     local ww = game.world_w or 1
     local wh = game.world_h or 1
@@ -432,7 +432,8 @@ function InfrastructureService.rebuildHPAHierarchy(game)
             end
         end
     end
-    game.hw_attachment_nodes = attachment_nodes
+    if not game.trunk_hubs then game.trunk_hubs = {} end
+    game.trunk_hubs["road"] = attachment_nodes
 
     -- Connected-component analysis on highway cells
     local hw_comp = {}
@@ -495,7 +496,8 @@ function InfrastructureService.rebuildHPAHierarchy(game)
             end
         end
     end
-    game.hw_city_edges = city_edges
+    if not game.trunks then game.trunks = {} end
+    game.trunks["road"] = city_edges
 end
 
 return InfrastructureService
