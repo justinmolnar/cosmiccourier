@@ -28,7 +28,13 @@
       "Bash(ls views/*.lua)",
       "Bash(grep -n \"C\\\\.VEHICLES\\\\|transport_mode\\\\|base_capacity\" \"C:\\\\Users\\\\chate\\\\Documents\\\\cosmic courier\\\\data\\\\GameplayConfig.lua\" \"C:\\\\Users\\\\chate\\\\Documents\\\\cosmic courier\"/**/*.lua)",
       "Bash(grep -n \"game\\\\.entities\\\\s*=\" \"C:\\\\Users\\\\chate\\\\Documents\\\\cosmic courier\"/**/*.lua)",
-      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(z['id'], 'can_send='+str\\(z.get\\('can_send',False\\)\\), 'can_receive='+str\\(z.get\\('can_receive',False\\)\\)\\) for z in data]\")"
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(z['id'], 'can_send='+str\\(z.get\\('can_send',False\\)\\), 'can_receive='+str\\(z.get\\('can_receive',False\\)\\)\\) for z in data]\")",
+      "Bash(grep -E \"\\\\.\\(lua|json\\)$\")",
+      "Bash(python3 -)",
+      "Bash(python -)",
+      "Bash(python -c ':*)",
+      "Bash(grep -n \"return claimed, pois\\\\|return owner, colors\\\\|return art_map\\\\|return {v=sv\" controllers/WorldSandboxController.lua)",
+      "Bash(grep:*)"
     ]
   }
 }
