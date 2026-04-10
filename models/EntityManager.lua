@@ -70,8 +70,31 @@ end
 function Entities:addVehicle(game, vehicleType, target_depot)
     local VehicleFactory = require("models.VehicleFactory")
     if not VehicleFactory.isValidVehicleType(vehicleType, game) then return end
-    
-    local depot = target_depot or self.depots[1]
+
+    local vcfg_v = game.C.VEHICLES[vehicleType:upper()]
+    local depot
+
+    if vcfg_v and vcfg_v.transport_mode == "water" then
+        -- Water-mode vehicles spawn at a dock hub, not a road depot.
+        local water_hubs = game.trunk_hubs and game.trunk_hubs["water"]
+        local dock_plot
+        if water_hubs then
+            for _, hubs in pairs(water_hubs) do
+                if hubs and #hubs > 0 then
+                    dock_plot = {x = hubs[1].ux, y = hubs[1].uy}
+                    break
+                end
+            end
+        end
+        if not dock_plot then
+            print("Cannot hire " .. vehicleType .. ": no dock placed yet.")
+            return
+        end
+        depot = { plot = dock_plot, assigned_vehicles = {}, id = "dock_spawn" }
+    else
+        depot = target_depot or self.depots[1]
+    end
+
     if not depot then return end
     
     local new_id = #self.vehicles + 1

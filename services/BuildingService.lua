@@ -169,10 +169,12 @@ function BuildingService.place(building_cfg, gx, gy, city_idx, game)
     if not game.buildings then game.buildings = {} end
     if not game.buildings[city_idx] then game.buildings[city_idx] = {} end
     table.insert(game.buildings[city_idx], {
-        cfg  = building_cfg,
-        x    = gx,
-        y    = gy,
-        city = city_idx,
+        cfg      = building_cfg,
+        x        = gx,
+        y        = gy,
+        city     = city_idx,
+        cargo    = {},
+        capacity = building_cfg.capacity,
     })
 
     -- Register as trunk hub for this mode.
@@ -206,6 +208,94 @@ function BuildingService.getHubsForMode(mode, game)
         end
     end
     return result
+end
+
+-- ── Building iteration ────────────────────────────────────────────────────────
+
+-- Single source of truth for "all buildings in the game." Every function that
+-- needs to scan buildings calls this, so adding a new building storage location
+-- requires only one update here.
+-- Each building has at minimum: cargo (table), capacity (number),
+-- and a position (either .plot.x/.plot.y for depots/clients, or .x/.y for placed).
+function BuildingService.allBuildings(game)
+    local result = {}
+    for _, d in ipairs(game.entities and game.entities.depots or {}) do
+        result[#result+1] = d
+    end
+    for _, c in ipairs(game.entities and game.entities.clients or {}) do
+        result[#result+1] = c
+    end
+    for _, city_buildings in pairs(game.buildings or {}) do
+        for _, b in ipairs(city_buildings) do
+            result[#result+1] = b
+        end
+    end
+    return result
+end
+
+-- Normalised position for any building type.
+local function _buildingPos(b)
+    if b.plot then return b.plot.x, b.plot.y end
+    return b.x, b.y
+end
+
+-- ── Cargo helpers ─────────────────────────────────────────────────────────────
+
+-- Returns the building at unified sub-cell (gx, gy), or nil.
+function BuildingService.findAtPlot(gx, gy, game)
+    for _, b in ipairs(BuildingService.allBuildings(game)) do
+        local bx, by = _buildingPos(b)
+        if bx == gx and by == gy then return b end
+    end
+    return nil
+end
+
+-- Deposit a trip into a building's cargo. Freezes the trip (timer keeps ticking
+-- via the freeze/thaw elapsed-time mechanism). Returns true on success.
+-- `game` is optional — when provided, publishes a "trip_deposited" event.
+function BuildingService.depositTrip(building, trip, game)
+    if not building.cargo then building.cargo = {} end
+    local cap = building.capacity
+    if cap and #building.cargo >= cap then return false end
+    -- Update the trip's pickup to this building so the next vehicle knows where
+    -- to collect it from (not the original client position).
+    local bx, by = _buildingPos(building)
+    local leg = trip.legs and trip.legs[trip.current_leg]
+    if leg then
+        leg.start_plot = { x = bx, y = by }
+    end
+
+    trip:freeze()
+    table.insert(building.cargo, trip)
+    if game then
+        local RE = require("services.DispatchRuleEngine")
+        RE.fireEvent(game.state and game.state.dispatch_rules or {}, "trip_deposited",
+            { building = building, trip = trip, game = game })
+    end
+    return true
+end
+
+-- Withdraw a specific trip from a building's cargo. Thaws the trip (calculates
+-- elapsed decay). Returns true if found and removed.
+function BuildingService.withdrawTrip(building, trip)
+    if not building.cargo then return false end
+    for i, t in ipairs(building.cargo) do
+        if t == trip then
+            table.remove(building.cargo, i)
+            trip:thaw()
+            return true
+        end
+    end
+    return false
+end
+
+-- Search all buildings for a trip and withdraw it. Used by dispatch when the
+-- caller doesn't know which building holds the trip.
+function BuildingService.withdrawTripFromAny(trip, game)
+    for _, b in ipairs(BuildingService.allBuildings(game)) do
+        if BuildingService.withdrawTrip(b, trip) then return true end
+    end
+    return false
 end
 
 return BuildingService

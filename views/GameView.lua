@@ -818,7 +818,18 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                 for _, b in ipairs(city_buildings) do
                     local icon = b.cfg and b.cfg.icon
                     if icon then
-                        DrawingUtils.drawWorldIcon(Game, icon, (b.x - 0.5) * uts, (b.y - 0.5) * uts)
+                        local bpx = (b.x - 0.5) * uts
+                        local bpy = (b.y - 0.5) * uts
+                        DrawingUtils.drawWorldIcon(Game, icon, bpx, bpy)
+                        local nc = b.cargo and #b.cargo or 0
+                        if nc > 0 then
+                            local f = Game.fonts and Game.fonts.ui_small
+                            if f then
+                                love.graphics.setFont(f)
+                                love.graphics.setColor(1, 1, 1, 1)
+                                love.graphics.print(tostring(nc), bpx + 6 / cs, bpy - 8 / cs)
+                            end
+                        end
                     end
                 end
             end

@@ -756,8 +756,11 @@ local function drawStackNode(node, x, y, w, game, nrects, path, warn_map, alpha)
                     local psd    = action_def.params[i]
                     local val    = node.slots[psd.key] or psd.default or ""
                     local has_rep = type(val) == "table" and val.kind == "reporter"
-                    local is_foc = not has_rep
-                                     and (psd.type == "number" or psd.type == "string" or psd.type == "text_var_enum" or psd.type == "reporter")
+                    -- Reporter-only slots show a placeholder when empty, not an editable field.
+                    local is_reporter_only = (psd.type == "reporter") and not has_rep
+                    if is_reporter_only then val = "<" .. psd.key .. ">" end
+                    local is_foc = not has_rep and not is_reporter_only
+                                     and (psd.type == "number" or psd.type == "string" or psd.type == "text_var_enum")
                                      and state.slot_input
                                      and state.slot_input.node == node
                                      and state.slot_input.slot_key == psd.key

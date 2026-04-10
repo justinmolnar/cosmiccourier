@@ -692,6 +692,31 @@ local function assign_ctx(block, ctx)
     return false
 end
 
+local function set_leg_destination(block, ctx)
+    if not ctx.trip then return false end
+    local leg = ctx.trip.legs[ctx.trip.current_leg]
+    if not leg then return false end
+    local pos = evalSlot(block.slots.pos, ctx)
+    if type(pos) == "table" and pos.x and pos.y then
+        -- Preserve the original final destination so DoDropoff knows when
+        -- to pay out vs. deposit at an intermediate building.
+        if not ctx.trip.final_destination then
+            ctx.trip.final_destination = { x = leg.end_plot.x, y = leg.end_plot.y }
+        end
+        leg.end_plot = { x = pos.x, y = pos.y }
+    end
+    return false
+end
+
+local function assign_from_building(block, ctx)
+    if not ctx.vehicle or not ctx.trip then return false end
+    if not TripEligibility.canAssign(ctx.vehicle, ctx.trip, ctx.game) then return false end
+    local BS = require("services.BuildingService")
+    if not BS.withdrawTripFromAny(ctx.trip, ctx.game) then return false end
+    ctx.vehicle:assignTrip(ctx.trip, ctx.game)
+    return "claimed"
+end
+
 local function fire_vehicle(block, ctx)
     if not ctx.vehicle then return false end
     ctx.game.entities:removeVehicle(ctx.vehicle, ctx.game)
@@ -987,6 +1012,8 @@ return {
     this_vehicle_type    = this_vehicle_type,
     this_vehicle_idle    = this_vehicle_idle,
     assign_ctx           = assign_ctx,
+    set_leg_destination  = set_leg_destination,
+    assign_from_building = assign_from_building,
     fire_vehicle         = fire_vehicle,
 
     depot_open           = depot_open,

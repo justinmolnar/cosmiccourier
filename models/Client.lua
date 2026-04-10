@@ -20,6 +20,10 @@ function Client:new(plot, game, city_map)
     instance.freq_mult       = 1.0    -- multiplies the inter-trip interval (>1 = less frequent)
     instance.trips_generated = 0
     instance.earnings        = 0
+
+    local bcfg = game.C.BUILDINGS and game.C.BUILDINGS["client"]
+    instance.capacity        = bcfg and bcfg.capacity or 5
+    instance.cargo           = {}
     return instance
 end
 

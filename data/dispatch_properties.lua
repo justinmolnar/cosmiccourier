@@ -94,4 +94,67 @@ return {
           for _, c in ipairs(ctx.game.entities.clients or {}) do if not c.paused then n = n + 1 end end
           return n
       end },
+
+    -- ── source: building ─────────────────────────────────────────────────────
+    { source="building", key="nearest_pos", type="table",
+      params = { { key="building_type", type="enum", options={"dock","depot","client"} } },
+      read = function(ctx, slots)
+          if not ctx.trip then return nil end
+          local leg = ctx.trip.legs[ctx.trip.current_leg or 1]
+          local sp  = leg and leg.start_plot
+          if not sp then return nil end
+          local BS    = require("services.BuildingService")
+          local btype = (slots.building_type or ""):lower()
+          local best, best_d2 = nil, math.huge
+          for _, b in ipairs(BS.allBuildings(ctx.game)) do
+              local bid = b.cfg and b.cfg.id or b.id or ""
+              if bid:lower() == btype then
+                  local bx = b.plot and b.plot.x or b.x
+                  local by = b.plot and b.plot.y or b.y
+                  local d2 = (bx - sp.x)^2 + (by - sp.y)^2
+                  if d2 < best_d2 then best_d2 = d2; best = {x = bx, y = by} end
+              end
+          end
+          return best
+      end },
+
+    { source="building", key="nearest_to_dest_pos", type="table",
+      params = { { key="building_type", type="enum", options={"dock","depot","client"} } },
+      read = function(ctx, slots)
+          if not ctx.trip then return nil end
+          -- Use the original final destination if the trip has been rerouted,
+          -- otherwise use the current leg's end_plot.
+          local ep = ctx.trip.final_destination
+          if not ep then
+              local leg = ctx.trip.legs[ctx.trip.current_leg or 1]
+              ep = leg and leg.end_plot
+          end
+          if not ep then return nil end
+          local BS    = require("services.BuildingService")
+          local btype = (slots.building_type or ""):lower()
+          local best, best_d2 = nil, math.huge
+          for _, b in ipairs(BS.allBuildings(ctx.game)) do
+              local bid = b.cfg and b.cfg.id or b.id or ""
+              if bid:lower() == btype then
+                  local bx = b.plot and b.plot.x or b.x
+                  local by = b.plot and b.plot.y or b.y
+                  local d2 = (bx - ep.x)^2 + (by - ep.y)^2
+                  if d2 < best_d2 then best_d2 = d2; best = {x = bx, y = by} end
+              end
+          end
+          return best
+      end },
+
+    { source="building", key="cargo_count", type="number",
+      params = { { key="building_type", type="enum", options={"dock","depot","client"} } },
+      read = function(ctx, slots)
+          local BS    = require("services.BuildingService")
+          local btype = (slots.building_type or ""):lower()
+          local total = 0
+          for _, b in ipairs(BS.allBuildings(ctx.game)) do
+              local bid = b.cfg and b.cfg.id or b.id or ""
+              if bid:lower() == btype then total = total + #(b.cargo or {}) end
+          end
+          return total
+      end },
 }

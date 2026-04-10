@@ -6,5 +6,6 @@
   "is_transfer_hub": true,
   "placement_rule": "adjacent_to_water",
   "build_cost": 800,
+  "capacity": 20,
   "trunk_turn_costs": { "turn_90": 8, "turn_180": 999 }
 }

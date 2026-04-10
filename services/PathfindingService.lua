@@ -74,7 +74,10 @@ local function _snapToNearestTraversable(plot, map, path_grid, grid_w, grid_h, v
     local function isTraversable(cx, cy)
         if not inBounds(cx, cy) then return false end
         local t = getTileType(cx, cy)
-        if map:isRoad(t) and vehicle:getMovementCostFor(t) < IMPASSABLE then return true end
+        -- Accept any tile the vehicle can actually traverse (covers water-mode vehicles too).
+        if vehicle:getMovementCostFor(t) < IMPASSABLE then return true end
+        -- Street-edge adjacency: zone_seg cells are traversable for road vehicles even
+        -- when their tile type is plot/downtown_plot.
         if vehicle:getMovementCostFor("road") < IMPASSABLE then
             if (zsv and zsv[cy] and (zsv[cy][cx] or zsv[cy][cx-1]))
             or (zsh and zsh[cy]   and zsh[cy][cx])
@@ -272,20 +275,38 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     end
     -- ── End HPA* ─────────────────────────────────────────────────────────────
 
-    -- Cache lookup: key on snapped start + original end_plot
+    -- Cache lookup: key on snapped start + end_plot, then try end_candidates
     local cached = PathCacheService.get(mode, start_sub.x, start_sub.y, end_plot.x, end_plot.y)
     if cached then return cached end
+    for _, ec in ipairs(end_candidates) do
+        cached = PathCacheService.get(mode, start_sub.x, start_sub.y, ec.x, ec.y)
+        if cached then return cached end
+    end
+
+    -- For non-road vehicles (ships etc.), the standard A* uses getNeighbors which
+    -- only returns road-connected cells. Pass zero turn_costs to trigger raw
+    -- 4-directional grid expansion gated by the cost function.
+    local turn_costs_arg = nil
+    if mode ~= "road" then
+        turn_costs_arg = { turn_90 = 0, turn_180 = 0 }
+    end
 
     local best_path = nil
     for _, end_node in ipairs(end_candidates) do
         if end_node.x == start_sub.x and end_node.y == start_sub.y then return {} end
-        local path = game.pathfinder.findPath(path_grid or {}, start_sub, end_node, get_cost, sandbox_proxy)
+        local path = game.pathfinder.findPath(path_grid or {}, start_sub, end_node, get_cost, sandbox_proxy, turn_costs_arg)
         if path and (not best_path or #path < #best_path) then best_path = path end
     end
 
     if not best_path then
-        print(string.format("ERROR: PathfindingService - No path found for %s %d. start_sub=(%d,%d) end_candidates=%d grid=%dx%d",
-            vehicle.type, vehicle.id, start_sub.x, start_sub.y, #end_candidates, grid_w, grid_h))
+        -- Rate-limit pathfinding error spam (once per vehicle per 5 seconds).
+        local now = love.timer.getTime()
+        local lk  = "_pf_err_" .. vehicle.id
+        if not vehicle[lk] or now - vehicle[lk] > 5 then
+            vehicle[lk] = now
+            print(string.format("ERROR: PathfindingService - No path found for %s %d. start_sub=(%d,%d) end=(%d,%d) end_candidates=%d mode=%s grid=%dx%d",
+                vehicle.type, vehicle.id, start_sub.x, start_sub.y, end_plot.x, end_plot.y, #end_candidates, mode, grid_w, grid_h))
+        end
         return nil
     end
 

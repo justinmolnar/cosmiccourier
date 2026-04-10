@@ -44,15 +44,45 @@ function State:new(C, game)
     -- Default fallback rule: assign any eligible vehicle to any pending trip.
     -- Sits at the bottom of the list; player rules inserted at index 1 take priority.
     instance.dispatch_rules = {
+        -- Rule 1: pending trips → set destination to nearest dock → assign truck
         {
             id      = "rule_default",
             enabled = true,
             stack   = {
                 { kind = "hat",  def_id = "trigger_trip", slots = {} },
+                { kind = "stack", def_id = "block_call", slots = {
+                    action = "set_leg_destination",
+                    pos = { kind = "reporter", node = {
+                        def_id = "rep_get_property",
+                        slots = { source = "building", property = "nearest_pos", building_type = "dock" },
+                    }},
+                }},
                 { kind = "find", def_id = "find_match",
                   slots = { collection = "vehicles", sorter = "nearest" },
                   condition = nil,
                   body = { { kind = "stack", def_id = "block_call", slots = { action = "assign_ctx" } } } },
+            },
+        },
+        -- Rule 2: trip deposited at building → set destination to far dock → assign ship
+        {
+            id      = "rule_ship_from_dock",
+            enabled = true,
+            stack   = {
+                { kind = "hat", def_id = "hat_trip_deposited", slots = {} },
+                { kind = "stack", def_id = "block_call", slots = {
+                    action = "set_leg_destination",
+                    pos = { kind = "reporter", node = {
+                        def_id = "rep_get_property",
+                        slots = { source = "building", property = "nearest_to_dest_pos", building_type = "dock" },
+                    }},
+                }},
+                { kind = "find", def_id = "find_match",
+                  slots = { collection = "vehicles", sorter = "nearest" },
+                  condition = {
+                      kind = "bool", def_id = "cond_vehicle_type",
+                      slots = { vehicle_type = "ship" },
+                  },
+                  body = { { kind = "stack", def_id = "block_call", slots = { action = "assign_from_building" } } } },
             },
         },
     }

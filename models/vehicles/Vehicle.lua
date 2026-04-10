@@ -15,9 +15,10 @@ function Vehicle:new(id, depot, game, vehicleType)
     instance.type_upper = (vehicleType or ""):upper()
 
     local vcfg = game.C.VEHICLES[instance.type_upper]
-    instance.icon              = vcfg and vcfg.icon       or "❓"
-    instance.base_speed        = vcfg and vcfg.base_speed or 80
+    instance.icon              = vcfg and vcfg.icon            or "❓"
+    instance.base_speed        = vcfg and vcfg.base_speed       or 80
     instance.pathfinding_costs = vcfg and vcfg.pathfinding_costs or {}
+    instance.transport_mode    = vcfg and vcfg.transport_mode   or "road"
 
     -- Speed modifier: accumulates upgrade multipliers on top of base_speed.
     instance.speed_modifier = game.state.upgrades[instance.type .. "_speed"] or 1.0
@@ -135,11 +136,22 @@ end
 
 function Vehicle:unassign(game)
     if not _States then _States = require("models.vehicles.vehicle_states") end
-    for _, trip in ipairs(self.trip_queue) do
-        table.insert(game.entities.trips.pending, trip)
+    local BS = require("services.BuildingService")
+    -- Return trips to the building at their current leg's start_plot.
+    local function returnTrip(trip)
+        local leg = trip.legs and trip.legs[trip.current_leg]
+        local sp  = leg and leg.start_plot
+        local building = sp and BS.findAtPlot(sp.x, sp.y, game)
+        if building then
+            BS.depositTrip(building, trip, game)
+        else
+            table.insert(game.entities.trips.pending, trip)
+        end
     end
+    for _, trip in ipairs(self.trip_queue) do returnTrip(trip) end
     for _, trip in ipairs(self.cargo) do
-        table.insert(game.entities.trips.pending, trip)
+        trip:thaw()
+        returnTrip(trip)
     end
     self.trip_queue = {}
     self.cargo      = {}

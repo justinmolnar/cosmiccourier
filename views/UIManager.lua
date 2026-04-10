@@ -52,6 +52,15 @@ end
 -- ─── Update ──────────────────────────────────────────────────────────────────
 
 function UIManager:handle_scroll(dy)
+    -- If a dropdown is open in the dispatch tab, scroll it instead of the panel.
+    local DT = require("views.tabs.DispatchTab")
+    local ds = DT.getState()
+    if ds and ds.active_dropdown then
+        if ds.active_dropdown.wheelmoved then
+            ds.active_dropdown:wheelmoved(0, dy)
+        end
+        return
+    end
     self.panel:handleScroll(dy)
 end
 

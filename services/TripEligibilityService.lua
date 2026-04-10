@@ -16,11 +16,6 @@ function TripEligibilityService.canAssign(vehicle, trip, game)
         return false
     end
 
-    -- 2. Transport mode
-    if vcfg.transport_mode ~= (leg.transport_mode or "road") then
-        return false
-    end
-
     return vehicle:isAvailable(game)
 end
 

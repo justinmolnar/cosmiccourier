@@ -620,11 +620,21 @@ function InputController:openContextMenu(sx, sy, game)
             local cost = game.state.costs[vid] or vcfg.base_cost
             local can_afford = game.state.money >= cost
             local district_ok = true
+            local suffix = ""
             if vcfg.required_depot_district then
                 district_ok = (hit_depot:getDistrict(game) == vcfg.required_depot_district)
+                if not district_ok then suffix = " [needs " .. vcfg.required_depot_district .. "]" end
             end
-            local suffix = (not district_ok)
-                and (" [needs " .. vcfg.required_depot_district .. "]") or ""
+            if vcfg.transport_mode == "water" then
+                local water_hubs = game.trunk_hubs and game.trunk_hubs["water"]
+                local has_dock = false
+                if water_hubs then
+                    for _, hubs in pairs(water_hubs) do
+                        if hubs and #hubs > 0 then has_dock = true; break end
+                    end
+                end
+                if not has_dock then district_ok = false; suffix = " [place a dock first]" end
+            end
             table.insert(items, {
                 icon     = vcfg.icon,
                 label    = string.format("Hire %s ($%d)%s", vcfg.display_name, cost, suffix),

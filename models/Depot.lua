@@ -8,7 +8,10 @@ function Depot:new(id, plot, game)
     
     instance.name              = id or "Depot"
     instance.open              = true
-    instance.capacity          = nil  -- nil = unlimited
+
+    local bcfg = game.C.BUILDINGS and game.C.BUILDINGS["depot"]
+    instance.capacity          = bcfg and bcfg.capacity or 10
+    instance.cargo             = {}
 
     instance.assigned_vehicles = {}
 

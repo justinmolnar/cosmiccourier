@@ -207,9 +207,14 @@ The "local leg" for ships is zero — ships board the trunk directly at the dock
 
 ---
 
-**Status:** Not started
-**Line count change:** —
-**Deviation from plan:** —
+**Status:** Complete — awaiting user test
+**Line count change:** +26 / −4
+**Deviation from plan:**
+- 5.1 (ship.json) was already done in Phase 4.
+- 5.2: Rather than extending HPA* for water mode, ships rely on the PathCache hit that Phase 4 pre-populated. The direct-A* fallback in PathfindingService already checks the cache before running a full search, so the cached shipline is returned immediately with no ocean A* at runtime.
+- 5.3: vehicle_states.lua required zero changes — all states are already mode-agnostic.
+- 5.4: TripEligibilityService required zero changes.
+- 5.5: Ships spawn from the nearest registered dock hub. A duck-typed depot `{plot, assigned_vehicles, id}` is created in EntityManager and passed to Vehicle:new. `vehicle.transport_mode` was not being stored on the instance (it lived only in vcfg) — added it to Vehicle:new. `_snapToNearestTraversable` in PathfindingService used `map:isRoad(t)` to gate traversability, which blocked water tiles; generalised to `vehicle:getMovementCostFor(t) < IMPASSABLE`. Ships appear in the depot hire menu and are disabled with "[place a dock first]" when no dock hub exists.
 
 ---
 

@@ -93,6 +93,8 @@ return {
     { id = "set_rule_name",    fn = E.set_rule_name,    params = { { key="name", type="string", default="New Name" } }, tags = {"logic"} },
     { id = "benchmark",        fn = E.benchmark,        params = {},                                     tags = {"logic"} },
     { id = "assign_ctx",       fn = E.assign_ctx,       params = {},                                     tags = {"logic"} },
+    { id = "set_leg_destination",  fn = E.set_leg_destination,  params = { { key="pos", type="reporter", default=0 } }, tags = {"trip"} },
+    { id = "assign_from_building", fn = E.assign_from_building, params = {},                                tags = {"building"} },
 
     -- Trip flow
     { id = "skip",             fn = E.skip,             params = {},                                     tags = {"trip"} },

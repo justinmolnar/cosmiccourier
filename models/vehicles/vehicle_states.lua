@@ -331,26 +331,31 @@ function States.DoDropoff:enter(vehicle, game)
 
     for i, trip in ipairs(vehicle.cargo) do
         local leg = trip.legs[trip.current_leg]
-        
+
         -- Vehicle completed its path to reach DoDropoff (or is off-screen abstracted),
         -- so it is at the destination by definition.
         trip:thaw()
-        local is_final_destination = trip.current_leg >= #trip.legs
 
-        if is_final_destination then
+        -- A trip is at its final destination when it hasn't been rerouted
+        -- (no final_destination) OR when the current end_plot matches the
+        -- saved final_destination.
+        local drop = leg.end_plot
+        local fd   = trip.final_destination
+        local is_final = not fd
+            or (drop.x == fd.x and drop.y == fd.y)
+
+        if is_final then
             -- FINAL DELIVERY
+            trip.final_destination = nil  -- clear for cleanliness
             vehicle.last_trip_end_time = love.timer.getTime()
             vehicle.trips_completed = (vehicle.trips_completed or 0) + 1
             local RE = require("services.DispatchRuleEngine")
             RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_trip_complete",
                 { vehicle = vehicle, game = game })
             local final_payout = trip.base_payout + trip.speed_bonus
-            -- Credit earnings back to the source client
             if trip.source_client then
                 trip.source_client.earnings = (trip.source_client.earnings or 0) + final_payout
             end
-            -- Convert city-local px/py to world-pixel coords so floating text
-            -- renders at the right position regardless of which city this vehicle is in.
             local ts   = game.C.MAP.TILE_SIZE
             local vmap = game.maps and game.maps[vehicle.operational_map_key]
             local wx   = vehicle.px + ((vmap and vmap.world_mn_x or 1) - 1) * ts
@@ -359,9 +364,14 @@ function States.DoDropoff:enter(vehicle, game)
             game.EventBus:publish("package_delivered", event_data)
             trip_index_to_remove = i
         else
-            -- INTERMEDIATE STOP (HUB/DEPOT) - bike completes leg 1, truck picks up leg 2
-            trip.current_leg = trip.current_leg + 1
-            table.insert(game.entities.trips.pending, trip)
+            -- WAYPOINT — deposit trip at the building it was delivered to.
+            local BS = require("services.BuildingService")
+            local building = drop and BS.findAtPlot(drop.x, drop.y, game)
+            if building then
+                BS.depositTrip(building, trip, game)
+            else
+                table.insert(game.entities.trips.pending, trip)
+            end
             trip_index_to_remove = i
         end
 

@@ -792,6 +792,17 @@ return {
       slots        = { { key="name", type="string", default="my block" } },
       evaluator    = "action_call" },
 
+    -- ── Building cargo ─────────────────────────────────────────────────────────
+
+    { id           = "hat_trip_deposited",
+      category     = "hat",
+      event_type   = "trip_deposited",
+      tags         = { "trigger", "building" },
+      color        = { 0.55, 0.38, 0.18 },
+      label        = "when trip deposited at building",
+      tooltip      = "Fires when a trip arrives at any building (dock, depot, client). Sets ctx.trip and ctx.building.",
+      must_be_first = true, max_per_rule = 1 },
+
     -- ── Client management ─────────────────────────────────────────────────────
 
     -- ── Utility / exotic ──────────────────────────────────────────────────────

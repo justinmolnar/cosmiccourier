@@ -1,0 +1,10 @@
+{
+  "id": "client",
+  "display_name": "Client",
+  "icon": "🏠",
+  "serves": "road",
+  "is_transfer_hub": false,
+  "placement_rule": "on_plot",
+  "build_cost": 100,
+  "capacity": 5
+}
