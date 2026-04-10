@@ -127,9 +127,11 @@ Direction is encoded as an integer: 0=North, 1=East, 2=South, 3=West. The start 
 
 ---
 
-**Status:** Not started
-**Line count change:** —
-**Deviation from plan:** —
+**Status:** Complete — awaiting user test
+**Line count change:** +75 / −1
+**Deviation from plan:**
+- Turn-aware A* bypasses `getNeighbors` entirely and does raw 4-directional grid expansion, letting the cost function determine traversability. This is necessary because `getNeighbors` only knows road topology and would block water tiles. The cost function returning >= 9999 is the impassable guard (a local `_IMPASSABLE = 9999` constant added to pathfinder.lua matching WorldGenConfig).
+- SEED_DIR=4 sentinel used for the start node so no turn penalty is applied leaving the first cell, regardless of which direction the pathfinder exits in.
 
 ---
 

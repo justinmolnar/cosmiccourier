@@ -182,7 +182,11 @@ local function heuristic(a, b)
     return math.abs(a.x - b.x) + math.abs(a.y - b.y)
 end
 
-function Pathfinder.findPath(grid, startNode, endNode, costs, map)
+-- Cost threshold above which a tile is considered impassable.
+-- Matches IMPASSABLE_COST in WorldGenConfig and vehicle pathfinding_costs tables.
+local _IMPASSABLE = 9999
+
+function Pathfinder.findPath(grid, startNode, endNode, costs, map, turn_costs)
     if not costs then
         error("FATAL: Pathfinder.findPath was called without a 'costs' function or table. This is a required argument. Please check the function call.", 0)
         return nil
@@ -194,6 +198,107 @@ function Pathfinder.findPath(grid, startNode, endNode, costs, map)
 
     local grid_height = map._h or (grid and #grid or 0)
     local grid_width  = map._w or (grid and grid[1] and #grid[1] or 0)
+
+    -- ── Direction-aware A* (turn_costs provided) ──────────────────────────────
+    -- Used for shipline generation and any other trunk that needs smooth curves.
+    -- Node state = (x, y, dir): dir 0=N 1=E 2=S 3=W.
+    -- Bypasses getNeighbors entirely — raw 4-directional expansion, cost function
+    -- determines traversability. Turn penalty added per direction change.
+    -- When turn_costs is nil this block is skipped; existing behaviour unchanged.
+    if turn_costs then
+        local tc90     = turn_costs.turn_90  or 0
+        local tc180    = turn_costs.turn_180 or 0
+        -- dx, dy, dir_id for each cardinal direction
+        local DIRS     = {{0,-1,0},{1,0,1},{0,1,2},{-1,0,3}}
+        -- Key encodes (x, y, dir): dir offset = dir * 65536²
+        local DIR_STR  = 65536 * 65536
+        local SEED_DIR = 4   -- sentinel: start node has no incoming direction
+        local function dk(x, y, d) return x + y * 65536 + d * DIR_STR end
+
+        local heap, cameFrom, gScore, closed = {}, {}, {}, {}
+        local function hpush(f, node)
+            local i = #heap + 1; heap[i] = {f=f, node=node}
+            while i > 1 do
+                local p = math.floor(i/2)
+                if heap[p].f > heap[i].f then heap[p],heap[i]=heap[i],heap[p]; i=p else break end
+            end
+        end
+        local function hpop()
+            local top=heap[1]; local n=#heap; heap[1]=heap[n]; heap[n]=nil
+            local i=1
+            while true do
+                local l,r,s=2*i,2*i+1,i
+                if l<=#heap and heap[l].f<heap[s].f then s=l end
+                if r<=#heap and heap[r].f<heap[s].f then s=r end
+                if s==i then break end
+                heap[i],heap[s]=heap[s],heap[i]; i=s
+            end
+            return top
+        end
+
+        local sk = dk(startNode.x, startNode.y, SEED_DIR)
+        gScore[sk] = 0
+        hpush(heuristic(startNode, endNode), {x=startNode.x, y=startNode.y, dir=SEED_DIR})
+
+        while #heap > 0 do
+            local entry = hpop()
+            local cur   = entry.node
+            local curk  = dk(cur.x, cur.y, cur.dir)
+            if not closed[curk] then
+                closed[curk] = true
+
+                if cur.x == endNode.x and cur.y == endNode.y then
+                    -- Reconstruct path, stripping direction from output nodes.
+                    local path, k, node = {}, curk, cur
+                    while node do
+                        path[#path+1] = {x=node.x, y=node.y}
+                        local parent   = cameFrom[k]
+                        if not parent then break end
+                        k    = dk(parent.x, parent.y, parent.dir)
+                        node = parent
+                    end
+                    local pn = #path
+                    for i = 1, math.floor(pn/2) do
+                        path[i], path[pn-i+1] = path[pn-i+1], path[i]
+                    end
+                    return path
+                end
+
+                local base_g = gScore[curk]
+                for _, dv in ipairs(DIRS) do
+                    local nx, ny, ndir = cur.x+dv[1], cur.y+dv[2], dv[3]
+                    if nx>=1 and nx<=grid_width and ny>=1 and ny<=grid_height then
+                        local move_cost = costs(nx, ny)
+                        if move_cost < _IMPASSABLE then
+                            -- Turn penalty: none from seed, 90° or 180° otherwise.
+                            local turn_pen = 0
+                            if cur.dir ~= SEED_DIR then
+                                local diff = math.abs(ndir - cur.dir)
+                                if     diff == 2            then turn_pen = tc180
+                                elseif diff == 1 or diff == 3 then turn_pen = tc90
+                                end
+                            end
+                            local nk = dk(nx, ny, ndir)
+                            local tg = base_g + move_cost + turn_pen
+                            if not gScore[nk] or tg < gScore[nk] then
+                                gScore[nk]   = tg
+                                cameFrom[nk] = cur
+                                hpush(tg + heuristic({x=nx,y=ny}, endNode),
+                                      {x=nx, y=ny, dir=ndir})
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        local closed_count = 0
+        for _ in pairs(closed) do closed_count = closed_count + 1 end
+        print(string.format("DEBUG pathfinder (turn): no path found. start=(%d,%d) end=(%d,%d) explored=%d",
+            startNode.x, startNode.y, endNode.x, endNode.y, closed_count))
+        return nil
+    end
+    -- ── End direction-aware A* ────────────────────────────────────────────────
 
     local startKey = nodeKey(startNode)
     local endKey   = nodeKey(endNode)
