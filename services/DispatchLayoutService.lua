@@ -23,6 +23,7 @@ local BOOL_ANGLE = 8
 local CAP_H      = 16
 local MIN_BODY_H = 36
 local STACK_W_MAX = 260
+local C_INDENT   = 22
 
 -- ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -234,7 +235,7 @@ function DispatchLayoutService.stackNaturalW(node, ctx)
         local val = (node.slots and node.slots[sd.key]) or sd.default or ""
         w = w + pillWidth(val, node, sd.key, ctx) + 6
     end
-    return math.max(160, math.min(STACK_W_MAX, w))
+    return math.max(160, w)
 end
 
 -- ── controlNaturalW ───────────────────────────────────────────────────────────
@@ -270,7 +271,23 @@ function DispatchLayoutService.controlNaturalW(node, ctx)
     end
 
     total_w = total_w + cond_w + 20
-    return math.max(220, total_w)
+    local header_w = math.max(220, total_w)
+
+    -- Measure body children so the control block expands to fit them.
+    local body_w = 0
+    for _, child in ipairs(node.body or {}) do
+        local cw
+        if child.kind == "hat" or child.kind == "stack" then
+            cw = DispatchLayoutService.stackNaturalW(child, ctx)
+        elseif child.kind == "control" or child.kind == "find" then
+            cw = DispatchLayoutService.controlNaturalW(child, ctx)
+        else
+            cw = 200
+        end
+        if cw > body_w then body_w = cw end
+    end
+
+    return math.max(header_w, body_w + C_INDENT)
 end
 
 -- ── loopNaturalW ──────────────────────────────────────────────────────────────
