@@ -56,6 +56,18 @@ local function _planCityRoute(start_city, end_city, city_edges, max_hops)
     return nil
 end
 
+-- Find the nearest trunk hub in a city to a given position.
+local function _nearestHub(city_idx, px, py, mode_hubs)
+    local hubs = mode_hubs and mode_hubs[city_idx]
+    if not hubs or #hubs == 0 then return nil end
+    local best, best_d2 = hubs[1], math.huge
+    for _, h in ipairs(hubs) do
+        local d2 = (h.ux - px)^2 + (h.uy - py)^2
+        if d2 < best_d2 then best_d2 = d2; best = h end
+    end
+    return best
+end
+
 -- ── Snap helper ───────────────────────────────────────────────────────────────
 
 -- BFS snap to nearest traversable tile on a sandbox (sub-cell) map.
@@ -202,9 +214,12 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
                 return IMPASSABLE
             end
 
-            -- Tier 1: local out — snapped start → first attachment node.
-            -- Bounded to the start city's sub-cell area to avoid exploring the full grid.
-            local first_att = hops[1].edge.from
+            -- Tier 1: local out — snapped start → nearest attachment node in start city.
+            -- Uses nearest hub to avoid crossing the city in the wrong direction.
+            local mode_hubs = game.trunk_hubs and game.trunk_hubs[mode]
+            local hop_from = hops[1].edge.from
+            local near_start = _nearestHub(start_city, start_sub.x, start_sub.y, mode_hubs)
+            local first_att = near_start or hop_from
             local bounds1 = mode_bounds and mode_bounds[start_city]
             local function tier1_cost(x, y)
                 if bounds1 and (x < bounds1.x1 or x > bounds1.x2
@@ -216,6 +231,17 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
             local seg1 = game.pathfinder.findPath(path_grid or {}, start_sub,
                 {x=first_att.ux, y=first_att.uy}, tier1_cost, sandbox_proxy)
             if seg1 then for _, n in ipairs(seg1) do full[#full+1] = n end end
+
+            -- Transit from nearest hub to hop's expected start (if they differ).
+            if first_att.ux ~= hop_from.ux or first_att.uy ~= hop_from.uy then
+                local transit0 = PathCacheService.get(mode, first_att.ux, first_att.uy, hop_from.ux, hop_from.uy)
+                if not transit0 then
+                    transit0 = game.pathfinder.findPath({},
+                        {x=first_att.ux, y=first_att.uy}, {x=hop_from.ux, y=hop_from.uy}, trunk_cost, trunk_proxy)
+                    if transit0 then PathCacheService.put(mode, first_att.ux, first_att.uy, hop_from.ux, hop_from.uy, transit0) end
+                end
+                if transit0 then for _, n in ipairs(transit0) do full[#full+1] = n end end
+            end
 
             -- Tiers 2 + 3: for each city hop, trunk segment then (if not last) intra-city transit.
             for hi, hop in ipairs(hops) do
@@ -244,9 +270,24 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
                 end
             end
 
-            -- Tier 4: local in — final attachment node → destination.
-            -- Bounded to the end city's sub-cell area to avoid exploring the full grid.
-            local last_in = hops[#hops].edge.to
+            -- Tier 4: local in — nearest attachment node in end city → destination.
+            -- Uses nearest hub to avoid crossing the city in the wrong direction.
+            local hop_to = hops[#hops].edge.to
+            local near_end = _nearestHub(end_city, end_plot.x, end_plot.y, mode_hubs)
+            local last_in = near_end or hop_to
+
+            -- Transit from hop's entry to nearest hub (if they differ).
+            if hop_to.ux ~= last_in.ux or hop_to.uy ~= last_in.uy then
+                local transit4 = PathCacheService.get(mode, hop_to.ux, hop_to.uy, last_in.ux, last_in.uy)
+                if not transit4 then
+                    transit4 = game.pathfinder.findPath({},
+                        {x=hop_to.ux, y=hop_to.uy}, {x=last_in.ux, y=last_in.uy}, trunk_cost, trunk_proxy)
+                    if transit4 then PathCacheService.put(mode, hop_to.ux, hop_to.uy, last_in.ux, last_in.uy, transit4) end
+                end
+                if transit4 then for _, n in ipairs(transit4) do full[#full+1] = n end end
+            end
+
+            -- Local in: nearest hub → destination.
             local local_in = PathCacheService.get(mode, last_in.ux, last_in.uy, end_plot.x, end_plot.y)
             if not local_in then
                 local end_node = end_candidates[1]
