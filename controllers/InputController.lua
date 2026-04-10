@@ -413,6 +413,21 @@ local function _worldToSubcell(wx, wy, game)
     return gx, gy, umap
 end
 
+-- Returns the 1-based index of the city in game.maps.all_cities that owns (gx, gy), or nil.
+local function _cityIdxForSubcell(gx, gy, game)
+    for i, cmap in ipairs(game.maps and game.maps.all_cities or {}) do
+        local ox = (cmap.world_mn_x - 1) * 3
+        local oy = (cmap.world_mn_y - 1) * 3
+        local lx = gx - ox
+        local ly = gy - oy
+        if lx >= 1 and ly >= 1
+        and cmap.grid and lx <= #(cmap.grid[1] or {}) and ly <= #cmap.grid then
+            return i
+        end
+    end
+    return nil
+end
+
 -- Returns true if unified sub-cell (gx, gy) is a valid depot build site.
 local function _isValidDepotSite(gx, gy, umap)
     if umap.ffi_grid then
@@ -684,6 +699,28 @@ function InputController:openContextMenu(sx, sy, game)
                 local ic = g.input_controller
                 if ic then ic:_tryPlaceDepot(world_x, world_y, sx, sy) end
             end })
+
+        -- Dock placement (water-adjacent city tile)
+        local dock_cfg  = game.C.BUILDINGS and game.C.BUILDINGS["dock"]
+        local dock_city = gx and _cityIdxForSubcell(gx, gy, game)
+        local BS        = dock_cfg and require("services.BuildingService")
+        local dock_ok   = BS and gx and dock_city
+                          and BS.canPlace(dock_cfg, gx, gy, umap)
+        local dock_cost = dock_cfg and dock_cfg.build_cost or 800
+        local dock_disabled = not dock_ok or game.state.money < dock_cost
+        if dock_cfg then
+            table.insert(items, { icon = dock_cfg.icon or "⚓",
+                label    = "Build Dock ($" .. dock_cost .. ")",
+                disabled = dock_disabled,
+                action   = function(g)
+                    if g.state.money < dock_cost then return end
+                    g.state.money = g.state.money - dock_cost
+                    BS.place(dock_cfg, gx, gy, dock_city, g)
+                    require("services.FloatingTextSystem").emit(
+                        "Dock Built! -$" .. dock_cost, world_x, world_y, g.C)
+                end })
+        end
+
         table.insert(items, { separator = true })
         table.insert(items, { icon = "📍", label = "Set Camera Here",
             action = function(g)

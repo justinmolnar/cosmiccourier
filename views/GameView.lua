@@ -812,6 +812,18 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
             end
         end
 
+        -- Buildings (docks etc.)
+        if cs >= Z.ZONE_THRESHOLD then
+            for _, city_buildings in pairs(Game.buildings or {}) do
+                for _, b in ipairs(city_buildings) do
+                    local icon = b.cfg and b.cfg.icon
+                    if icon then
+                        DrawingUtils.drawWorldIcon(Game, icon, (b.x - 0.5) * uts, (b.y - 0.5) * uts)
+                    end
+                end
+            end
+        end
+
         -- Clients
         if cs >= Z.ZONE_THRESHOLD then
             for _, client in ipairs(Game.entities.clients) do
@@ -1604,6 +1616,35 @@ function GameView:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
             end
         end
     end
+    -- Shipline paths (game.trunks["water"]) — drawn in the active camera transform
+    local water_trunks = Game.trunks and Game.trunks["water"]
+    if water_trunks then
+        local PathCacheService = require("services.PathCacheService")
+        love.graphics.setLineWidth(2.5 / cs)
+        love.graphics.setColor(0.2, 0.7, 1.0, 0.9)
+        local drawn = {}
+        for city_a, row in pairs(water_trunks) do
+            for city_b, trunk in pairs(row) do
+                local key = math.min(city_a, city_b) * 100000 + math.max(city_a, city_b)
+                if not drawn[key] then
+                    drawn[key] = true
+                    local f, t = trunk.from, trunk.to
+                    if f and t then
+                        local path = PathCacheService.get("water", f.ux, f.uy, t.ux, t.uy)
+                        if path then
+                            for pi = 1, #path - 1 do
+                                local a, b = path[pi], path[pi+1]
+                                love.graphics.line(
+                                    (a.x - 0.5) * uts, (a.y - 0.5) * uts,
+                                    (b.x - 0.5) * uts, (b.y - 0.5) * uts)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     love.graphics.setLineWidth(1)
     love.graphics.pop()
     love.graphics.setColor(1, 1, 1)
@@ -1673,7 +1714,16 @@ function GameView:_drawF3Overlay()
         for _, row in pairs(road_trunks) do
             for _ in pairs(row) do n_city_edges = n_city_edges + 1 end
         end
-        n_city_edges = n_city_edges / 2  -- each edge stored in both directions
+        n_city_edges = n_city_edges / 2
+    end
+
+    local n_shiplines = 0
+    local water_trunks_f3 = Game.trunks and Game.trunks["water"]
+    if water_trunks_f3 then
+        for _, row in pairs(water_trunks_f3) do
+            for _ in pairs(row) do n_shiplines = n_shiplines + 1 end
+        end
+        n_shiplines = n_shiplines / 2
     end
 
     local cam    = Game.camera
@@ -1713,6 +1763,7 @@ function GameView:_drawF3Overlay()
         string.format("Cities:        %d", n_cities),
         string.format("Att. nodes:    %d total", n_att_nodes),
         string.format("City edges:    %d", math.floor(n_city_edges)),
+        string.format("Shiplines:     %d", math.floor(n_shiplines)),
         "",
         string.format("Vehicles:  %d  (abstracted %d)", #vehicles, n_abstracted),
         string.format("Clients:   %d", #clients),

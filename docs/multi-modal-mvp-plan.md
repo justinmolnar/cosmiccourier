@@ -166,9 +166,13 @@ Player can place docks in coastal cities. When two docks exist, a shipline is si
 
 ---
 
-**Status:** Not started
-**Line count change:** —
-**Deviation from plan:** —
+**Status:** Complete — awaiting user test
+**Line count change:** +130 / −0
+**Deviation from plan:**
+- `ship.json` created in this phase (not Phase 5) because `_vehicleCostsForMode` needs a registered ship vehicle to generate trunks. The plan listed it as Phase 5 task 5.1, but it's data-only with no runtime effect until Phase 5.
+- Build UI wiring implemented as a context-menu item (right-click → "Build Dock ($800)") rather than a separate build mode, matching the simpler one-click pattern used for depots in the same menu. No separate build_dock_mode state was needed.
+- Dock item always shows in the empty-world context menu; it is disabled when not on a water-adjacent city tile or when funds are insufficient.
+- `_cityIdxForSubcell` helper added to InputController (mirrors `Depot:getCity()` but returns numeric index for `game.trunk_hubs` keying).
 
 ---
 

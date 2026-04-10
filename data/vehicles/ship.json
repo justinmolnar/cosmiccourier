@@ -1,0 +1,34 @@
+{
+  "id": "ship",
+  "display_name": "Cargo Ship",
+  "icon": "🚢",
+  "dot_color": [0.2, 0.5, 0.9],
+  "base_speed": 45,
+  "base_capacity": 20,
+  "base_cost": 3000,
+  "cost_multiplier": 1.5,
+  "max_range": null,
+  "transport_mode": "water",
+  "anchor_to_road": false,
+  "pathfinding_costs": {
+    "coastal_water": 2,
+    "deep_water":    5,
+    "open_ocean":    10,
+    "water":         3,
+    "grass":         9999,
+    "road":          9999,
+    "downtown_road": 9999,
+    "arterial":      9999,
+    "highway":       9999,
+    "mountain":      9999,
+    "river":         9999,
+    "plot":          9999,
+    "downtown_plot": 9999
+  },
+  "rendering": {
+    "render_zoom_key": "ENTITY_THRESHOLD",
+    "abstract_zoom_key": "ENTITY_THRESHOLD",
+    "needs_speed_scale": false
+  },
+  "upgrades": []
+}

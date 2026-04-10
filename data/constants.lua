@@ -111,8 +111,9 @@ local C = {
         DOWNTOWN_IMG_THRESHOLD   = 20.0,
     },
 
-    -- VEHICLES is populated after C is fully defined (loader below).
-    VEHICLES = {},
+    -- VEHICLES and BUILDINGS are populated after C is fully defined (loaders below).
+    VEHICLES  = {},
+    BUILDINGS = {},
 
     MAP_GEN = {
         -- Component Toggles (EXISTING)
@@ -234,6 +235,21 @@ do
                 def.downtown_only_sim          = (def.rendering.render_zoom_threshold >= (Z.BIKE_THRESHOLD or 8.0))
                 def.can_long_distance          = (def.max_range == nil)
                 C.VEHICLES[key] = def
+            end
+        end
+    end
+end
+
+-- Load building definitions from data/buildings/*.json
+do
+    local json  = require("lib.json")
+    local files = love.filesystem.getDirectoryItems("data/buildings")
+    for _, filename in ipairs(files or {}) do
+        if filename:match("%.json$") then
+            local contents = love.filesystem.read("data/buildings/" .. filename)
+            if contents then
+                local def = json.decode(contents)
+                C.BUILDINGS[def.id] = def
             end
         end
     end
