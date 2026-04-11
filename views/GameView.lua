@@ -952,15 +952,61 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                     htrip.route_plan = plan  -- expose to dispatch reporters
                     local materialized = RoutePlannerService.materializeRoute(plan, Game, vehicleForMode)
                     if materialized then
-                        local snap_lookup = umap._snap_lookup
-                        local uw = umap._w or 0
+                        -- Per-node nearest-chain-point search. The shared
+                        -- umap._snap_lookup uses "first-write-wins" stamping
+                        -- over a 3x3 neighborhood and is lossy enough to
+                        -- introduce cell-scale zigzags in rendered polylines.
+                        -- The preview runs once per hover and is cached, so
+                        -- an exact per-node scan is fine here.
+                        local hw_smooth  = Game._world_highway_smooth
+                        local all_cities = Game.maps.all_cities or {}
+                        local fgi = umap.ffi_grid
+                        local fgw = umap._w
+                        local _TN = fgi and {[0]="grass",[1]="road",[2]="downtown_road",
+                                             [3]="arterial",[4]="highway"} or nil
+
+                        local function nearestOnChains(opx, opy, chains, wox, woy)
+                            local bd, sx, sy = math.huge, opx, opy
+                            for _, ch in ipairs(chains) do
+                                for j = 1, #ch - 1, 2 do
+                                    local cx, cy = ch[j] + wox, ch[j+1] + woy
+                                    local d2 = (cx - opx)^2 + (cy - opy)^2
+                                    if d2 < bd then bd = d2; sx = cx; sy = cy end
+                                end
+                            end
+                            return sx, sy
+                        end
 
                         local function nodeToPixel(node)
-                            if snap_lookup then
-                                local s = snap_lookup[node.y * (uw + 1) + node.x]
-                                if s then return s[1], s[2] end
+                            local orig_px = (node.x - 0.5) * uts
+                            local orig_py = (node.y - 0.5) * uts
+                            local tt
+                            if fgi then
+                                tt = _TN[fgi[(node.y-1)*fgw + (node.x-1)].type]
+                            elseif umap.grid and umap.grid[node.y] and umap.grid[node.y][node.x] then
+                                tt = umap.grid[node.y][node.x].type
                             end
-                            return (node.x - 0.5) * uts, (node.y - 0.5) * uts
+                            if tt == "highway" and hw_smooth then
+                                return nearestOnChains(orig_px, orig_py, hw_smooth, 0, 0)
+                            elseif tt == "arterial" or tt == "road" or tt == "downtown_road" then
+                                for _, cmap in ipairs(all_cities) do
+                                    local ox = (cmap.world_mn_x - 1) * 3
+                                    local oy = (cmap.world_mn_y - 1) * 3
+                                    local cw = cmap.city_grid_width  or (cmap.grid and cmap.grid[1] and #cmap.grid[1] or 0)
+                                    local ch = cmap.city_grid_height or (cmap.grid and #cmap.grid or 0)
+                                    if node.x > ox and node.x <= ox+cw and node.y > oy and node.y <= oy+ch then
+                                        local chains = (tt == "arterial") and cmap._road_smooth_paths_v8
+                                                   or cmap._street_smooth_paths_like_v5
+                                        if chains then
+                                            local wox = (cmap.world_mn_x - 1) * ts
+                                            local woy = (cmap.world_mn_y - 1) * ts
+                                            return nearestOnChains(orig_px, orig_py, chains, wox, woy)
+                                        end
+                                        break
+                                    end
+                                end
+                            end
+                            return orig_px, orig_py
                         end
 
                         local function smoothSegment(points)
