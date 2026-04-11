@@ -201,7 +201,10 @@ function GameBridgeService.wire(
         end
     end
 
-    -- ── City edges via highway connected-component analysis ───────────────────
+    -- Highway connected-component analysis so we only wire trunks between
+    -- attachments that are actually reachable by road. Without this filter,
+    -- phantom road trunks get created between cities separated by water and
+    -- compete with legitimate water routes in Dijkstra.
     local hw_comp = {}; local n_comp = 0
     for hci, _ in pairs(hw) do
         if not hw_comp[hci] then
@@ -224,32 +227,42 @@ function GameBridgeService.wire(
             end
         end
     end
-    local city_comp = {}
-    for city_idx, nodes2 in pairs(attachment_nodes) do
-        city_comp[city_idx] = {}
-        for _, att in ipairs(nodes2) do
-            local awx  = math.ceil(att.ux / 3)
-            local awy  = math.ceil(att.uy / 3)
-            local comp2 = hw_comp[(awy - 1) * ww + awx]
-            if comp2 and not city_comp[city_idx][comp2] then
-                city_comp[city_idx][comp2] = att
+
+    -- Group each city's attachments by the highway component they sit on.
+    local by_city_comp = {}  -- city_idx → comp_id → list of attachments
+    for city_idx, atts in pairs(attachment_nodes) do
+        by_city_comp[city_idx] = {}
+        for _, att in ipairs(atts) do
+            local awx = math.ceil(att.ux / 3)
+            local awy = math.ceil(att.uy / 3)
+            local comp = hw_comp[(awy - 1) * ww + awx]
+            if comp then
+                by_city_comp[city_idx][comp] = by_city_comp[city_idx][comp] or {}
+                table.insert(by_city_comp[city_idx][comp], att)
             end
         end
     end
+
     -- Build the entrance graph: intra-city + transfer edges from the
-    -- registered entrances, then inter-city trunk edges from component pairs.
+    -- registered entrances, then inter-city trunk edges between EVERY pair
+    -- of road entrances in cities connected by the same highway component.
+    -- Dijkstra picks the best pair based on local distances.
     local EntranceGraphService = require("services.EntranceGraphService")
     local Entrance = require("models.Entrance")
     EntranceGraphService.rebuild(game)
-    for city_a, comps_a in pairs(city_comp) do
-        for city_b, comps_b in pairs(city_comp) do
+    for city_a, comps_a in pairs(by_city_comp) do
+        for city_b, comps_b in pairs(by_city_comp) do
             if city_a < city_b then
-                for comp3, att_a in pairs(comps_a) do
-                    local att_b = comps_b[comp3]
-                    if att_b then
-                        local id_a = Entrance.makeId("road", city_a, att_a.ux, att_a.uy)
-                        local id_b = Entrance.makeId("road", city_b, att_b.ux, att_b.uy)
-                        EntranceGraphService.addTrunkEdge(id_a, id_b, "road", game)
+                for comp, atts_a_in in pairs(comps_a) do
+                    local atts_b_in = comps_b[comp]
+                    if atts_b_in then
+                        for _, att_a in ipairs(atts_a_in) do
+                            for _, att_b in ipairs(atts_b_in) do
+                                local id_a = Entrance.makeId("road", city_a, att_a.ux, att_a.uy)
+                                local id_b = Entrance.makeId("road", city_b, att_b.ux, att_b.uy)
+                                EntranceGraphService.addTrunkEdge(id_a, id_b, "road", game)
+                            end
+                        end
                     end
                 end
             end

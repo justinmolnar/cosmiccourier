@@ -62,17 +62,39 @@ end
 
 -- ── Public API ───────────────────────────────────────────────────────────────
 
--- Rebuild the entire graph from game.entrances. Adds all intra-city edges
--- (same-mode transit + cross-mode transfer). Inter-city trunk edges must
--- be added separately via addTrunkEdge — this function does not know about
--- trunk connectivity on its own.
+-- Rebuild intra-city and transfer edges from game.entrances. Non-road
+-- trunk edges (water, rail, etc.) are preserved because they're owned by
+-- BuildingService at dock/station placement time, not by the caller of
+-- this rebuild — wiping them would strand multi-modal routing on every
+-- road-network update. Road trunks are the caller's responsibility to
+-- clear and re-add.
 function EntranceGraphService.rebuild(game)
     local g = _ensureGraph(game)
+
+    -- Snapshot every non-road trunk so we can restore it after the wipe.
+    local saved_trunks = {}
+    for from_id, edges in pairs(g.adj) do
+        for _, e in ipairs(edges) do
+            if e.kind == "trunk" and e.mode ~= "road" then
+                saved_trunks[#saved_trunks+1] = {
+                    from = from_id, to = e.to, mode = e.mode, cost = e.cost,
+                }
+            end
+        end
+    end
+
     g:clear()
 
     -- Add a node for every entrance.
     for _, e in ipairs(EntranceService.all(game)) do
         g:addNode(e.id)
+    end
+
+    -- Restore preserved trunks when both endpoints still exist.
+    for _, t in ipairs(saved_trunks) do
+        if g.adj[t.from] and g.adj[t.to] then
+            g:addEdge(t.from, t.to, "trunk", t.mode, t.cost)
+        end
     end
 
     -- Intra-city edges: walk each city's entrance list once and emit
