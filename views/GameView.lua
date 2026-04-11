@@ -923,109 +923,137 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         love.graphics.pop()
     end
 
-    -- LAYER: Trip preview (unified pathfinding, cached per trip)
+    -- LAYER: Trip preview (multi-modal route via entrance graph, cached per trip)
     if ui_manager.hovered_trip_index and umap then
         local htrip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
-        local leg   = htrip and htrip.legs and htrip.legs[htrip.current_leg]
-        if leg then
+        local first_leg = htrip and htrip.legs and htrip.legs[1]
+        local last_leg  = htrip and htrip.legs and htrip.legs[#htrip.legs]
+        if first_leg and last_leg then
             local cache = _trip_preview_cache
             if not cache or cache.trip ~= htrip then
                 _trip_preview_cache = nil
-                -- Pick the first vehicle config matching this leg's transport mode
-                local leg_mode = leg.transport_mode or "road"
-                local vp = nil
-                for _, cfg in pairs(Game.C.VEHICLES) do
-                    if cfg.transport_mode == leg_mode then vp = cfg; break end
+
+                local RoutePlannerService = require("services.RoutePlannerService")
+                local PathUtils           = require("lib.path_utils")
+
+                -- Mock vehicles per mode, lazily constructed.
+                local mock_cache = {}
+                local function vehicleForMode(mode)
+                    mode = mode or "road"
+                    if mock_cache[mode] == nil then
+                        mock_cache[mode] = RoutePlannerService.makeMockVehicle(mode, Game) or false
+                    end
+                    return mock_cache[mode] or nil
                 end
-                vp = vp or select(2, next(Game.C.VEHICLES))
-                local mock = {
-                    operational_map_key = "unified",
-                    grid_anchor         = leg.start_plot,
-                    pathfinding_bounds  = nil,
-                    type                = leg_mode,
-                    id                  = 0,
-                    getMovementCostFor  = function(self, t) return (vp and vp.pathfinding_costs[t]) or 9999 end,
-                    getSpeed            = function(self) return (vp and (vp.base_speed or vp.speed)) or 60 end,
-                }
-                local PathfindingService = require("services.PathfindingService")
-                local path = PathfindingService.findVehiclePath(mock, leg.start_plot, leg.end_plot, Game)
-                if path and #path >= 2 then
-                    local hw_smooth  = Game._world_highway_smooth
-                    local all_cities = Game.maps.all_cities or {}
-                    local function snapToChains(opx, opy, chains, wox, woy)
-                        local bd, sx, sy = math.huge, opx, opy
-                        for _, ch in ipairs(chains) do
-                            for j = 1, #ch - 1, 2 do
-                                local d2 = (ch[j]+wox-opx)^2 + (ch[j+1]+woy-opy)^2
-                                if d2 < bd then bd=d2; sx=ch[j]+wox; sy=ch[j+1]+woy end
+
+                local plan = RoutePlannerService.findRoute(
+                    first_leg.start_plot, last_leg.end_plot, Game)
+                if plan then
+                    htrip.route_plan = plan  -- expose to dispatch reporters
+                    local materialized = RoutePlannerService.materializeRoute(plan, Game, vehicleForMode)
+                    if materialized then
+                        local snap_lookup = umap._snap_lookup
+                        local uw = umap._w or 0
+
+                        local function nodeToPixel(node)
+                            if snap_lookup then
+                                local s = snap_lookup[node.y * (uw + 1) + node.x]
+                                if s then return s[1], s[2] end
+                            end
+                            return (node.x - 0.5) * uts, (node.y - 0.5) * uts
+                        end
+
+                        local function smoothSegment(points)
+                            if not points or #points == 0 then return nil end
+                            local flat = {}
+                            for _, n in ipairs(points) do
+                                local px, py = nodeToPixel(n)
+                                flat[#flat+1] = px
+                                flat[#flat+1] = py
+                            end
+                            if #flat < 4 then return flat end
+                            return PathUtils.chaikin(flat, 3)
+                        end
+
+                        local rendered = {segments = {}, transfer_pts = {}, endpoints = nil}
+                        for _, seg in ipairs(materialized.segments) do
+                            local pts = smoothSegment(seg.points)
+                            if pts and #pts >= 2 then
+                                rendered.segments[#rendered.segments+1] = {
+                                    kind = seg.kind,
+                                    mode = seg.mode,
+                                    pts  = pts,
+                                }
                             end
                         end
-                        return sx, sy
-                    end
-                    local _fg = umap.ffi_grid
-                    local _fgw = umap._w
-                    local _TN = _fg and {[0]="grass",[1]="road",[2]="downtown_road",[3]="arterial",[4]="highway"} or nil
-                    local pixel_path = {}
-                    for _, node in ipairs(path) do
-                        local orig_px = (node.x - 0.5) * uts
-                        local orig_py = (node.y - 0.5) * uts
-                        local px, py  = orig_px, orig_py
-                        local tt = _fg and _TN[_fg[(node.y-1)*_fgw + (node.x-1)].type]
-                                       or (umap.grid and umap.grid[node.y] and umap.grid[node.y][node.x] and umap.grid[node.y][node.x].type)
-                        if tt == "highway" and hw_smooth then
-                            local bd = math.huge
-                            for _, chain in ipairs(hw_smooth) do
-                                for j = 1, #chain - 1, 2 do
-                                    local d2 = (chain[j]-orig_px)^2 + (chain[j+1]-orig_py)^2
-                                    if d2 < bd then bd=d2; px=chain[j]; py=chain[j+1] end
-                                end
-                            end
-                        elseif tt == "arterial" or tt == "road" or tt == "downtown_road" then
-                            for _, cmap in ipairs(all_cities) do
-                                local ox = (cmap.world_mn_x - 1) * 3
-                                local oy = (cmap.world_mn_y - 1) * 3
-                                local cw = cmap.city_grid_width  or (cmap.grid[1] and #cmap.grid[1] or 0)
-                                local ch = cmap.city_grid_height or #cmap.grid
-                                if node.x > ox and node.x <= ox+cw and node.y > oy and node.y <= oy+ch then
-                                    local chains = (tt == "arterial") and cmap._road_smooth_paths_v8
-                                               or cmap._street_smooth_paths_like_v5
-                                    if chains then
-                                        local wox = (cmap.world_mn_x - 1) * ts
-                                        local woy = (cmap.world_mn_y - 1) * ts
-                                        px, py = snapToChains(orig_px, orig_py, chains, wox, woy)
-                                    end
-                                    break
-                                end
+
+                        -- Diamonds at every transfer point in the original plan.
+                        for _, seg in ipairs(plan.segments) do
+                            if seg.kind == "transfer" and seg.from_e then
+                                local px = (seg.from_e.ux - 0.5) * uts
+                                local py = (seg.from_e.uy - 0.5) * uts
+                                rendered.transfer_pts[#rendered.transfer_pts+1] = {px, py}
                             end
                         end
-                        table.insert(pixel_path, px)
-                        table.insert(pixel_path, py)
-                    end
-                    local PathUtils = require("lib.path_utils")
-                    local smoothed  = PathUtils.chaikin(pixel_path, 3)
-                    if #smoothed >= 4 then
-                        _trip_preview_cache = {trip = htrip, pts = smoothed}
+
+                        -- Endpoint dots: very first point of first segment, very last of last.
+                        if #rendered.segments > 0 then
+                            local first = rendered.segments[1].pts
+                            local last  = rendered.segments[#rendered.segments].pts
+                            rendered.endpoints = {first[1], first[2], last[#last-1], last[#last]}
+                        end
+
+                        if #rendered.segments > 0 then
+                            _trip_preview_cache = {trip = htrip, rendered = rendered}
+                        end
                     end
                 end
             end
+
             local cache2 = _trip_preview_cache
-            if cache2 and cache2.pts then
-                local pts = cache2.pts
+            if cache2 and cache2.rendered then
+                local EConfig = require("data.entrance_config")
+                local r = cache2.rendered
+                local lw = 3 / cs
+                local cr = 5 / cs
+                local dr = 6 / cs   -- diamond radius
                 for i = tile_i0, tile_i1 do
                     love.graphics.push()
                     love.graphics.translate(i * mpw, 0)
-                    love.graphics.setColor(0.2, 0.8, 1, 0.85)
-                    love.graphics.setLineWidth(3 / cs)
+                    love.graphics.setLineWidth(lw)
                     love.graphics.setLineJoin("bevel")
-                    love.graphics.line(pts)
-                    local cr = 5 / cs
-                    love.graphics.setColor(0.2, 0.8, 1, 1)
-                    love.graphics.circle("fill", pts[1], pts[2], cr)
-                    love.graphics.circle("fill", pts[#pts-1], pts[#pts], cr)
+                    for _, seg in ipairs(r.segments) do
+                        local color
+                        if seg.kind == "transfer" then
+                            color = EConfig.MODE_COLORS.transfer
+                        else
+                            color = EConfig.MODE_COLORS[seg.mode or "road"] or EConfig.MODE_COLORS.road
+                        end
+                        love.graphics.setColor(color[1], color[2], color[3], color[4])
+                        love.graphics.line(seg.pts)
+                    end
+                    -- Endpoint dots in road color (matches first/last legs which are typically road).
+                    if r.endpoints then
+                        local c = EConfig.MODE_COLORS.road
+                        love.graphics.setColor(c[1], c[2], c[3], 1)
+                        love.graphics.circle("fill", r.endpoints[1], r.endpoints[2], cr)
+                        love.graphics.circle("fill", r.endpoints[3], r.endpoints[4], cr)
+                    end
+                    -- Transfer diamonds.
+                    local tc = EConfig.MODE_COLORS.transfer
+                    love.graphics.setColor(tc[1], tc[2], tc[3], 1)
+                    for _, pt in ipairs(r.transfer_pts) do
+                        love.graphics.push()
+                        love.graphics.translate(pt[1], pt[2])
+                        love.graphics.rotate(math.pi / 4)
+                        love.graphics.rectangle("fill", -dr, -dr, dr * 2, dr * 2)
+                        love.graphics.pop()
+                    end
                     love.graphics.setLineWidth(1)
                     love.graphics.setLineJoin("miter")
                     love.graphics.pop()
                 end
+                love.graphics.setColor(1, 1, 1, 1)
             end
         end
     end

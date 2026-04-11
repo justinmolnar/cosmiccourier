@@ -38,7 +38,10 @@
       "Bash(pacman -Q lua)",
       "Read(//mingw64/**)",
       "Bash(mkdir -p /tmp/graph_test)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(luac -p services/RoutePlannerService.lua services/PathfindingService.lua models/Trip.lua data/dispatch_properties.lua)",
+      "Bash(where lua:*)",
+      "Bash(lua -v)"
     ]
   }
 }

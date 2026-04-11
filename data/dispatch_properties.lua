@@ -22,6 +22,18 @@ return {
           local leg = ctx.trip.legs[ctx.trip.current_leg or 1]
           return leg and leg.cargo_size or 1
       end },
+    -- Mode of the next inter-modal transfer in this trip's planned route, or
+    -- "" if the route is single-modal / unplanned. Reads trip.route_plan.
+    { source="trip", key="next_mode", type="string", read = function(ctx)
+          local plan = ctx.trip and ctx.trip.route_plan
+          if not plan or not plan.segments then return "" end
+          for _, seg in ipairs(plan.segments) do
+              if seg.kind == "transfer" and seg.to_e then
+                  return seg.to_e.mode or ""
+              end
+          end
+          return ""
+      end },
 
     -- ── source: vehicle ───────────────────────────────────────────────────────
     { source="vehicle", key="speed",         type="number", read = function(ctx) return ctx.vehicle and ctx.vehicle:getSpeed() or 0 end },

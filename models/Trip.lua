@@ -19,6 +19,8 @@ function Trip:new(base_payout, initial_bonus)
     instance.start_plot = nil
     instance.end_plot = nil
 
+    instance.route_plan = nil  -- RoutePlan computed by RoutePlannerService; populated lazily
+
     return instance
 end
 

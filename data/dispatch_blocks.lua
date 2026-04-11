@@ -599,7 +599,7 @@ return {
 -- ═══════════════════════════════════════════════════════════════════════════
 
     -- All property keys available for rep_get_property, grouped by source:
-    --   trip:    payout  wait_time  bonus  leg_count  scope  cargo_size
+    --   trip:    payout  wait_time  bonus  leg_count  scope  cargo_size  next_mode
     --   vehicle: speed   trips_completed  type
     --   game:    money   queue_count  trips_completed  rh_timer
     --   fleet:   count   idle_count  utilization
