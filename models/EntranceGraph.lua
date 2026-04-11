@@ -1,15 +1,21 @@
 -- models/EntranceGraph.lua
 -- Pure adjacency-list container for the mode-agnostic entrance graph.
--- Nodes are entrance IDs (strings). Edges are directed, weighted, and
--- tagged with a mode string — but the graph itself does not interpret
--- the mode. Dijkstra lives in lib/graph.lua; this file is pure data.
+-- Nodes are entrance IDs (strings). Edges are directed and weighted.
+-- Each edge carries:
+--   kind — "trunk" | "intra_city" | "transfer"
+--   mode — transport mode the edge is used in ("road", "water", ...),
+--          or nil for transfer edges (which span two different modes)
+--   cost — numeric weight (estimated travel time in seconds)
+--
+-- The graph itself does not interpret kind or mode. Dijkstra lives in
+-- lib/graph.lua; this file is pure data.
 
 local EntranceGraph = {}
 EntranceGraph.__index = EntranceGraph
 
 function EntranceGraph:new()
     local instance = setmetatable({}, EntranceGraph)
-    instance.adj = {}  -- adj[node_id] = { {to=id, mode=str, cost=num}, ... }
+    instance.adj = {}  -- adj[node_id] = { {to=id, kind=str, mode=str, cost=num}, ... }
     return instance
 end
 
@@ -20,10 +26,10 @@ function EntranceGraph:addNode(id)
 end
 
 -- Directed edge. Call twice (both directions) for bidirectional edges.
-function EntranceGraph:addEdge(from_id, to_id, mode, cost)
+function EntranceGraph:addEdge(from_id, to_id, kind, mode, cost)
     self:addNode(from_id)
     self:addNode(to_id)
-    table.insert(self.adj[from_id], {to = to_id, mode = mode, cost = cost})
+    table.insert(self.adj[from_id], {to = to_id, kind = kind, mode = mode, cost = cost})
 end
 
 -- Remove a node and all edges pointing to it.

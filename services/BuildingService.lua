@@ -3,8 +3,10 @@
 -- Adding a new transport mode requires only a new data/buildings/*.json file.
 -- Core logic here is completely mode-agnostic.
 
-local PathCacheService = require("services.PathCacheService")
-local EntranceService  = require("services.EntranceService")
+local PathCacheService      = require("services.PathCacheService")
+local EntranceService       = require("services.EntranceService")
+local EntranceGraphService  = require("services.EntranceGraphService")
+local Entrance              = require("models.Entrance")
 
 local BuildingService = {}
 
@@ -69,7 +71,8 @@ local function _vehicleCostsForMode(mode, game)
 end
 
 -- Build and cache a trunk path between two hub positions using direction-aware A*.
--- Writes to game.trunks[mode] bidirectionally and primes PathCacheService.
+-- Primes PathCacheService with the computed path and registers a trunk edge
+-- in the entrance graph between the two matching entrances.
 local function _buildTrunk(mode, ax, ay, city_a, bx, by, city_b,
                            costs_table, turn_costs, game)
     local umap = game.maps and game.maps.unified
@@ -102,28 +105,18 @@ local function _buildTrunk(mode, ax, ay, city_a, bx, by, city_b,
         return
     end
 
-    if not game.trunks then game.trunks = {} end
-    if not game.trunks[mode] then game.trunks[mode] = {} end
-
-    -- Forward direction
-    if not game.trunks[mode][city_a] then game.trunks[mode][city_a] = {} end
-    game.trunks[mode][city_a][city_b] = {
-        from = {ux=ax, uy=ay},
-        to   = {ux=bx, uy=by},
-    }
-
-    -- Reverse direction
+    -- Prime path cache so PathfindingService finds the trunk without re-running A*.
     local rev = {}
     for i = #path, 1, -1 do rev[#rev+1] = path[i] end
-    if not game.trunks[mode][city_b] then game.trunks[mode][city_b] = {} end
-    game.trunks[mode][city_b][city_a] = {
-        from = {ux=bx, uy=by},
-        to   = {ux=ax, uy=ay},
-    }
-
-    -- Prime path cache so PathfindingService finds the trunk without re-running A*.
     PathCacheService.put(mode, ax, ay, bx, by, path)
     PathCacheService.put(mode, bx, by, ax, ay, rev)
+
+    -- Register trunk edge in the entrance graph. The actual path length is
+    -- known here (water trunks route around land) so we pass it through for
+    -- an accurate cost estimate.
+    local id_a = Entrance.makeId(mode, city_a, ax, ay)
+    local id_b = Entrance.makeId(mode, city_b, bx, by)
+    EntranceGraphService.addTrunkEdge(id_a, id_b, mode, game, #path)
 end
 
 -- After placing a new hub, generate trunks to all existing hubs of the same
@@ -190,9 +183,14 @@ function BuildingService.place(building_cfg, gx, gy, city_idx, game)
     if umap and umap.ffi_grid then
         hx, hy = _snapToWaterCell(gx, gy, umap.ffi_grid, umap._w, umap._h)
     end
-    EntranceService.register(mode, city_idx, hx, hy, building_ref, game)
+    local new_entrance = EntranceService.register(mode, city_idx, hx, hy, building_ref, game)
+
+    -- Add intra-city and transfer edges for the new entrance (does not
+    -- require a full graph rebuild).
+    EntranceGraphService.addEdgesForEntrance(new_entrance.id, game)
 
     -- Generate trunks to all other cities that already have an entrance of this mode.
+    -- _buildTrunk also registers trunk edges in the entrance graph.
     if building_cfg.is_transfer_hub then
         _generateTrunksForNewHub(building_cfg, gx, gy, city_idx, mode, game)
     end

@@ -236,29 +236,25 @@ function GameBridgeService.wire(
             end
         end
     end
-    local city_edges = {}
+    -- Build the entrance graph: intra-city + transfer edges from the
+    -- registered entrances, then inter-city trunk edges from component pairs.
+    local EntranceGraphService = require("services.EntranceGraphService")
+    local Entrance = require("models.Entrance")
+    EntranceGraphService.rebuild(game)
     for city_a, comps_a in pairs(city_comp) do
         for city_b, comps_b in pairs(city_comp) do
             if city_a < city_b then
                 for comp3, att_a in pairs(comps_a) do
                     local att_b = comps_b[comp3]
                     if att_b then
-                        if not city_edges[city_a] then city_edges[city_a] = {} end
-                        if not city_edges[city_a][city_b] then
-                            city_edges[city_a][city_b] = {
-                                from={ux=att_a.ux,uy=att_a.uy}, to={ux=att_b.ux,uy=att_b.uy} }
-                        end
-                        if not city_edges[city_b] then city_edges[city_b] = {} end
-                        if not city_edges[city_b][city_a] then
-                            city_edges[city_b][city_a] = {
-                                from={ux=att_b.ux,uy=att_b.uy}, to={ux=att_a.ux,uy=att_a.uy} }
-                        end
+                        local id_a = Entrance.makeId("road", city_a, att_a.ux, att_a.uy)
+                        local id_b = Entrance.makeId("road", city_b, att_b.ux, att_b.uy)
+                        EntranceGraphService.addTrunkEdge(id_a, id_b, "road", game)
                     end
                 end
             end
         end
     end
-    game.trunks = { road = city_edges }
 
     -- ── City sub-cell bounding boxes ──────────────────────────────────────────
     local MARGIN        = 6
@@ -281,7 +277,7 @@ function GameBridgeService.wire(
             }
         end
     end
-    game.trunk_sc_bounds = { road = city_sc_bounds }
+    game.city_sc_bounds = city_sc_bounds
 
     -- ── Vehicle / depot reset ─────────────────────────────────────────────────
     local States          = require("models.vehicles.vehicle_states")

@@ -2,8 +2,9 @@
 local WGC            = require("data.WorldGenConfig")
 local IMPASSABLE     = WGC.IMPASSABLE_COST
 local SNAP_CAP       = WGC.SNAP_SEARCH_CAP
-local PathCacheService = require("services.PathCacheService")
-local EntranceService  = require("services.EntranceService")
+local PathCacheService    = require("services.PathCacheService")
+local EntranceService     = require("services.EntranceService")
+local RoutePlannerService = require("services.RoutePlannerService")
 
 -- Integer → string tile type translation for FFI grid reads.
 -- Indices match TILE_INT in WorldSandboxController and C.TILE in constants.lua.
@@ -25,36 +26,6 @@ local function _cityOf(ux, uy, game)
     local wy = math.ceil(uy / 3)
     local ci = (wy - 1) * umap.world_w + wx
     return game.hw_all_claimed and game.hw_all_claimed[ci] or nil
-end
-
--- BFS on the city graph to find the shortest sequence of city hops from
--- start_city to end_city. Returns a list of hop tables:
---   {from_city, to_city, edge={from={ux,uy}, to={ux,uy}}}
--- Returns nil if no route exists.
-local function _planCityRoute(start_city, end_city, city_edges, max_hops)
-    if start_city == end_city then return {} end
-    local visited = {[start_city] = true}
-    local q = {{city = start_city, path = {}}}
-    local qi = 1
-    while qi <= #q do
-        local cur = q[qi]; qi = qi + 1
-        local edges = city_edges[cur.city]
-        if edges then
-            for neighbor, edge in pairs(edges) do
-                if not visited[neighbor] then
-                    local new_path = {}
-                    for _, e in ipairs(cur.path) do new_path[#new_path+1] = e end
-                    new_path[#new_path+1] = {from_city=cur.city, to_city=neighbor, edge=edge}
-                    if neighbor == end_city then return new_path end
-                    if #new_path < (max_hops or 10) then
-                        visited[neighbor] = true
-                        q[#q+1] = {city=neighbor, path=new_path}
-                    end
-                end
-            end
-        end
-    end
-    return nil
 end
 
 -- ── Snap helper ───────────────────────────────────────────────────────────────
@@ -168,7 +139,7 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     -- city maps that also carry road-node data.
     local sandbox_proxy = setmetatable({road_v_rxs = false}, {__index = map})
 
-    -- ── HPA* inter-city hierarchical routing ──────────────────────────────────
+    -- ── Entrance-graph inter-city routing ────────────────────────────────────
     -- Only runs for highway-capable vehicles (bikes cannot traverse highways).
     -- Falls through to direct A* on failure or same-city trips.
     -- _cityOf falls back to original start_node in case the snap moved the vehicle
@@ -179,13 +150,29 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     local end_city    = can_highway and _cityOf(end_plot.x, end_plot.y, game) or nil
 
     local mode         = vehicle.transport_mode or "road"
-    local mode_trunks  = game.trunks and game.trunks[mode]
-    local mode_bounds  = game.trunk_sc_bounds and game.trunk_sc_bounds[mode]
+    local city_bounds  = game.city_sc_bounds
 
-    if start_city and end_city and start_city ~= end_city and mode_trunks then
-        local hops = _planCityRoute(start_city, end_city, mode_trunks)
+    local is_cross_city = start_city and end_city and start_city ~= end_city
+    if is_cross_city then
+        -- Cross-city routing is handled exclusively by the entrance graph.
+        -- If no route exists there, the trip is unroutable — we do not fall
+        -- through to a direct grid-wide A*.
+        local route = game.entrance_graph and RoutePlannerService.findRouteForMode(
+            start_city, start_sub, end_city, end_plot, mode, game)
 
-        if hops and #hops > 0 then
+        if not route or #route == 0 then
+            local now = love.timer.getTime()
+            local lk  = "_pf_err_" .. vehicle.id
+            if not vehicle[lk] or now - vehicle[lk] > 5 then
+                vehicle[lk] = now
+                print(string.format(
+                    "ERROR: PathfindingService - No entrance-graph route for %s %d. start_city=%d end_city=%d mode=%s",
+                    vehicle.type, vehicle.id, start_city, end_city, mode))
+            end
+            return nil
+        end
+
+        do
             local full = {}
 
             -- Trunk cost: vehicle-agnostic, highway-first. Trunk paths are shared
@@ -203,106 +190,67 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
                 return IMPASSABLE
             end
 
-            -- Tier 1: local out — snapped start → nearest entrance in start city.
-            -- Uses nearest entrance to avoid crossing the city in the wrong direction.
-            local hop_from = hops[1].edge.from
-            local near_start = EntranceService.nearest(start_city, start_sub.x, start_sub.y, mode, game)
-            local first_att = near_start or hop_from
-            local bounds1 = mode_bounds and mode_bounds[start_city]
-            local function tier1_cost(x, y)
-                if bounds1 and (x < bounds1.x1 or x > bounds1.x2
-                             or y < bounds1.y1 or y > bounds1.y2) then
-                    return IMPASSABLE
+            -- Bounded-cost wrapper: clamps A* to a city's sub-cell bounding
+            -- box so local tiers don't wander across the world map.
+            local function _boundedGetCost(bounds)
+                if not bounds then return get_cost end
+                return function(x, y)
+                    if x < bounds.x1 or x > bounds.x2
+                    or y < bounds.y1 or y > bounds.y2 then
+                        return IMPASSABLE
+                    end
+                    return get_cost(x, y)
                 end
-                return get_cost(x, y)
             end
+
+            -- Tier 1: local out — snapped start → first entrance in the route.
+            local first_e = route[1]
             local seg1 = game.pathfinder.findPath(path_grid or {}, start_sub,
-                {x=first_att.ux, y=first_att.uy}, tier1_cost, sandbox_proxy)
+                {x=first_e.ux, y=first_e.uy},
+                _boundedGetCost(city_bounds and city_bounds[start_city]),
+                sandbox_proxy)
             if seg1 then for _, n in ipairs(seg1) do full[#full+1] = n end end
 
-            -- Transit from nearest hub to hop's expected start (if they differ).
-            if first_att.ux ~= hop_from.ux or first_att.uy ~= hop_from.uy then
-                local transit0 = PathCacheService.get(mode, first_att.ux, first_att.uy, hop_from.ux, hop_from.uy)
-                if not transit0 then
-                    transit0 = game.pathfinder.findPath({},
-                        {x=first_att.ux, y=first_att.uy}, {x=hop_from.ux, y=hop_from.uy}, trunk_cost, trunk_proxy)
-                    if transit0 then PathCacheService.put(mode, first_att.ux, first_att.uy, hop_from.ux, hop_from.uy, transit0) end
-                end
-                if transit0 then for _, n in ipairs(transit0) do full[#full+1] = n end end
-            end
-
-            -- Tiers 2 + 3: for each city hop, trunk segment then (if not last) intra-city transit.
-            for hi, hop in ipairs(hops) do
-                local att_out = hop.edge.from
-                local att_in  = hop.edge.to
-
-                -- Tier 2: trunk (cached highway segment, vehicle-agnostic cost).
-                local trunk = PathCacheService.get(mode, att_out.ux, att_out.uy, att_in.ux, att_in.uy)
-                if not trunk then
-                    trunk = game.pathfinder.findPath({},
-                        {x=att_out.ux,y=att_out.uy}, {x=att_in.ux,y=att_in.uy}, trunk_cost, trunk_proxy)
-                    if trunk then PathCacheService.put(mode, att_out.ux, att_out.uy, att_in.ux, att_in.uy, trunk) end
-                end
-                if trunk then for _, n in ipairs(trunk) do full[#full+1] = n end end
-
-                -- Tier 3: intra-city transit when more hops follow (also trunk cost).
-                if hi < #hops then
-                    local next_att_out = hops[hi+1].edge.from
-                    local transit = PathCacheService.get(mode, att_in.ux, att_in.uy, next_att_out.ux, next_att_out.uy)
-                    if not transit then
-                        transit = game.pathfinder.findPath({},
-                            {x=att_in.ux,y=att_in.uy}, {x=next_att_out.ux,y=next_att_out.uy}, trunk_cost, trunk_proxy)
-                        if transit then PathCacheService.put(mode, att_in.ux, att_in.uy, next_att_out.ux, next_att_out.uy, transit) end
+            -- Walk the entrance sequence. Each consecutive pair is either a
+            -- trunk (different cities) or an intra-city transit (same city).
+            -- Both live in PathCacheService keyed by (mode, from, to); compute
+            -- lazily on cache miss.
+            for i = 1, #route - 1 do
+                local a, b = route[i], route[i+1]
+                local seg = PathCacheService.get(mode, a.ux, a.uy, b.ux, b.uy)
+                if not seg then
+                    seg = game.pathfinder.findPath({},
+                        {x=a.ux, y=a.uy}, {x=b.ux, y=b.uy}, trunk_cost, trunk_proxy)
+                    if seg then
+                        PathCacheService.put(mode, a.ux, a.uy, b.ux, b.uy, seg)
                     end
-                    if transit then for _, n in ipairs(transit) do full[#full+1] = n end end
                 end
+                if seg then for _, n in ipairs(seg) do full[#full+1] = n end end
             end
 
-            -- Tier 4: local in — nearest entrance in end city → destination.
-            -- Uses nearest entrance to avoid crossing the city in the wrong direction.
-            local hop_to = hops[#hops].edge.to
-            local near_end = EntranceService.nearest(end_city, end_plot.x, end_plot.y, mode, game)
-            local last_in = near_end or hop_to
-
-            -- Transit from hop's entry to nearest hub (if they differ).
-            if hop_to.ux ~= last_in.ux or hop_to.uy ~= last_in.uy then
-                local transit4 = PathCacheService.get(mode, hop_to.ux, hop_to.uy, last_in.ux, last_in.uy)
-                if not transit4 then
-                    transit4 = game.pathfinder.findPath({},
-                        {x=hop_to.ux, y=hop_to.uy}, {x=last_in.ux, y=last_in.uy}, trunk_cost, trunk_proxy)
-                    if transit4 then PathCacheService.put(mode, hop_to.ux, hop_to.uy, last_in.ux, last_in.uy, transit4) end
-                end
-                if transit4 then for _, n in ipairs(transit4) do full[#full+1] = n end end
-            end
-
-            -- Local in: nearest hub → destination.
-            local local_in = PathCacheService.get(mode, last_in.ux, last_in.uy, end_plot.x, end_plot.y)
+            -- Tier 4: local in — last entrance → destination.
+            local last_e = route[#route]
+            local local_in = PathCacheService.get(mode, last_e.ux, last_e.uy, end_plot.x, end_plot.y)
             if not local_in then
                 local end_node = end_candidates[1]
                 if end_node then
-                    local bounds4 = mode_bounds and mode_bounds[end_city]
-                    local function tier4_cost(x, y)
-                        if bounds4 and (x < bounds4.x1 or x > bounds4.x2
-                                     or y < bounds4.y1 or y > bounds4.y2) then
-                            return IMPASSABLE
-                        end
-                        return get_cost(x, y)
-                    end
                     local_in = game.pathfinder.findPath(path_grid or {},
-                        {x=last_in.ux,y=last_in.uy}, end_node, tier4_cost, sandbox_proxy)
-                    if local_in then PathCacheService.put(mode, last_in.ux, last_in.uy, end_plot.x, end_plot.y, local_in) end
+                        {x=last_e.ux, y=last_e.uy}, end_node,
+                        _boundedGetCost(city_bounds and city_bounds[end_city]),
+                        sandbox_proxy)
+                    if local_in then
+                        PathCacheService.put(mode, last_e.ux, last_e.uy, end_plot.x, end_plot.y, local_in)
+                    end
                 end
             end
             if local_in then for _, n in ipairs(local_in) do full[#full+1] = n end end
 
-            if #full > 0 then
-                table.remove(full, 1)  -- remove start node (vehicle already there)
-                return full
-            end
+            if #full == 0 then return nil end
+            table.remove(full, 1)  -- remove start node (vehicle already there)
+            return full
         end
-        -- Fallback: direct full A* if city graph route failed.
     end
-    -- ── End HPA* ─────────────────────────────────────────────────────────────
+    -- ── End entrance-graph routing ───────────────────────────────────────────
 
     -- Cache lookup: key on snapped start + end_plot, then try end_candidates
     local cached = PathCacheService.get(mode, start_sub.x, start_sub.y, end_plot.x, end_plot.y)

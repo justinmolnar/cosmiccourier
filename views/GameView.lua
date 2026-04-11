@@ -1627,33 +1627,28 @@ function GameView:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
             end
         end
     end
-    -- Shipline paths (game.trunks["water"]) — drawn in the active camera transform
-    local water_trunks = Game.trunks and Game.trunks["water"]
-    if water_trunks then
+    -- Shipline paths — iterate water trunk edges in the entrance graph and
+    -- render each cached path.
+    if Game.entrance_graph then
         local PathCacheService = require("services.PathCacheService")
+        local EntranceService = require("services.EntranceService")
+        local EntranceGraphService = require("services.EntranceGraphService")
         love.graphics.setLineWidth(2.5 / cs)
         love.graphics.setColor(0.2, 0.7, 1.0, 0.9)
-        local drawn = {}
-        for city_a, row in pairs(water_trunks) do
-            for city_b, trunk in pairs(row) do
-                local key = math.min(city_a, city_b) * 100000 + math.max(city_a, city_b)
-                if not drawn[key] then
-                    drawn[key] = true
-                    local f, t = trunk.from, trunk.to
-                    if f and t then
-                        local path = PathCacheService.get("water", f.ux, f.uy, t.ux, t.uy)
-                        if path then
-                            for pi = 1, #path - 1 do
-                                local a, b = path[pi], path[pi+1]
-                                love.graphics.line(
-                                    (a.x - 0.5) * uts, (a.y - 0.5) * uts,
-                                    (b.x - 0.5) * uts, (b.y - 0.5) * uts)
-                            end
-                        end
-                    end
-                end
+        EntranceGraphService.forEachTrunkEdge(Game, function(from_id, to_id, mode)
+            if mode ~= "water" then return end
+            local a = EntranceService.getById(from_id, Game)
+            local b = EntranceService.getById(to_id, Game)
+            if not (a and b) then return end
+            local path = PathCacheService.get("water", a.ux, a.uy, b.ux, b.uy)
+            if not path then return end
+            for pi = 1, #path - 1 do
+                local p, q = path[pi], path[pi+1]
+                love.graphics.line(
+                    (p.x - 0.5) * uts, (p.y - 0.5) * uts,
+                    (q.x - 0.5) * uts, (q.y - 0.5) * uts)
             end
-        end
+        end)
     end
 
     love.graphics.setLineWidth(1)
@@ -1724,23 +1719,16 @@ function GameView:_drawF3Overlay()
             end
         end
     end
+    -- Count trunk edges (road and water) from the entrance graph. Each
+    -- undirected trunk is reported once by forEachTrunkEdge.
     local n_city_edges = 0
-    local road_trunks = Game.trunks and Game.trunks["road"]
-    if road_trunks then
-        for _, row in pairs(road_trunks) do
-            for _ in pairs(row) do n_city_edges = n_city_edges + 1 end
+    local n_shiplines  = 0
+    local EntranceGraphService = require("services.EntranceGraphService")
+    EntranceGraphService.forEachTrunkEdge(Game, function(_, _, mode, _)
+        if     mode == "road"  then n_city_edges = n_city_edges + 1
+        elseif mode == "water" then n_shiplines  = n_shiplines  + 1
         end
-        n_city_edges = n_city_edges / 2
-    end
-
-    local n_shiplines = 0
-    local water_trunks_f3 = Game.trunks and Game.trunks["water"]
-    if water_trunks_f3 then
-        for _, row in pairs(water_trunks_f3) do
-            for _ in pairs(row) do n_shiplines = n_shiplines + 1 end
-        end
-        n_shiplines = n_shiplines / 2
-    end
+    end)
 
     local cam    = Game.camera
     local cam_x  = cam and math.floor(cam.x) or 0

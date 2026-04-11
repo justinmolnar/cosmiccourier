@@ -34,7 +34,11 @@
       "Bash(python -)",
       "Bash(python -c ':*)",
       "Bash(grep -n \"return claimed, pois\\\\|return owner, colors\\\\|return art_map\\\\|return {v=sv\" controllers/WorldSandboxController.lua)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(pacman -Q lua)",
+      "Read(//mingw64/**)",
+      "Bash(mkdir -p /tmp/graph_test)",
+      "Read(//tmp/**)"
     ]
   }
 }
