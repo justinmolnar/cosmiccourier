@@ -4,6 +4,7 @@
 -- Core logic here is completely mode-agnostic.
 
 local PathCacheService = require("services.PathCacheService")
+local EntranceService  = require("services.EntranceService")
 
 local BuildingService = {}
 
@@ -137,15 +138,19 @@ local function _generateTrunksForNewHub(building_cfg, gx, gy, city_idx, mode, ga
 
     local turn_costs = building_cfg.trunk_turn_costs  -- e.g. {turn_90=8, turn_180=999}
 
-    local mode_hubs = game.trunk_hubs and game.trunk_hubs[mode]
-    if not mode_hubs then return end
-
-    for other_city, hubs in pairs(mode_hubs) do
-        if other_city ~= city_idx and hubs and #hubs > 0 then
-            local hub_b = hubs[1]
-            _buildTrunk(mode, gx, gy, city_idx,
-                        hub_b.ux, hub_b.uy, other_city,
-                        costs_table, turn_costs, game)
+    -- One trunk per other city that already has an entrance of this mode.
+    -- Picks the first registered entrance in each target city (stable order).
+    if not game.entrances_by_city then return end
+    for other_city, list in pairs(game.entrances_by_city) do
+        if other_city ~= city_idx then
+            for _, other in ipairs(list) do
+                if other.mode == mode then
+                    _buildTrunk(mode, gx, gy, city_idx,
+                                other.ux, other.uy, other_city,
+                                costs_table, turn_costs, game)
+                    break
+                end
+            end
         end
     end
 end
@@ -161,35 +166,33 @@ function BuildingService.canPlace(building_cfg, gx, gy, umap)
 end
 
 -- Place a building at unified sub-cell (gx, gy) in city city_idx.
--- Registers the building, updates trunk_hubs, and generates any new trunks.
+-- Registers the building as an entrance and generates any new trunks.
 function BuildingService.place(building_cfg, gx, gy, city_idx, game)
     local mode = building_cfg.serves
 
     -- Register in game.buildings
     if not game.buildings then game.buildings = {} end
     if not game.buildings[city_idx] then game.buildings[city_idx] = {} end
-    table.insert(game.buildings[city_idx], {
+    local building_ref = {
         cfg      = building_cfg,
         x        = gx,
         y        = gy,
         city     = city_idx,
         cargo    = {},
         capacity = building_cfg.capacity,
-    })
+    }
+    table.insert(game.buildings[city_idx], building_ref)
 
-    -- Register as trunk hub for this mode.
+    -- Register as an entrance for this mode.
     -- Snap to nearest water cell so pathfinding can route to a traversable tile.
     local umap = game.maps and game.maps.unified
     local hx, hy = gx, gy
     if umap and umap.ffi_grid then
         hx, hy = _snapToWaterCell(gx, gy, umap.ffi_grid, umap._w, umap._h)
     end
-    if not game.trunk_hubs then game.trunk_hubs = {} end
-    if not game.trunk_hubs[mode] then game.trunk_hubs[mode] = {} end
-    if not game.trunk_hubs[mode][city_idx] then game.trunk_hubs[mode][city_idx] = {} end
-    table.insert(game.trunk_hubs[mode][city_idx], {ux=hx, uy=hy, key=hy*10000+hx})
+    EntranceService.register(mode, city_idx, hx, hy, building_ref, game)
 
-    -- Generate trunks to all other cities that already have a hub of this mode.
+    -- Generate trunks to all other cities that already have an entrance of this mode.
     if building_cfg.is_transfer_hub then
         _generateTrunksForNewHub(building_cfg, gx, gy, city_idx, mode, game)
     end

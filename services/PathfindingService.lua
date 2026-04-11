@@ -3,6 +3,7 @@ local WGC            = require("data.WorldGenConfig")
 local IMPASSABLE     = WGC.IMPASSABLE_COST
 local SNAP_CAP       = WGC.SNAP_SEARCH_CAP
 local PathCacheService = require("services.PathCacheService")
+local EntranceService  = require("services.EntranceService")
 
 -- Integer → string tile type translation for FFI grid reads.
 -- Indices match TILE_INT in WorldSandboxController and C.TILE in constants.lua.
@@ -54,18 +55,6 @@ local function _planCityRoute(start_city, end_city, city_edges, max_hops)
         end
     end
     return nil
-end
-
--- Find the nearest trunk hub in a city to a given position.
-local function _nearestHub(city_idx, px, py, mode_hubs)
-    local hubs = mode_hubs and mode_hubs[city_idx]
-    if not hubs or #hubs == 0 then return nil end
-    local best, best_d2 = hubs[1], math.huge
-    for _, h in ipairs(hubs) do
-        local d2 = (h.ux - px)^2 + (h.uy - py)^2
-        if d2 < best_d2 then best_d2 = d2; best = h end
-    end
-    return best
 end
 
 -- ── Snap helper ───────────────────────────────────────────────────────────────
@@ -214,11 +203,10 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
                 return IMPASSABLE
             end
 
-            -- Tier 1: local out — snapped start → nearest attachment node in start city.
-            -- Uses nearest hub to avoid crossing the city in the wrong direction.
-            local mode_hubs = game.trunk_hubs and game.trunk_hubs[mode]
+            -- Tier 1: local out — snapped start → nearest entrance in start city.
+            -- Uses nearest entrance to avoid crossing the city in the wrong direction.
             local hop_from = hops[1].edge.from
-            local near_start = _nearestHub(start_city, start_sub.x, start_sub.y, mode_hubs)
+            local near_start = EntranceService.nearest(start_city, start_sub.x, start_sub.y, mode, game)
             local first_att = near_start or hop_from
             local bounds1 = mode_bounds and mode_bounds[start_city]
             local function tier1_cost(x, y)
@@ -270,10 +258,10 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
                 end
             end
 
-            -- Tier 4: local in — nearest attachment node in end city → destination.
-            -- Uses nearest hub to avoid crossing the city in the wrong direction.
+            -- Tier 4: local in — nearest entrance in end city → destination.
+            -- Uses nearest entrance to avoid crossing the city in the wrong direction.
             local hop_to = hops[#hops].edge.to
-            local near_end = _nearestHub(end_city, end_plot.x, end_plot.y, mode_hubs)
+            local near_end = EntranceService.nearest(end_city, end_plot.x, end_plot.y, mode, game)
             local last_in = near_end or hop_to
 
             -- Transit from hop's entry to nearest hub (if they differ).

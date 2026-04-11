@@ -383,9 +383,10 @@ end
 
 -- ── HPA* rebuild ─────────────────────────────────────────────────────────────
 
--- Rebuilds game.trunk_hubs["road"] and game.trunks["road"] from current
+-- Rebuilds road entrances and game.trunks["road"] from current
 -- world_highway_map and city map bounds. Mirrors GameBridgeService.wire().
 function InfrastructureService.rebuildHPAHierarchy(game)
+    local EntranceService = require("services.EntranceService")
     local ww = game.world_w or 1
     local wh = game.world_h or 1
     local hw = game.world_highway_map or {}
@@ -432,8 +433,13 @@ function InfrastructureService.rebuildHPAHierarchy(game)
             end
         end
     end
-    if not game.trunk_hubs then game.trunk_hubs = {} end
-    game.trunk_hubs["road"] = attachment_nodes
+    -- Replace all existing road entrances with freshly computed ones.
+    EntranceService.clearMode("road", game)
+    for city_idx, nodes in pairs(attachment_nodes) do
+        for _, n in ipairs(nodes) do
+            EntranceService.register("road", city_idx, n.ux, n.uy, nil, game)
+        end
+    end
 
     -- Connected-component analysis on highway cells
     local hw_comp = {}

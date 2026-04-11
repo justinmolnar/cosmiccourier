@@ -1712,11 +1712,16 @@ function GameView:_drawF3Overlay()
 
     local n_cities = 0
     local n_att_nodes = 0
-    local road_hubs = Game.trunk_hubs and Game.trunk_hubs["road"]
-    if road_hubs then
-        for _, nodes in pairs(road_hubs) do
-            n_cities = n_cities + 1
-            n_att_nodes = n_att_nodes + #nodes
+    if Game.entrances_by_city then
+        for _, list in pairs(Game.entrances_by_city) do
+            local road_count = 0
+            for _, e in ipairs(list) do
+                if e.mode == "road" then road_count = road_count + 1 end
+            end
+            if road_count > 0 then
+                n_cities = n_cities + 1
+                n_att_nodes = n_att_nodes + road_count
+            end
         end
     end
     local n_city_edges = 0

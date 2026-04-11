@@ -626,14 +626,10 @@ function InputController:openContextMenu(sx, sy, game)
                 if not district_ok then suffix = " [needs " .. vcfg.required_depot_district .. "]" end
             end
             if vcfg.transport_mode == "water" then
-                local water_hubs = game.trunk_hubs and game.trunk_hubs["water"]
-                local has_dock = false
-                if water_hubs then
-                    for _, hubs in pairs(water_hubs) do
-                        if hubs and #hubs > 0 then has_dock = true; break end
-                    end
+                local EntranceService = require("services.EntranceService")
+                if not EntranceService.anyOfMode("water", game) then
+                    district_ok = false; suffix = " [place a dock first]"
                 end
-                if not has_dock then district_ok = false; suffix = " [place a dock first]" end
             end
             table.insert(items, {
                 icon     = vcfg.icon,

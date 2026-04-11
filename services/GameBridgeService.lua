@@ -191,7 +191,15 @@ function GameBridgeService.wire(
             end
         end
     end
-    game.trunk_hubs = { road = attachment_nodes }
+    -- Register road attachment nodes as first-class entrances.
+    -- Clear any prior road entrances (world regen) so stale nodes don't linger.
+    local EntranceService = require("services.EntranceService")
+    EntranceService.clearMode("road", game)
+    for city_idx, nodes in pairs(attachment_nodes) do
+        for _, n in ipairs(nodes) do
+            EntranceService.register("road", city_idx, n.ux, n.uy, nil, game)
+        end
+    end
 
     -- ── City edges via highway connected-component analysis ───────────────────
     local hw_comp = {}; local n_comp = 0

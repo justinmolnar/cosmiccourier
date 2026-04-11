@@ -75,22 +75,18 @@ function Entities:addVehicle(game, vehicleType, target_depot)
     local depot
 
     if vcfg_v and vcfg_v.transport_mode == "water" then
-        -- Water-mode vehicles spawn at a dock hub, not a road depot.
-        local water_hubs = game.trunk_hubs and game.trunk_hubs["water"]
-        local dock_plot
-        if water_hubs then
-            for _, hubs in pairs(water_hubs) do
-                if hubs and #hubs > 0 then
-                    dock_plot = {x = hubs[1].ux, y = hubs[1].uy}
-                    break
-                end
-            end
-        end
-        if not dock_plot then
+        -- Water-mode vehicles spawn at a dock entrance, not a road depot.
+        local EntranceService = require("services.EntranceService")
+        local dock = EntranceService.firstOfMode("water", game)
+        if not dock then
             print("Cannot hire " .. vehicleType .. ": no dock placed yet.")
             return
         end
-        depot = { plot = dock_plot, assigned_vehicles = {}, id = "dock_spawn" }
+        depot = {
+            plot = {x = dock.ux, y = dock.uy},
+            assigned_vehicles = {},
+            id = "dock_spawn",
+        }
     else
         depot = target_depot or self.depots[1]
     end
