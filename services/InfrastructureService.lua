@@ -490,6 +490,7 @@ function InfrastructureService.rebuildHPAHierarchy(game)
     -- component. Dijkstra picks the best pair based on local distances.
     local EntranceGraphService = require("services.EntranceGraphService")
     local Entrance = require("models.Entrance")
+    EntranceGraphService.clearTrunksByMode("road", game)
     EntranceGraphService.rebuild(game)
     for city_a, comps_a in pairs(by_city_comp) do
         for city_b, comps_b in pairs(by_city_comp) do

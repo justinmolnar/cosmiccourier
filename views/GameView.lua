@@ -1033,14 +1033,14 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                             end
                         end
 
-                        -- Diamonds at every transfer point. For water-mode
-                        -- endpoints, mark the dock's land-side plot (where
-                        -- the truck picks up / drops off) rather than the
-                        -- water cell itself.
+                        -- Diamonds at every transfer point. Placed-building
+                        -- entrances (docks, stations, airports) mark the
+                        -- building's land-side plot where a truck actually
+                        -- picks up / drops off; auto-generated entrances
+                        -- (highway attachments) use their own coords.
                         local function diamondPx(e)
                             local bx, by
-                            if e.mode == "water" and e.building
-                               and e.building.x and e.building.y then
+                            if e.building and e.building.x and e.building.y then
                                 bx, by = e.building.x, e.building.y
                             else
                                 bx, by = e.ux, e.uy

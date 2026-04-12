@@ -1,5 +1,5 @@
 -- services/EntranceGraphService.lua
--- Builds and maintains the mode-agnostic EntranceGraph in game.entrance_graph.
+-- Builds and maintains the EntranceGraph in game.entrance_graph.
 --
 -- Edge taxonomy:
 --   trunk        — inter-city, same mode. Represents a cached trunk path
@@ -12,10 +12,13 @@
 --   transfer     — same-city, different mode. Represents cargo transfer from
 --                  one mode's entrance to another's at loading/unloading cost.
 --
--- The graph is incremental: register an entrance and this service adds the
--- relevant intra-city + transfer edges. Trunk edges are added by the caller
--- (GameBridgeService, BuildingService, InfrastructureService) at the points
--- where they have the trunk connectivity information.
+-- Intra-city and transfer edges are owned by this service (rebuild wipes
+-- and recreates them from game.entrances on every call). Trunk edges are
+-- owned by whoever adds them — road infrastructure rebuilds road trunks,
+-- BuildingService adds water trunks on dock placement, etc. Callers that
+-- own a mode's trunks must clear them via clearTrunksByMode before calling
+-- rebuild if they intend to re-add them; other modes' trunks survive the
+-- rebuild unchanged.
 
 local EntranceGraph = require("models.EntranceGraph")
 local EntranceService = require("services.EntranceService")
@@ -65,20 +68,19 @@ end
 
 -- ── Public API ───────────────────────────────────────────────────────────────
 
--- Rebuild intra-city and transfer edges from game.entrances. Non-road
--- trunk edges (water, rail, etc.) are preserved because they're owned by
--- BuildingService at dock/station placement time, not by the caller of
--- this rebuild — wiping them would strand multi-modal routing on every
--- road-network update. Road trunks are the caller's responsibility to
--- clear and re-add.
+-- Rebuild intra-city and transfer edges from game.entrances. All existing
+-- trunk edges are preserved — trunk lifetime is owned by whoever added
+-- them (road infrastructure, building placement, etc.), and callers are
+-- responsible for clearing their own trunks via clearTrunksByMode before
+-- calling rebuild if they intend to re-add them.
 function EntranceGraphService.rebuild(game)
     local g = _ensureGraph(game)
 
-    -- Snapshot every non-road trunk so we can restore it after the wipe.
+    -- Snapshot every trunk edge so we can restore it after the wipe.
     local saved_trunks = {}
     for from_id, edges in pairs(g.adj) do
         for _, e in ipairs(edges) do
-            if e.kind == "trunk" and e.mode ~= "road" then
+            if e.kind == "trunk" then
                 saved_trunks[#saved_trunks+1] = {
                     from = from_id, to = e.to, mode = e.mode, cost = e.cost,
                 }
@@ -116,6 +118,23 @@ function EntranceGraphService.rebuild(game)
                     g:addEdge(a.id, b.id, "transfer", nil, c)
                     g:addEdge(b.id, a.id, "transfer", nil, c)
                 end
+            end
+        end
+    end
+end
+
+-- Remove every trunk edge of the given mode in both directions. Callers
+-- that own a mode's trunks (e.g. road infrastructure rebuilds) should
+-- call this before EntranceGraphService.rebuild and re-add their trunks
+-- after. Other modes' trunks survive rebuild on their own.
+function EntranceGraphService.clearTrunksByMode(mode, game)
+    local g = game.entrance_graph
+    if not g then return end
+    for _, edges in pairs(g.adj) do
+        for i = #edges, 1, -1 do
+            local e = edges[i]
+            if e.kind == "trunk" and e.mode == mode then
+                table.remove(edges, i)
             end
         end
     end

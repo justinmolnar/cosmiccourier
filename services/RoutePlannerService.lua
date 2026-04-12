@@ -1,21 +1,22 @@
 -- services/RoutePlannerService.lua
 -- Multi-modal route planning over the entrance graph.
 --
--- Two query flavors:
---   findRoute             — single best route as a RoutePlan
---   findAlternativeRoutes — k cheapest distinct routes
+-- findRoute produces a single best route as a RoutePlan using a virtual
+-- source/sink attached to the endpoint-mode entrances of the start and
+-- end cities. The optional `allowed_modes` set restricts which interior
+-- edges may be walked, so vehicle pathfinding can constrain to its own
+-- mode while the trip preview can roam across all modes.
 --
--- Both use a virtual source/sink connected to the entrances of the start
--- and end cities. The optional `allowed_modes` set restricts which mode
--- edges may be walked, so vehicle pathfinding can constrain to its own mode
--- while the trip preview can roam across all modes.
---
--- materializeRoute(plan, game, vehicle) walks a RoutePlan's segments and
--- attaches a sub-cell point sequence to each. Local segments delegate to
--- PathfindingService.findLocalSegment for vehicle-aware in-city pathing
--- (lazy-required to avoid the load-time cycle). Trunk and intra-city
--- segments hit PathCacheService and fall back to a mode-specific cost
--- function on cache miss. Transfer segments are two-point straight lines.
+-- materializeRoute(plan, game, vehicle_provider) walks a RoutePlan's
+-- segments and attaches a sub-cell point sequence to each:
+--   local              — vehicle-aware bounded A* via
+--                        PathfindingService.findLocalSegment.
+--   trunk / intra_city — cached trunk path or lazy compute via _trunkPath
+--                        with a mode-specific highway-first cost function.
+--   transfer           — real in-city road A* between the two entrances.
+--                        Placed-building endpoints (e.g. docks) are snapped
+--                        to their land-side plot so the road vehicle can
+--                        actually reach them.
 
 local graph             = require("lib.graph")
 local EntranceService   = require("services.EntranceService")
@@ -220,30 +221,6 @@ function RoutePlannerService.findRoute(start_pos, end_pos, game, allowed_modes)
     return RoutePlan.new(result.cost, segs)
 end
 
--- Up to `max_routes` cheapest distinct routes between the same endpoints,
--- via Yen's k-shortest. Returns a list of RoutePlans (possibly empty).
-function RoutePlannerService.findAlternativeRoutes(start_pos, end_pos, game, max_routes, allowed_modes)
-    local start_city = _cityOf(start_pos.x, start_pos.y, game)
-    local end_city   = _cityOf(end_pos.x,   end_pos.y,   game)
-    if start_city == nil or end_city == nil or start_city == end_city then
-        local single = RoutePlannerService.findRoute(start_pos, end_pos, game, allowed_modes)
-        return single and {single} or {}
-    end
-    if not game.entrance_graph then return {} end
-
-    local get_edges = _routedEdges(game, start_city, start_pos, end_city, end_pos, allowed_modes)
-    local results = graph.k_shortest(get_edges, _SRC, _SNK, max_routes or 3)
-
-    local plans = {}
-    for _, r in ipairs(results) do
-        local segs = _segmentsFromIds(r.path, game, start_city, start_pos, end_city, end_pos)
-        if #segs > 0 then
-            plans[#plans+1] = RoutePlan.new(r.cost, segs)
-        end
-    end
-    return plans
-end
-
 -- ── Trunk / intra-city pixel paths ───────────────────────────────────────────
 
 -- Vehicle-agnostic, mode-specific cost function for trunk/intra-city A*.
@@ -311,7 +288,6 @@ function RoutePlannerService.makeMockVehicle(mode, game)
     if not vp then return nil end
     return {
         operational_map_key = "unified",
-        grid_anchor         = nil,
         pathfinding_bounds  = nil,
         type                = mode,
         id                  = 0,
@@ -323,13 +299,15 @@ end
 
 -- ── Public: materializeRoute ─────────────────────────────────────────────────
 
--- For water entrances, the ux/uy is a water cell (where ships dock) and
--- therefore impassable to road vehicles. The dock building itself lives
--- on the adjacent plot, which is where a truck would actually pick up
--- or drop off cargo. Returns that land-side position, falling back to
--- the entrance's own coords for non-water entrances.
-local function _roadSideOf(e)
-    if e and e.mode == "water" and e.building and e.building.x and e.building.y then
+-- Return the land-side plot position for a placed building's entrance
+-- (docks, stations, airports — anything with a .building reference),
+-- where a truck can actually drive to pick up or drop off cargo. The
+-- entrance's own ux/uy typically sits on the traversable tile for its
+-- own mode (water cell for docks, etc.) which is unreachable by road.
+-- Auto-generated entrances without a building (highway attachments)
+-- fall through to their own coords.
+local function _buildingPlotOf(e)
+    if e and e.building and e.building.x and e.building.y then
         return {x = e.building.x, y = e.building.y}
     end
     return e and {x = e.ux, y = e.uy} or nil
@@ -375,8 +353,8 @@ function RoutePlannerService.materializeRoute(plan, game, vehicle_provider)
                 end
             end
         elseif seg.kind == "transfer" then
-            local from = _roadSideOf(seg.from_e)
-            local to   = _roadSideOf(seg.to_e)
+            local from = _buildingPlotOf(seg.from_e)
+            local to   = _buildingPlotOf(seg.to_e)
             if from and to then
                 local v = provide("road")
                 if v then
