@@ -2,15 +2,27 @@
 -- Pure palette filtering and grouping logic for the dispatch rule editor.
 -- No love.* imports. No game references.
 
+local UnlockService = require("services.UnlockService")
+local Registry      = require("data.unlock_registry")
+
 local DispatchPaletteService = {}
 
--- Returns the subset of `all` that passes the current tag + search filters.
+-- Returns the subset of `all` that passes the current tag + search + unlock filters.
 -- Multi-tag: a block passes only if it has ALL active tags (AND semantics).
-function DispatchPaletteService.filter(all, filter)
+-- `unlock_namespace` is "block" or "prefab" — determines the unlock key prefix.
+-- `state` is game.state (contains .unlocked). Pass nil to skip unlock filtering.
+function DispatchPaletteService.filter(all, filter, unlock_namespace, state)
     local has_tags   = next(filter.active_tags) ~= nil
     local search     = filter.search:lower()
+    local check_lock = state ~= nil and unlock_namespace ~= nil
     local result     = {}
     for _, def in ipairs(all) do
+        -- Unlock: must be unlocked in the player's state
+        if check_lock then
+            if not UnlockService.isUnlocked(Registry.key(unlock_namespace, def.id), state) then
+                goto continue
+            end
+        end
         -- Tag: must have every active tag
         local tag_ok = true
         if has_tags then
@@ -30,6 +42,7 @@ function DispatchPaletteService.filter(all, filter)
             or (def.tooltip and def.tooltip:lower():find(search, 1, true))
             or (def.tip     and def.tip:lower():find(search, 1, true))
         if tag_ok and search_ok then result[#result+1] = def end
+        ::continue::
     end
     return result
 end

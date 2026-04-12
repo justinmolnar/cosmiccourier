@@ -444,16 +444,17 @@
             {
               "id": "auto_dispatch_1",
               "name": "Auto-Dispatcher",
-              "description": "Automatically assign pending trips.",
+              "description": "Unlock dispatch rules and receive your first rule pack.",
               "icon": "🤖",
               "cost": 1000,
               "max_level": 1,
               "cost_multiplier": 1,
               "prerequisites": [],
               "position": {"x": 1, "y": 0},
-              "effect_type": "set_flag",
+              "effect_type": "grant_pack",
               "effect_target": "auto_dispatch_unlocked",
-              "effect_value": true
+              "effect_value": true,
+              "grant_pack_id": "starter_pack"
             },
             {
               "id": "warehouse_expansion",

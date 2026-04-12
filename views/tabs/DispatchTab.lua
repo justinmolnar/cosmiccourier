@@ -10,6 +10,8 @@ local RTU            = require("services.RuleTreeUtils")
 local PaletteService = require("services.DispatchPaletteService")
 local DLS            = require("services.DispatchLayoutService")
 local RE             = require("services.DispatchRuleEngine")
+local UnlockService  = require("services.UnlockService")
+local UnlockReg      = require("data.unlock_registry")
 local TextInput      = require("views.components.TextInput")
 local Dropdown       = require("views.components.Dropdown")
 local PREFABS        = require("data.dispatch_prefabs")
@@ -1538,7 +1540,7 @@ end
 
 -- ── Palette component ─────────────────────────────────────────────────────────
 
-local function makePalette(rule_i, panel_w)
+local function makePalette(rule_i, panel_w, game)
     local all = RE.getAllDefs()
     local pad = PAL_PAD
 
@@ -1562,10 +1564,11 @@ local function makePalette(rule_i, panel_w)
     local function calcPaletteH(pw)
         local font     = love.graphics.getFont()
         local filter_h = calcFilterHeaderH(font, pw, pad)
+        local gs       = game and game.state or nil
         local prefabs  = state.palette_filter.show_prefabs
-                         and PaletteService.filter(PREFABS,state.palette_filter) or {}
+                         and PaletteService.filter(PREFABS, state.palette_filter, "prefab", gs) or {}
         local pref_h   = calcPrefabSectionH(font, pw, prefabs)
-        local groups   = PaletteService.group(PaletteService.filter(all, state.palette_filter))
+        local groups   = PaletteService.group(PaletteService.filter(all, state.palette_filter, "block", gs))
         if #groups == 0 then
             return pad + filter_h + pref_h + 40 + pad
         end
@@ -1709,8 +1712,9 @@ local function makePalette(rule_i, panel_w)
             state.palette_search_rect = { x=sf_x, y=sf_y, w=sf_w, h=sf_h }
 
             -- ── Prefabs section ──────────────────────────────────────────────
+            local gs       = game and game.state or nil
             local prefabs  = filter.show_prefabs
-                             and PaletteService.filter(PREFABS,filter) or {}
+                             and PaletteService.filter(PREFABS, filter, "prefab", gs) or {}
             local prects   = {}
             local cy       = sf_y + sf_h + PAL_GAP
 
@@ -1771,7 +1775,7 @@ local function makePalette(rule_i, panel_w)
             end
 
             -- ── Block list (filtered + grouped by category) ──────────────────
-            local groups = PaletteService.group(PaletteService.filter(all, filter))
+            local groups = PaletteService.group(PaletteService.filter(all, filter, "block", gs))
             local bprects = {}
 
             if #groups == 0 then
@@ -1903,6 +1907,15 @@ end
 
 function DispatchTab.build(game, ui_manager)
     local comps = {}
+
+    -- Gate: dispatch tab is empty until auto-dispatch is unlocked
+    if not game.state.upgrades.auto_dispatch_unlocked then
+        table.insert(comps, { type = "label", style = "heading", h = 26, text = "Dispatch Rules" })
+        table.insert(comps, { type = "label", style = "body", h = 40,
+            text = "Purchase the Auto-Dispatcher upgrade to unlock dispatch rules." })
+        return comps
+    end
+
     local rules = game.state.dispatch_rules or {}
     local pw    = ui_manager and ui_manager.panel and ui_manager.panel.w or 300
     state.rule_card_tops     = {}
@@ -1921,7 +1934,7 @@ function DispatchTab.build(game, ui_manager)
         local is_open = state.palette_open and state.selected_rule == rule_i
         table.insert(comps, makeRuleCard(rule_i, rule, game, pw))
         if is_open and not state.collapsed_rules[rule.id or ""] then
-            table.insert(comps, makePalette(rule_i, pw))
+            table.insert(comps, makePalette(rule_i, pw, game))
         end
     end
 
@@ -2364,7 +2377,18 @@ function DispatchTab.cycleSlot(rule_i, path, slot_key, game)
                     for id in pairs(game.C.VEHICLES or {}) do opts[#opts+1] = id:lower() end
                     table.sort(opts)
                 end
-                
+
+                -- ── Unlock gating: filter opts to only unlocked items ────────────
+                local ns = UnlockReg.SLOT_NAMESPACE[sd.key]
+                if sd.type == "vehicle_enum" then ns = "vehicle"
+                elseif def.id == "block_call" and sd.key == "action" then ns = "action"
+                elseif def.id == "find_match" and sd.key == "collection" then ns = "collection"
+                elseif def.id == "find_match" and sd.key == "sorter" then ns = "sorter"
+                end
+                if ns then
+                    opts = UnlockService.filterOptions(ns, opts, game.state)
+                end
+
                 -- Calculate screen position
                 local panel = game.ui_manager.panel
                 local scroll_y = panel.scroll[panel.active_tab_id] and panel.scroll[panel.active_tab_id].scroll_y or 0
@@ -2468,6 +2492,27 @@ function DispatchTab.cycleRepInnerSlot(rep_node, rep_key, rep_sd, game)
             opts = {}
             for id in pairs(game.C.VEHICLES or {}) do opts[#opts+1] = id:lower() end
             table.sort(opts)
+        end
+
+        -- ── Unlock gating: filter opts to only unlocked items ────────────
+        local ns = UnlockReg.SLOT_NAMESPACE[sd.key]
+        if sd.type == "vehicle_enum" then ns = "vehicle"
+        elseif rep_node.def_id == "rep_get_property" and sd.key == "source" then ns = "property_source"
+        elseif rep_node.def_id == "rep_get_property" and sd.key == "property" then
+            ns = "property"
+            -- property keys are stored as "source.key" in the unlock set
+            local source = rep_node.slots.source or ""
+            local filtered = {}
+            for _, opt in ipairs(opts) do
+                if UnlockService.isUnlocked(UnlockReg.key("property", source .. "." .. opt), game.state) then
+                    filtered[#filtered + 1] = opt
+                end
+            end
+            opts = filtered
+            ns = nil -- already filtered
+        end
+        if ns then
+            opts = UnlockService.filterOptions(ns, opts, game.state)
         end
 
         -- Calculate screen position

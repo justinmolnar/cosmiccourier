@@ -40,6 +40,25 @@ function InformationFeed:new(game)
         instance:push({ text = label, color = { 1.0, 0.5, 0.3 } })
     end)
 
+    game.EventBus:subscribe("pack_opened", function(data)
+        local pack = data and data.pack
+        local result = data and data.result
+        if pack then
+            instance:push({
+                text  = string.format("Rule Pack: %s", pack.name),
+                color = { 1.0, 0.85, 0.2 },
+            })
+        end
+        if result and result.templates then
+            for _, t in ipairs(result.templates) do
+                instance:push({
+                    text  = string.format("  Unlocked: %s", t.name),
+                    color = { 0.6, 1.0, 0.75 },
+                })
+            end
+        end
+    end)
+
     return instance
 end
 

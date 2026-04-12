@@ -154,6 +154,36 @@ local EFFECT_HANDLERS = {
     special = function(system, upgrade)
         system:applySpecialEffect(upgrade)
     end,
+
+    grant_pack = function(system, upgrade)
+        local PackService  = require("services.PackService")
+        local all_templates = require("data.rule_templates")
+        local all_packs     = require("data.rule_packs")
+
+        -- Also set the flag if specified (e.g. auto_dispatch_unlocked)
+        if upgrade.effect_target and upgrade.effect_value then
+            system.state.upgrades[upgrade.effect_target] = upgrade.effect_value
+        end
+
+        local pack_id = upgrade.grant_pack_id
+        local pack_def = PackService.findPack(pack_id, all_packs)
+        if not pack_def then
+            print("ERROR: Unknown pack id: " .. tostring(pack_id))
+            return
+        end
+
+        local result = PackService.openPack(pack_def, all_templates, system.state)
+        print(string.format("Opened pack '%s': %d templates, %d new unlocks",
+            pack_def.name, #result.templates, #result.new_keys))
+
+        -- Publish event for UI pickup
+        if system.game and system.game.EventBus then
+            system.game.EventBus:publish("pack_opened", {
+                pack   = pack_def,
+                result = result,
+            })
+        end
+    end,
 }
 
 function UpgradeSystem:applyDataDrivenEffect(upgrade)
