@@ -10,6 +10,7 @@ function EventService.setupGameEvents(state, game)
     EventService.setupUpgradeEvents(state, game)
     EventService.setupVehicleEvents(state, game)
     EventService.setupCameraEvents(state, game)
+    EventService.setupFuelEvents(state, game)
 end
 
 function EventService.setupDeliveryEvents(state, game)
@@ -114,6 +115,13 @@ function EventService.setupVehicleEvents(state, game)
         state.money = state.money - cost
         state.costs[vehicleType] = math.floor(cost * vcfg.cost_multiplier)
         game.entities:addVehicle(game, vehicleType, data.depot)
+    end)
+end
+
+function EventService.setupFuelEvents(state, game)
+    game.EventBus:subscribe("fuel_consumed", function(data)
+        local text = string.format("-$%.f fuel", data.amount)
+        FloatingTextSystem.emit(text, data.x, data.y, game.C)
     end)
 end
 

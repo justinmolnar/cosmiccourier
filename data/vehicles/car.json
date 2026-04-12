@@ -9,6 +9,7 @@
   "cost_multiplier": 1.2,
   "locked_to_zone": "city",
   "transport_mode": "road",
+  "fuel_rate": 0.05,
   "anchor_to_road": true,
   "pathfinding_costs": {
     "downtown_road": 10,

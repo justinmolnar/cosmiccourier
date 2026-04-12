@@ -4,6 +4,7 @@ Vehicle.__index = Vehicle
 
 local _States
 local PathfindingService = require("services.PathfindingService")
+local FuelService        = require("services.FuelService")
 
 function Vehicle:new(id, depot, game, vehicleType)
     if not _States then _States = require("models.vehicles.vehicle_states") end
@@ -19,6 +20,8 @@ function Vehicle:new(id, depot, game, vehicleType)
     instance.base_speed        = vcfg and vcfg.base_speed       or 80
     instance.pathfinding_costs = vcfg and vcfg.pathfinding_costs or {}
     instance.transport_mode    = vcfg and vcfg.transport_mode   or "road"
+    instance.fuel_rate         = vcfg and vcfg.fuel_rate        or 0
+    instance.path_fuel_cost    = 0
 
     -- Speed modifier: accumulates upgrade multipliers on top of base_speed.
     instance.speed_modifier = game.state.upgrades[instance.type .. "_speed"] or 1.0
@@ -153,10 +156,11 @@ function Vehicle:unassign(game)
         trip:thaw()
         returnTrip(trip)
     end
-    self.trip_queue = {}
-    self.cargo      = {}
-    self.path       = {}
-    self.path_i     = 1
+    self.trip_queue     = {}
+    self.cargo          = {}
+    self.path           = {}
+    self.path_i         = 1
+    self.path_fuel_cost = 0
     self:changeState(_States.Idle, game)
 end
 
@@ -174,9 +178,16 @@ function Vehicle:_resolveOffScreenState(game)
     }
 
     local STATE_RESOLUTION = {
-        ["To Pickup"]  = function(v, g) v:changeState(States.DoPickup, g) end,
-        ["To Dropoff"] = function(v, g) v:changeState(States.DoDropoff, g) end,
+        ["To Pickup"]  = function(v, g)
+            FuelService.consume(v, g)
+            v:changeState(States.DoPickup, g)
+        end,
+        ["To Dropoff"] = function(v, g)
+            FuelService.consume(v, g)
+            v:changeState(States.DoDropoff, g)
+        end,
         ["Returning"]  = function(v, g)
+            FuelService.consume(v, g)
             if #v.trip_queue > 0 then
                 v:changeState(States.GoToPickup, g)
             else

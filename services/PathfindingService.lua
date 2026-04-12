@@ -111,6 +111,24 @@ local function _buildVehicleCostFn(vehicle, map, grid_w)
     end
 end
 
+-- Walk a completed path and sum the per-tile movement costs for a vehicle.
+-- Returns the raw accumulated cost (same units as A* gScore), NOT money.
+function PathfindingService.computePathCost(vehicle, path, game)
+    if not path or #path == 0 then return 0 end
+    local map = game.maps[vehicle.operational_map_key]
+    if not map then return 0 end
+    local grid_w = map._w or (map.grid and map.grid[1] and #map.grid[1] or 0)
+    local get_cost = _buildVehicleCostFn(vehicle, map, grid_w)
+    local total = 0
+    for _, node in ipairs(path) do
+        local c = get_cost(node.x, node.y)
+        if c < IMPASSABLE then
+            total = total + c
+        end
+    end
+    return total
+end
+
 -- Cardinal-neighbor end candidates for a destination plot. Used when the
 -- destination cell itself isn't traversable (building plots, etc.).
 local function _endCandidates(end_plot, get_cost, grid_w, grid_h)

@@ -4,9 +4,10 @@
 local States = {}
 
 -- Cache service references at module load to avoid per-call require() overhead.
-local PathScheduler     = require("services.PathScheduler")
+local PathScheduler      = require("services.PathScheduler")
 local PathfindingService = require("services.PathfindingService")
-local buildSmoothPath   = require("services.PathSmoothingService").buildSmoothPath
+local buildSmoothPath    = require("services.PathSmoothingService").buildSmoothPath
+local FuelService        = require("services.FuelService")
 
 
 --------------------------------------------------------------------------------
@@ -186,6 +187,7 @@ function States.ReturningToDepot:enter(vehicle, game)
             vehicle:changeState(States.Stuck, game)
             return
         end
+        FuelService.computeAndStore(vehicle, vehicle.path, game)
         vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
         if game.debug_smooth_vehicle_movement then buildSmoothPath(vehicle, game) end
     end)
@@ -198,6 +200,7 @@ function States.ReturningToDepot:update(dt, vehicle, game)
         return
     end
     if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
+        FuelService.consume(vehicle, game)
         local RE = require("services.DispatchRuleEngine")
         local ctx = { vehicle = vehicle, game = game }
         RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_returns_depot", ctx)
@@ -207,6 +210,7 @@ function States.ReturningToDepot:update(dt, vehicle, game)
     end
     moveAlongPath(dt, vehicle, game)
     if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
+        FuelService.consume(vehicle, game)
         local RE = require("services.DispatchRuleEngine")
         local ctx = { vehicle = vehicle, game = game }
         RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_returns_depot", ctx)
@@ -234,6 +238,7 @@ function States.GoToPickup:enter(vehicle, game)
             vehicle:changeState(States.Stuck, game)
             return
         end
+        FuelService.computeAndStore(vehicle, vehicle.path, game)
         vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
         if game.debug_smooth_vehicle_movement then buildSmoothPath(vehicle, game) end
     end)
@@ -242,11 +247,13 @@ end
 function States.GoToPickup:update(dt, vehicle, game)
     if vehicle._path_pending then return end
     if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
+        FuelService.consume(vehicle, game)
         vehicle:changeState(States.DoPickup, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
     if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
+        FuelService.consume(vehicle, game)
         vehicle:changeState(States.DoPickup, game)
     end
 end
@@ -304,6 +311,7 @@ function States.GoToDropoff:enter(vehicle, game)
             vehicle:changeState(States.Stuck, game)
             return
         end
+        FuelService.computeAndStore(vehicle, vehicle.path, game)
         vehicle.current_path_eta = PathfindingService.estimatePathTravelTime(vehicle.path, vehicle, game)
         if game.debug_smooth_vehicle_movement then buildSmoothPath(vehicle, game) end
     end)
@@ -312,11 +320,13 @@ end
 function States.GoToDropoff:update(dt, vehicle, game)
     if vehicle._path_pending then return end
     if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
+        FuelService.consume(vehicle, game)
         vehicle:changeState(States.DoDropoff, game)
         return
     end
     moveAlongPath(dt, vehicle, game)
     if (not vehicle.path) or ((vehicle.path_i or 1) > #vehicle.path) then
+        FuelService.consume(vehicle, game)
         vehicle:changeState(States.DoDropoff, game)
     end
 end

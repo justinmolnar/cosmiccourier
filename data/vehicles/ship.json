@@ -9,6 +9,7 @@
   "cost_multiplier": 1.5,
   "max_range": null,
   "transport_mode": "water",
+  "fuel_rate": 0.15,
   "anchor_to_road": false,
   "pathfinding_costs": {
     "coastal_water": 2,

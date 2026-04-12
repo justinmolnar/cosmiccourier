@@ -32,6 +32,14 @@ function InformationFeed:new(game)
         instance:push({ text = "New trip available", color = { 0.6, 0.75, 1.0 } })
     end)
 
+    game.EventBus:subscribe("fuel_consumed", function(data)
+        local v = data and data.vehicle
+        local label = v
+            and string.format("%s #%d fuel -$%.f", v:getIcon(), v.id, data.amount)
+            or  string.format("Fuel -$%.f", data.amount)
+        instance:push({ text = label, color = { 1.0, 0.5, 0.3 } })
+    end)
+
     return instance
 end
 

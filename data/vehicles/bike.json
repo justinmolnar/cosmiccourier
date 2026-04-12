@@ -10,6 +10,7 @@
   "locked_to_zone": "district",
   "required_depot_district": "downtown",
   "transport_mode": "road",
+  "fuel_rate": 0.01,
   "anchor_to_road": false,
   "pathfinding_costs": {
     "downtown_road": 5,
