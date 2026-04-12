@@ -1033,11 +1033,23 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                             end
                         end
 
-                        -- Diamonds at every transfer point in the original plan.
+                        -- Diamonds at every transfer point. For water-mode
+                        -- endpoints, mark the dock's land-side plot (where
+                        -- the truck picks up / drops off) rather than the
+                        -- water cell itself.
+                        local function diamondPx(e)
+                            local bx, by
+                            if e.mode == "water" and e.building
+                               and e.building.x and e.building.y then
+                                bx, by = e.building.x, e.building.y
+                            else
+                                bx, by = e.ux, e.uy
+                            end
+                            return (bx - 0.5) * uts, (by - 0.5) * uts
+                        end
                         for _, seg in ipairs(plan.segments) do
                             if seg.kind == "transfer" and seg.from_e then
-                                local px = (seg.from_e.ux - 0.5) * uts
-                                local py = (seg.from_e.uy - 0.5) * uts
+                                local px, py = diamondPx(seg.from_e)
                                 rendered.transfer_pts[#rendered.transfer_pts+1] = {px, py}
                             end
                         end

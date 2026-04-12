@@ -37,10 +37,13 @@ local function _intraCityCost(a, b, mode)
 end
 
 -- Transfer cost between two same-city entrances of different modes.
--- Road speed + the configured loading/unloading penalty.
+-- Represents a truck ferrying cargo between the two endpoints via city
+-- streets, so it uses the same LOCAL_COST_FACTOR penalty as _localCost
+-- in RoutePlannerService. Plus the flat loading/unloading penalty.
 local function _transferCost(a, b)
     local speed = EConfig.MODE_SPEEDS.road or 60
-    return _manhattan(a, b) / speed + EConfig.TRANSFER_COST
+    local dist  = (EConfig.LOCAL_COST_FACTOR or 1) * _manhattan(a, b) / speed
+    return dist + EConfig.TRANSFER_COST
 end
 
 -- Travel-time cost for an inter-city trunk edge. Caller supplies the true

@@ -45,27 +45,52 @@ end
 -- ── Cost helpers ──────────────────────────────────────────────────────────────
 
 -- Estimated travel time between a sub-cell position and an entrance,
--- using the entrance's mode speed.
+-- penalized by LOCAL_COST_FACTOR because local driving uses city streets
+-- which are much slower than the highway-grade travel assumed by trunk
+-- edges.
 local function _localCost(p, e, mode)
     local dx = math.abs(p.x - e.ux)
     local dy = math.abs(p.y - e.uy)
     local speed = EConfig.MODE_SPEEDS[mode] or EConfig.MODE_SPEEDS.road or 60
-    return (dx + dy) / speed
+    return (EConfig.LOCAL_COST_FACTOR or 1) * (dx + dy) / speed
 end
 
 -- ── Edge accessor with virtual SRC/SNK ───────────────────────────────────────
 
+-- Infer the endpoint mode (how the start and end positions are physically
+-- reached) from allowed_modes. If exactly one mode is allowed, use it;
+-- otherwise default to road because trip start/end positions are building
+-- plots and only road vehicles can reach those. The endpoint mode restricts
+-- which entrances SRC and SNK can attach to — without this, Dijkstra will
+-- happily pick a water entrance for the final leg into the destination
+-- plot, which is physically impossible (ships can't drive onto plots) and
+-- produces broken materialization.
+local function _inferEndpointMode(allowed_modes)
+    if not allowed_modes then return "road" end
+    local n, last = 0, nil
+    for k in pairs(allowed_modes) do n = n + 1; last = k end
+    if n == 1 then return last end
+    return "road"
+end
+
 -- Build a get_edges closure over game.entrance_graph plus virtual SRC/SNK
--- nodes. SRC connects to every entrance of start_city; every entrance of
--- end_city connects to SNK. Optional allowed_modes restricts which edges
--- (and which transfers) may be walked.
+-- nodes. SRC connects to entrances of start_city matching endpoint_mode;
+-- every endpoint_mode entrance of end_city connects to SNK.
+--
+-- Terminal rule: once Dijkstra reaches an endpoint_mode entrance in
+-- end_city, the only outgoing edge is SNK. No intra_city hop, no transfer,
+-- no further trunk traversal. Without this rule Dijkstra can "hop" between
+-- entrances in the destination city looking for one that's closer to
+-- end_pos, producing visual detours that drive past the destination,
+-- loop to another entrance, then come back.
 local function _routedEdges(game, start_city, start_pos, end_city, end_pos, allowed_modes)
     local g = game.entrance_graph
+    local endpoint_mode = _inferEndpointMode(allowed_modes)
     return function(id)
         if id == _SRC then
             local out = {}
             for _, e in ipairs(EntranceService.getForCity(start_city, game)) do
-                if not allowed_modes or allowed_modes[e.mode] then
+                if e.mode == endpoint_mode then
                     out[#out+1] = {to = e.id, cost = _localCost(start_pos, e, e.mode)}
                 end
             end
@@ -73,10 +98,25 @@ local function _routedEdges(game, start_city, start_pos, end_city, end_pos, allo
         end
         if id == _SNK then return {} end
 
+        -- Terminal node: first endpoint_mode entrance we hit in end_city.
+        -- Bail out immediately to SNK so the rest of the route is the
+        -- local A* from this entrance to end_pos — no graph detours.
+        local ent = EntranceService.getById(id, game)
+        if ent and ent.city_idx == end_city and ent.mode == endpoint_mode then
+            return {{to = _SNK, cost = _localCost(end_pos, ent, ent.mode)}}
+        end
+
+        -- Start-city intra_city edges are blocked: Dijkstra should pick one
+        -- start-city entrance directly from SRC and leave via trunk/transfer,
+        -- not hop between entrances in the start city first. Transfers are
+        -- still allowed so multi-modal outbound (road → water) works.
+        local in_start = ent and ent.city_idx == start_city
+
         local out = {}
         if g then
             for _, e in ipairs(g:getEdges(id)) do
                 local ok = (e.kind == "trunk" or e.kind == "intra_city" or e.kind == "transfer")
+                if ok and in_start and e.kind == "intra_city" then ok = false end
                 if ok and allowed_modes then
                     if e.mode and not allowed_modes[e.mode] then ok = false end
                     if e.kind == "transfer" then
@@ -86,12 +126,6 @@ local function _routedEdges(game, start_city, start_pos, end_city, end_pos, allo
                 end
                 if ok then out[#out+1] = e end
             end
-        end
-
-        local ent = EntranceService.getById(id, game)
-        if ent and ent.city_idx == end_city
-           and (not allowed_modes or allowed_modes[ent.mode]) then
-            out[#out+1] = {to = _SNK, cost = _localCost(end_pos, ent, ent.mode)}
         end
         return out
     end
@@ -289,11 +323,31 @@ end
 
 -- ── Public: materializeRoute ─────────────────────────────────────────────────
 
+-- For water entrances, the ux/uy is a water cell (where ships dock) and
+-- therefore impassable to road vehicles. The dock building itself lives
+-- on the adjacent plot, which is where a truck would actually pick up
+-- or drop off cargo. Returns that land-side position, falling back to
+-- the entrance's own coords for non-water entrances.
+local function _roadSideOf(e)
+    if e and e.mode == "water" and e.building and e.building.x and e.building.y then
+        return {x = e.building.x, y = e.building.y}
+    end
+    return e and {x = e.ux, y = e.uy} or nil
+end
+
 -- Walk a RoutePlan and attach a sub-cell point sequence to each segment.
 -- `vehicle_provider` is either a vehicle table OR a function(mode) → vehicle.
--- Trunk/intra_city/transfer segments don't need a vehicle. Local segments
--- need one whose mode matches the segment (or any vehicle for the mode-nil
--- same-city case). Returns {segments = [{kind, mode, points}]}.
+-- Returns {segments = [{kind, mode, points}]}.
+--
+-- Segment handling:
+--   trunk / intra_city — cached trunk path or lazy compute via _trunkPath.
+--   local              — vehicle-aware bounded A* via findLocalSegment.
+--   transfer           — a real in-city road path from one entrance to the
+--                        other, representing the truck that physically moves
+--                        the cargo between a dock and a road (or between any
+--                        two entrances of different modes). Water-mode
+--                        endpoints are snapped to their dock's land plot so
+--                        road A* can actually reach them.
 function RoutePlannerService.materializeRoute(plan, game, vehicle_provider)
     if not plan then return nil end
     local PathfindingService = require("services.PathfindingService")
@@ -321,11 +375,23 @@ function RoutePlannerService.materializeRoute(plan, game, vehicle_provider)
                 end
             end
         elseif seg.kind == "transfer" then
-            if seg.from_e and seg.to_e then
-                points = {
-                    {x = seg.from_e.ux, y = seg.from_e.uy},
-                    {x = seg.to_e.ux,   y = seg.to_e.uy},
-                }
+            local from = _roadSideOf(seg.from_e)
+            local to   = _roadSideOf(seg.to_e)
+            if from and to then
+                local v = provide("road")
+                if v then
+                    points = PathfindingService.findLocalSegment(v, from, to, seg.city_idx, game)
+                end
+            end
+            -- Fallback to a straight line if A* can't find a path (e.g., the
+            -- dock plot has no adjacent road — shouldn't happen in practice).
+            if not points or #points == 0 then
+                if seg.from_e and seg.to_e then
+                    points = {
+                        {x = seg.from_e.ux, y = seg.from_e.uy},
+                        {x = seg.to_e.ux,   y = seg.to_e.uy},
+                    }
+                end
             end
         end
         out.segments[#out.segments+1] = {
