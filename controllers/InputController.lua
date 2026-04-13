@@ -246,6 +246,12 @@ function InputController:textinput(text)
 end
 
 function InputController:mousewheelmoved(x, y)
+    -- Modal gets scroll priority
+    local mm = self.game.ui_manager and self.game.ui_manager.modal_manager
+    if mm and mm:isActive() and mm.active_modal.wheelmoved then
+        if mm.active_modal:wheelmoved(x, y) then return end
+    end
+
     local mx, my = love.mouse.getPosition()
     -- Sidebar: pass vertical scroll to UI manager
     if mx < self.game.C.UI.SIDEBAR_WIDTH then
@@ -552,26 +558,31 @@ function InputController:_tryPlaceDepot(wx, wy, sx, sy)
 end
 
 -- Build and show a context-sensitive right-click menu at screen position (sx, sy).
+-- Hit-tests all entity types at the click position and delegates item building
+-- to data/context_menu_items.lua. Multiple overlapping entities each contribute
+-- their own section to the same menu.
 function InputController:openContextMenu(sx, sy, game)
+    local CMI = require("data.context_menu_items")
     local world_x, world_y = game.camera:screenToWorld(sx, sy, game)
     local mpw = (game.world_w or 0) * game.C.MAP.TILE_SIZE
     if mpw > 0 then world_x = ((world_x % mpw) + mpw) % mpw end
 
-    local items = {}
+    local items    = {}
+    local any_hit  = false
     local gx, gy, umap = _worldToSubcell(world_x, world_y, game)
 
-    -- ── Hit-test: highway tile ───────────────────────────────────────────────
-    local hit_highway = false
-    local hw_wx, hw_wy
-    if gx then
-        local IS = require("services.InfrastructureService")
-        hw_wx = math.ceil(gx / 3)
-        hw_wy = math.ceil(gy / 3)
-        hit_highway = IS.isHighwayCell(hw_wx, hw_wy, game)
+    -- ── Hit-test: all vehicles in radius ─────────────────────────────────────
+    local click_r = game.C.UI.VEHICLE_CLICK_RADIUS / game.camera.scale
+    local r2 = click_r * click_r
+    for _, v in ipairs(game.entities.vehicles) do
+        if (world_x - v.px)^2 + (world_y - v.py)^2 < r2 then
+            if any_hit then table.insert(items, { separator = true }) end
+            for _, item in ipairs(CMI.vehicle(v, game)) do items[#items + 1] = item end
+            any_hit = true
+        end
     end
 
     -- ── Hit-test: depot ──────────────────────────────────────────────────────
-    local hit_depot = nil
     if umap then
         local u_uts = umap.tile_pixel_size
         local hit_r = 20 / game.camera.scale
@@ -580,159 +591,30 @@ function InputController:openContextMenu(sx, sy, game)
                 local dpx = (depot.plot.x - 0.5) * u_uts
                 local dpy = (depot.plot.y - 0.5) * u_uts
                 if (world_x - dpx)^2 + (world_y - dpy)^2 < hit_r * hit_r then
-                    hit_depot = depot
+                    if any_hit then table.insert(items, { separator = true }) end
+                    for _, item in ipairs(CMI.depot(depot, game)) do items[#items + 1] = item end
+                    any_hit = true
                     break
                 end
             end
         end
     end
 
-    -- ── Hit-test: vehicle ────────────────────────────────────────────────────
-    local hit_vehicle = nil
-    do
-        local click_r = game.C.UI.VEHICLE_CLICK_RADIUS / game.camera.scale
-        local r2 = click_r * click_r
-        for _, v in ipairs(game.entities.vehicles) do
-            if (world_x - v.px)^2 + (world_y - v.py)^2 < r2 then
-                hit_vehicle = v
-                break
-            end
+    -- ── Hit-test: highway tile ───────────────────────────────────────────────
+    if gx then
+        local IS = require("services.InfrastructureService")
+        local hw_wx = math.ceil(gx / 3)
+        local hw_wy = math.ceil(gy / 3)
+        if IS.isHighwayCell(hw_wx, hw_wy, game) then
+            if any_hit then table.insert(items, { separator = true }) end
+            for _, item in ipairs(CMI.highway(hw_wx, hw_wy, game)) do items[#items + 1] = item end
+            any_hit = true
         end
     end
 
-    -- ── Context: on a depot ──────────────────────────────────────────────────
-    if hit_depot then
-        table.insert(items, { label = hit_depot.id or "Depot", disabled = true })
-        table.insert(items, { separator = true })
-        table.insert(items, { icon = "📊", label = "View Depot Info",
-            action = function(g)
-                g.ui_manager.panel.depot_view = hit_depot
-            end })
-        -- Hire menu per vehicle type
-        local sorted = {}
-        for id, vcfg in pairs(game.C.VEHICLES) do
-            sorted[#sorted+1] = { id = id, vcfg = vcfg }
-        end
-        table.sort(sorted, function(a, b) return a.vcfg.base_cost < b.vcfg.base_cost end)
-        for _, entry in ipairs(sorted) do
-            local vid  = entry.id:lower()
-            local vcfg = entry.vcfg
-            local cost = game.state.costs[vid] or vcfg.base_cost
-            local can_afford = game.state.money >= cost
-            local district_ok = true
-            local suffix = ""
-            if vcfg.required_depot_district then
-                district_ok = (hit_depot:getDistrict(game) == vcfg.required_depot_district)
-                if not district_ok then suffix = " [needs " .. vcfg.required_depot_district .. "]" end
-            end
-            if vcfg.transport_mode == "water" then
-                local EntranceService = require("services.EntranceService")
-                if not EntranceService.anyOfMode("water", game) then
-                    district_ok = false; suffix = " [place a dock first]"
-                end
-            end
-            table.insert(items, {
-                icon     = vcfg.icon,
-                label    = string.format("Hire %s ($%d)%s", vcfg.display_name, cost, suffix),
-                disabled = not can_afford or not district_ok,
-                action   = function(g)
-                    g.EventBus:publish("ui_buy_vehicle_at_depot_clicked",
-                        { vehicle_id = vid, depot = hit_depot })
-                end,
-            })
-        end
-        table.insert(items, { separator = true })
-        table.insert(items, { icon = "📢", label = "Market for Clients ($100)",
-            disabled = true })  -- placeholder
-
-    -- ── Context: on a vehicle ────────────────────────────────────────────────
-    elseif hit_vehicle then
-        local vcfg = game.C.VEHICLES[hit_vehicle.type_upper]
-        local name = (vcfg and vcfg.display_name or hit_vehicle.type)
-                  .. " #" .. hit_vehicle.id
-        table.insert(items, { label = name, disabled = true })
-        table.insert(items, { separator = true })
-        table.insert(items, { icon = "🚗", label = "Select Vehicle",
-            action = function(g)
-                g.entities.selected_vehicle = hit_vehicle
-                g.entities.selected_depot   = nil
-            end })
-        table.insert(items, { icon = "🏠", label = "Recall to Depot",
-            action = function(g)
-                local States = require("models.vehicles.vehicle_states")
-                hit_vehicle:unassign(g)
-            end })
-
-    -- ── Context: highway tile ────────────────────────────────────────────────
-    elseif hit_highway then
-        table.insert(items, { label = "Highway", disabled = true })
-        table.insert(items, { separator = true })
-        table.insert(items, { icon = "🛣️", label = "Extend Highway from here",
-            action = function(g)
-                g.entities.build_highway_mode = true
-                g.entities.highway_build_nodes = {{ wx = hw_wx, wy = hw_wy }}
-            end })
-
-    -- ── Context: empty world space ───────────────────────────────────────────
-    else
-        local valid_site = gx and _isValidDepotSite(gx, gy, umap)
-        local depot_cost = 500
-        -- Check district uniqueness for the context menu disabled state
-        local district_taken = false
-        local depot_district_label = nil
-        if valid_site then
-            local Depot_cls = require("models.Depot")
-            local cand = Depot_cls:new("_cand", {x=gx, y=gy}, game)
-            local cand_district = cand:getDistrict(game)
-            local cand_city     = cand:getCity(game)
-            if cand_district then
-                for _, existing in ipairs(game.entities.depots) do
-                    if existing:getCity(game) == cand_city and existing:getDistrict(game) == cand_district then
-                        district_taken = true
-                        depot_district_label = "District already has a depot"
-                        break
-                    end
-                end
-            end
-        end
-        local depot_disabled = not valid_site or game.state.money < depot_cost or district_taken
-        local depot_label = "Build Depot ($" .. depot_cost .. ")"
-        if district_taken then depot_label = "Build Depot — " .. (depot_district_label or "unavailable") end
-        table.insert(items, { icon = "🏢", label = depot_label,
-            disabled = depot_disabled,
-            action   = function(g)
-                g.entities.build_depot_mode = true
-                local ic = g.input_controller
-                if ic then ic:_tryPlaceDepot(world_x, world_y, sx, sy) end
-            end })
-
-        -- Dock placement (water-adjacent city tile)
-        local dock_cfg  = game.C.BUILDINGS and game.C.BUILDINGS["dock"]
-        local dock_city = gx and _cityIdxForSubcell(gx, gy, game)
-        local BS        = dock_cfg and require("services.BuildingService")
-        local dock_ok   = BS and gx and dock_city
-                          and BS.canPlace(dock_cfg, gx, gy, umap)
-        local dock_cost = dock_cfg and dock_cfg.build_cost or 800
-        local dock_disabled = not dock_ok or game.state.money < dock_cost
-        if dock_cfg then
-            table.insert(items, { icon = dock_cfg.icon or "⚓",
-                label    = "Build Dock ($" .. dock_cost .. ")",
-                disabled = dock_disabled,
-                action   = function(g)
-                    if g.state.money < dock_cost then return end
-                    g.state.money = g.state.money - dock_cost
-                    BS.place(dock_cfg, gx, gy, dock_city, g)
-                    require("services.FloatingTextSystem").emit(
-                        "Dock Built! -$" .. dock_cost, world_x, world_y, g.C)
-                end })
-        end
-
-        table.insert(items, { separator = true })
-        table.insert(items, { icon = "📍", label = "Set Camera Here",
-            action = function(g)
-                g.camera.x = world_x
-                g.camera.y = world_y
-            end })
+    -- ── Fallback: empty world space ──────────────────────────────────────────
+    if not any_hit then
+        items = CMI.empty(world_x, world_y, sx, sy, gx, gy, umap, game)
     end
 
     if #items > 0 then

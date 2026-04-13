@@ -15,7 +15,7 @@ return {
     {   id             = "starter_pack",
         name           = "Dispatch Basics",
         tags           = { "starter" },
-        count          = 4,
+        count          = 2,
         max_complexity = 1,
     },
 

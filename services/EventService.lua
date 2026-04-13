@@ -11,6 +11,7 @@ function EventService.setupGameEvents(state, game)
     EventService.setupVehicleEvents(state, game)
     EventService.setupCameraEvents(state, game)
     EventService.setupFuelEvents(state, game)
+    EventService.setupPackEvents(state, game)
 end
 
 function EventService.setupDeliveryEvents(state, game)
@@ -50,6 +51,12 @@ function EventService.setupTripEvents(state, game)
         -- If all checks pass, remove the trip and assign it
         trip_to_assign = table.remove(game.entities.trips.pending, trip_index)
         if trip_to_assign then
+            local sc = trip_to_assign.source_client
+            if sc and sc.cargo then
+                for j = #sc.cargo, 1, -1 do
+                    if sc.cargo[j] == trip_to_assign then table.remove(sc.cargo, j); break end
+                end
+            end
             print(string.format("Assigned trip to %s %d.", selected_vehicle.type, selected_vehicle.id))
             selected_vehicle:assignTrip(trip_to_assign, game)
         end
@@ -134,6 +141,15 @@ function EventService.setupCameraEvents(state, game)
             game.camera.y       = data.camera.y
             game.camera.scale   = data.camera.scale
         end
+    end)
+end
+
+function EventService.setupPackEvents(state, game)
+    game.EventBus:subscribe("pack_opened", function(data)
+        local PackModal = require("views.components.PackModal")
+        local on_close  = function() game.ui_manager.modal_manager:hide() end
+        local modal     = PackModal:new(data.pack, data.result, on_close)
+        game.ui_manager.modal_manager:show(modal)
     end)
 end
 

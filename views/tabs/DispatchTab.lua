@@ -212,6 +212,8 @@ measureStack = function(stack, game, panel_w) return DLS.measureStack(stack, mkC
 boolNodeW    = function(node, font)           return DLS.boolNodeW   (node, mkCtx(font)) end
 boolNodeSize = function(node, font, panel_w)  return DLS.boolNodeSize(node, mkCtx(font, panel_w)) end
 
+DispatchTab.measureStack = measureStack
+
 -- ── Slot pill helper ──────────────────────────────────────────────────────────
 
 -- Convert a slot value to its display string (handles reporter nodes).
@@ -1293,6 +1295,10 @@ drawNodeList = function(stack, x, y, w, game, nrects, dtargets, path_prefix, war
 
     return cy - y
 end
+
+-- Expose for read-only preview rendering (e.g. PackModal).
+-- Call with nrects=nil, dtargets=nil, path_prefix=nil, warn_map=nil for preview.
+DispatchTab.drawNodeList = drawNodeList
 
 -- ── Rule card component ───────────────────────────────────────────────────────
 
