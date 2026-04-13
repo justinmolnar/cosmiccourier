@@ -39,6 +39,7 @@ function Client:update(dt, game)
         if new_trip then
             new_trip.source_client = self
             self.trips_generated   = (self.trips_generated or 0) + 1
+            table.insert(self.cargo, new_trip)
             table.insert(game.entities.trips.pending, new_trip)
             game.EventBus:publish("trip_created")
         end

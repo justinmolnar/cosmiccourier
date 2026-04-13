@@ -108,6 +108,9 @@ function VehicleRenderer.draw(vehicle, game)
 
     DrawingUtils.drawWorldIcon(game, vehicle:getIcon(), draw_px, draw_py)
 
+    -- Count badge (cargo the vehicle is actually carrying)
+    DrawingUtils.drawCountBadge(game, #vehicle.cargo, draw_px, draw_py)
+
     -- Speech bubble (fades in last second)
     local sb = vehicle.speech_bubble
     if sb and sb.timer > 0 then

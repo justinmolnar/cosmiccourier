@@ -41,7 +41,10 @@
       "Read(//tmp/**)",
       "Bash(luac -p services/RoutePlannerService.lua services/PathfindingService.lua models/Trip.lua data/dispatch_properties.lua)",
       "Bash(where lua:*)",
-      "Bash(lua -v)"
+      "Bash(lua -v)",
+      "Bash(find . -name \"*.lua\" -type f -exec grep -l \"REGION\\\\|CONTINENT\\\\|WORLD\" {} \\\\;)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(python -c \"import json; json.load\\(open\\('data/upgrades.json'\\)\\); print\\('JSON valid'\\)\")"
     ]
   }
 }

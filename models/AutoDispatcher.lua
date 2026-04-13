@@ -42,6 +42,12 @@ function AutoDispatcher:dispatch(game)
             local trip = game.entities.trips.pending[i]
             if claimed[trip] or cancelled[trip] then
                 table.remove(game.entities.trips.pending, i)
+                local sc = trip.source_client
+                if sc and sc.cargo then
+                    for j = #sc.cargo, 1, -1 do
+                        if sc.cargo[j] == trip then table.remove(sc.cargo, j); break end
+                    end
+                end
             end
         end
     end

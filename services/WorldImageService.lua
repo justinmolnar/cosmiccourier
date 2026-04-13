@@ -155,7 +155,6 @@ function WorldImageService.buildCityImage(
     local ZONE_ALPHA = ZT.COLOR_ALPHA
 
     local use_districts = (view_mode == "districts")
-    local fog_downtown  = (view_scope == "downtown")
 
     if use_districts and not terrain_cmap then return nil end
     if not use_districts and not active_colormap then return nil end
@@ -285,12 +284,6 @@ function WorldImageService.buildCityImage(
                 end
 
                 local r, g, b = c[1], c[2], c[3]
-                if fog_downtown and dist_owner_map then
-                    local sci2 = gscy * sub_w + gscx + 1
-                    if dist_owner_map[sci2] ~= 1 then
-                        r = r*0.18+0.01; g = g*0.18+0.02; b = b*0.18+0.06
-                    end
-                end
                 imgdata:setPixel(px, py, r, g, b, 1.0)
             else
                 imgdata:setPixel(px, py, 0, 0, 0, 0)

@@ -165,4 +165,32 @@ function DrawingUtils.drawPanel(x, y, w, h, bg_color, border_color)
     end)
 end
 
+function DrawingUtils.drawCountBadge(game, count, px, py)
+    if count <= 0 then return end
+    local g   = love.graphics
+    local cs  = game.camera.scale
+    local r   = 7   -- badge radius in screen pixels
+    local ox  = 10  -- offset right from entity center
+    local oy  = -10 -- offset up from entity center
+
+    g.push()
+    g.translate(px, py)
+    g.scale(1 / cs, 1 / cs)
+
+    -- Circle background
+    g.setColor(0.85, 0.25, 0.2, 0.9)
+    g.circle("fill", ox, oy, r)
+
+    -- Number
+    local font = game.fonts.ui_small
+    g.setFont(font)
+    local text = tostring(count)
+    local tw = font:getWidth(text)
+    local th = font:getHeight()
+    g.setColor(1, 1, 1, 1)
+    g.print(text, ox - tw / 2, oy - th / 2)
+
+    g.pop()
+end
+
 return DrawingUtils
