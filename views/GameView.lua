@@ -1994,6 +1994,11 @@ function GameView:_drawFogOfWar(sidebar_w, screen_w, screen_h)
         self._fog_mask_image = love.graphics.newImage(mask_info.mask_data)
         self._fog_mask_image:setFilter("linear", "linear")
         self._fog_mask_image:setWrap("clamp", "clamp")
+        if mask_info.dist_data then
+            self._fog_dist_image = love.graphics.newImage(mask_info.dist_data)
+            self._fog_dist_image:setFilter("linear", "linear")
+            self._fog_dist_image:setWrap("clamp", "clamp")
+        end
         self._fog_mask_tier = tier
     end
 
@@ -2010,9 +2015,11 @@ function GameView:_drawFogOfWar(sidebar_w, screen_w, screen_h)
     shader:send("vp_offset",        {sidebar_w + vw / 2, screen_h / 2})
     shader:send("world_pixel_size", {wpx_w, wpx_h})
     shader:send("reveal_mask",      self._fog_mask_image)
+    if self._fog_dist_image then
+        shader:send("dist_field", self._fog_dist_image)
+    end
     shader:send("time",             love.timer.getTime())
     shader:send("fog_color",        FC.COLOR)
-    shader:send("cloud_density",    FC.DENSITY)
     shader:send("noise_scale",      FC.NOISE_SCALE)
     shader:send("drift",            {FC.DRIFT_X, FC.DRIFT_Y})
     shader:send("cloud_tex",        self._cloud_texture)

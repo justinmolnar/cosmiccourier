@@ -19,8 +19,11 @@ function FogService.getRevealMask(game)
     local mask_data = masks[tier]
     if not mask_data then return nil end
 
+    local dist_data = game.scope_dist_fields and game.scope_dist_fields[tier]
+
     return {
         mask_data = mask_data,
+        dist_data = dist_data,
         mask_w    = game.scope_mask_w or 1,
         mask_h    = game.scope_mask_h or 1,
     }

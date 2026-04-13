@@ -1,17 +1,19 @@
 // shaders/fog_of_war.glsl
 // Cloud fog of war using domain-warped FBM for organic cloud shapes.
+// Opacity ramps from translucent near revealed areas to fully opaque far away.
 
 extern vec2  cam_pos;
 extern float cam_scale;
 extern vec2  vp_offset;
 extern vec2  world_pixel_size;
 extern Image reveal_mask;
+extern vec2  mask_size;
 extern float time;
 extern vec3  fog_color;
-extern float cloud_density;
 extern float noise_scale;
 extern vec2  drift;
 extern Image cloud_tex;
+extern Image dist_field;  // normalized distance to nearest revealed cell (0=edge, 1=far)
 
 // --- Hash + noise for procedural FBM ---
 
@@ -51,6 +53,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     // Skip pixels deep inside the revealed area
     if (revealed > 0.92) return vec4(0.0);
 
+    // Distance from nearest revealed cell (0 = at edge, 1 = very far)
+    float dist = Texel(dist_field, mask_uv).r;
+
     // Domain-warped FBM for cloud shapes
     vec2 st = world_pos * noise_scale * 1.5;
     st += drift * time * 30.0;
@@ -74,19 +79,23 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
     float cloud = (f * f * f + 0.6 * f * f + 0.5 * f);
     cloud = clamp(cloud, 0.0, 1.0);
 
-    // Color: lighter tops, darker shadows
-    vec3 bright = fog_color * 1.1;
-    vec3 shadow = fog_color * vec3(0.7, 0.72, 0.82);
-    vec3 col = mix(shadow, bright, cloud);
-
     // Use noise to perturb the reveal boundary — biased inward so fog
     // encroaches into the revealed area rather than bleeding outward
     float edge_noise = f * 0.5 + baked * 0.5;
     float threshold = 0.7 + (edge_noise - 0.5) * 0.4;
     float fog_factor = smoothstep(threshold + 0.1, threshold - 0.1, revealed);
 
-    // Modulate opacity with cloud density so thin areas are slightly translucent
-    fog_factor *= mix(0.88, 1.0, cloud) * cloud_density;
+    // Distance-based final opacity: slight haze at edge, fully opaque within a few tiles
+    float final_alpha = 0.4 + 0.6 * smoothstep(0.0, 0.015, dist);
+    fog_factor = fog_factor * final_alpha;
+
+    // Color: cloud texture only visible in fully opaque areas.
+    // In the transition zone use flat fog color so cloud patterns
+    // don't create visible streaks against the terrain underneath.
+    vec3 bright = fog_color * 1.1;
+    vec3 shadow = fog_color * vec3(0.7, 0.72, 0.82);
+    float color_blend = smoothstep(0.85, 1.0, fog_factor);
+    vec3 col = mix(fog_color, mix(shadow, bright, cloud), color_blend);
 
     if (fog_factor < 0.01) return vec4(0.0);
 

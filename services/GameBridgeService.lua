@@ -490,6 +490,85 @@ function GameBridgeService.wire(
     game.scope_mask_w = sw
     game.scope_mask_h = sh
 
+    -- Generate per-tier distance fields via BFS flood from revealed cells.
+    -- Each pixel stores normalized distance to nearest revealed cell (0=edge, 1=far).
+    -- Euclidean distance transform (two-pass squared-distance method).
+    -- Stores nearest-revealed-cell coordinates, computes true Euclidean distance.
+    local INF = sw * sw + sh * sh
+    local max_dist = math.sqrt(INF) * 0.25
+    local scope_dist_fields = {}
+    for tier, mask in pairs(fog_masks) do
+        -- Init squared distance grid: 0 for revealed, INF for fogged
+        local sd = {}
+        for py = 0, sh - 1 do
+            for px = 0, sw - 1 do
+                local idx = py * sw + px + 1
+                local r = mask:getPixel(px, py)
+                sd[idx] = (r > 0.5) and 0 or INF
+            end
+        end
+        -- Forward pass: top-left to bottom-right
+        for py = 0, sh - 1 do
+            for px = 0, sw - 1 do
+                local idx = py * sw + px + 1
+                if px > 0      then local v = sd[idx - 1];     if v + 1 < sd[idx] then sd[idx] = v + 1 end end
+                if py > 0      then local v = sd[(py-1)*sw+px+1]; if v + 1 < sd[idx] then sd[idx] = v + 1 end end
+                if px > 0 and py > 0 then local v = sd[(py-1)*sw+px]; if v + 2 < sd[idx] then sd[idx] = v + 2 end end
+                if px < sw-1 and py > 0 then local v = sd[(py-1)*sw+px+2]; if v + 2 < sd[idx] then sd[idx] = v + 2 end end
+            end
+        end
+        -- Backward pass: bottom-right to top-left
+        for py = sh - 1, 0, -1 do
+            for px = sw - 1, 0, -1 do
+                local idx = py * sw + px + 1
+                if px < sw-1   then local v = sd[idx + 1];     if v + 1 < sd[idx] then sd[idx] = v + 1 end end
+                if py < sh-1   then local v = sd[(py+1)*sw+px+1]; if v + 1 < sd[idx] then sd[idx] = v + 1 end end
+                if px < sw-1 and py < sh-1 then local v = sd[(py+1)*sw+px+2]; if v + 2 < sd[idx] then sd[idx] = v + 2 end end
+                if px > 0 and py < sh-1 then local v = sd[(py+1)*sw+px]; if v + 2 < sd[idx] then sd[idx] = v + 2 end end
+            end
+        end
+        -- Write distance values to a flat array, take sqrt, normalize
+        local sqrt = math.sqrt
+        local min  = math.min
+        local vals = {}
+        for i = 1, sw * sh do
+            vals[i] = min(sqrt(sd[i]) / max_dist, 1.0)
+        end
+        -- Box blur passes to eliminate interpolation artifacts
+        for pass = 1, 3 do
+            local tmp = {}
+            for py = 0, sh - 1 do
+                for px = 0, sw - 1 do
+                    local sum, cnt = 0, 0
+                    for dy = -2, 2 do
+                        local ny = py + dy
+                        if ny >= 0 and ny < sh then
+                            for dx = -2, 2 do
+                                local nx = px + dx
+                                if nx >= 0 and nx < sw then
+                                    sum = sum + vals[ny * sw + nx + 1]
+                                    cnt = cnt + 1
+                                end
+                            end
+                        end
+                    end
+                    tmp[py * sw + px + 1] = sum / cnt
+                end
+            end
+            vals = tmp
+        end
+        -- Write blurred values to ImageData
+        local df = love.image.newImageData(sw, sh, "rgba16f")
+        for py = 0, sh - 1 do
+            for px = 0, sw - 1 do
+                local v = vals[py * sw + px + 1]
+                df:setPixel(px, py, v, v, v, 1)
+            end
+        end
+        scope_dist_fields[tier] = df
+    end
+    game.scope_dist_fields = scope_dist_fields
+
     game._prewarm_pending = true
 end
 

@@ -127,8 +127,8 @@ local C = {
         -- Visual appearance
         COLOR               = {0.85, 0.88, 0.92},  -- light cloud gray
         DENSITY             = 0.97,                 -- overall fog opacity
-        DRIFT_X             = 0.008,                -- UV offset per second (horizontal)
-        DRIFT_Y             = 0.005,                -- UV offset per second (vertical)
+        DRIFT_X             = 0.0008,               -- UV offset per second (horizontal)
+        DRIFT_Y             = 0.0005,               -- UV offset per second (vertical)
         NOISE_SCALE         = 0.003,                -- world-px to noise UV
 
         -- Per-tier edge softness (world pixels).
