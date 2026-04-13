@@ -113,6 +113,7 @@ local function _routedEdges(game, start_city, start_pos, end_city, end_pos, allo
         -- still allowed so multi-modal outbound (road → water) works.
         local in_start = ent and ent.city_idx == start_city
 
+        local FogService = require("services.FogService")
         local out = {}
         if g then
             for _, e in ipairs(g:getEdges(id)) do
@@ -124,6 +125,11 @@ local function _routedEdges(game, start_city, start_pos, end_city, end_pos, allo
                         local dst = EntranceService.getById(e.to, game)
                         if dst and not allowed_modes[dst.mode] then ok = false end
                     end
+                end
+                -- Skip edges whose destination is in fog
+                if ok then
+                    local dst = EntranceService.getById(e.to, game)
+                    if dst and not FogService.isRevealed(game, dst.ux, dst.uy) then ok = false end
                 end
                 if ok then out[#out+1] = e end
             end

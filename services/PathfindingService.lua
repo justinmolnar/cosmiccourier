@@ -31,7 +31,8 @@ end
 
 -- BFS snap to nearest traversable tile on a sandbox (sub-cell) map.
 -- Accepts road-type tiles AND zone_seg-adjacent cells (city streets are edges, not tiles).
-local function _snapToNearestTraversable(plot, map, path_grid, grid_w, grid_h, vehicle)
+local function _snapToNearestTraversable(plot, map, path_grid, grid_w, grid_h, vehicle, game)
+    local FogService = require("services.FogService")
     local x, y = plot.x, plot.y
     local zsv = map.zone_seg_v
     local zsh = map.zone_seg_h
@@ -44,6 +45,7 @@ local function _snapToNearestTraversable(plot, map, path_grid, grid_w, grid_h, v
     end
     local function isTraversable(cx, cy)
         if not inBounds(cx, cy) then return false end
+        if game and not FogService.isRevealed(game, cx, cy) then return false end
         local t = getTileType(cx, cy)
         -- Accept any tile the vehicle can actually traverse (covers water-mode vehicles too).
         if vehicle:getMovementCostFor(t) < IMPASSABLE then return true end
@@ -80,7 +82,8 @@ end
 -- Build the vehicle's per-cell cost closure for sandbox-grid A*. Honors
 -- pathfinding_bounds and treats zone_seg edges as traversable for road
 -- vehicles even when the underlying tile type is plot/downtown_plot.
-local function _buildVehicleCostFn(vehicle, map, grid_w)
+local function _buildVehicleCostFn(vehicle, map, grid_w, game)
+    local FogService = require("services.FogService")
     local fgi = map.ffi_grid
     local fgw = grid_w
     local path_grid = map.grid
@@ -94,6 +97,9 @@ local function _buildVehicleCostFn(vehicle, map, grid_w)
     return function(node_x, node_y)
         if bounds and (node_x < bounds.x1 or node_x > bounds.x2
                     or node_y < bounds.y1 or node_y > bounds.y2) then
+            return IMPASSABLE
+        end
+        if game and not FogService.isRevealed(game, node_x, node_y) then
             return IMPASSABLE
         end
         local t = getTileType(node_x, node_y)
@@ -118,7 +124,7 @@ function PathfindingService.computePathCost(vehicle, path, game)
     local map = game.maps[vehicle.operational_map_key]
     if not map then return 0 end
     local grid_w = map._w or (map.grid and map.grid[1] and #map.grid[1] or 0)
-    local get_cost = _buildVehicleCostFn(vehicle, map, grid_w)
+    local get_cost = _buildVehicleCostFn(vehicle, map, grid_w, game)
     local total = 0
     for _, node in ipairs(path) do
         local c = get_cost(node.x, node.y)
@@ -152,10 +158,10 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
     local grid_h = map._h or (path_grid and #path_grid or 0)
     local grid_w = map._w or (path_grid and path_grid[1] and #path_grid[1] or 0)
 
-    local start_sub = _snapToNearestTraversable(start_node, map, path_grid, grid_w, grid_h, vehicle)
+    local start_sub = _snapToNearestTraversable(start_node, map, path_grid, grid_w, grid_h, vehicle, game)
     if not start_sub then return nil end
 
-    local get_cost = _buildVehicleCostFn(vehicle, map, grid_w)
+    local get_cost = _buildVehicleCostFn(vehicle, map, grid_w, game)
     local sandbox_proxy = setmetatable({road_v_rxs = false}, {__index = map})
     local mode = vehicle.transport_mode or "road"
 
@@ -198,7 +204,7 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
 
     local end_candidates = _endCandidates(end_plot, get_cost, grid_w, grid_h)
     if #end_candidates == 0 then
-        local fallback = _snapToNearestTraversable(end_plot, map, path_grid, grid_w, grid_h, vehicle)
+        local fallback = _snapToNearestTraversable(end_plot, map, path_grid, grid_w, grid_h, vehicle, game)
         if not fallback then return nil end
         end_candidates = {fallback}
     end
@@ -275,10 +281,10 @@ function PathfindingService.findLocalSegment(vehicle, from, to, city_idx, game)
     local grid_h = map._h or (path_grid and #path_grid or 0)
     local grid_w = map._w or (path_grid and path_grid[1] and #path_grid[1] or 0)
 
-    local start_sub = _snapToNearestTraversable(from, map, path_grid, grid_w, grid_h, vehicle)
+    local start_sub = _snapToNearestTraversable(from, map, path_grid, grid_w, grid_h, vehicle, game)
     if not start_sub then return nil end
 
-    local get_cost = _buildVehicleCostFn(vehicle, map, grid_w)
+    local get_cost = _buildVehicleCostFn(vehicle, map, grid_w, game)
     local bounds   = city_idx and game.city_sc_bounds and game.city_sc_bounds[city_idx]
     local function bounded(x, y)
         if bounds and (x < bounds.x1 or x > bounds.x2

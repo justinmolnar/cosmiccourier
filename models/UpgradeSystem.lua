@@ -125,6 +125,9 @@ local EFFECT_HANDLERS = {
     set_flag = function(system, upgrade)
         system.state.upgrades[upgrade.effect_target] = upgrade.effect_value
         print(string.format("Set flag: upgrades.%s = %s", upgrade.effect_target, tostring(upgrade.effect_value)))
+        if upgrade.effect_target == "fog_tier" then
+            require("services.PathCacheService").invalidate()
+        end
     end,
 
     add_stat = function(system, upgrade)

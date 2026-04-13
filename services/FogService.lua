@@ -10,6 +10,35 @@ local function _getTier(game)
     return (st.upgrades and st.upgrades.fog_tier) or st.fog_tier or 1
 end
 
+local TIER_SCOPE = { "district", "city", "region", "continent", "world" }
+
+--- Returns the current fog tier (public accessor).
+function FogService.getTier(game)
+    return _getTier(game)
+end
+
+--- Returns the maximum allowed trip/interaction scope for the current fog tier.
+function FogService.getMaxScope(game)
+    return TIER_SCOPE[_getTier(game)] or "world"
+end
+
+--- Returns true if the given sub-cell (1-indexed) is inside the revealed area.
+function FogService.isRevealed(game, gx, gy)
+    local tier = _getTier(game)
+    if tier >= 5 then return true end
+    local masks = game.fog_reveal_masks
+    if not masks then return true end
+    local mask = masks[tier]
+    if not mask then return true end
+    local mw = game.fog_mask_w
+    local mh = game.fog_mask_h
+    if not mw or not mh then return true end
+    local mx, my = gx - 1, gy - 1
+    if mx < 0 or my < 0 or mx >= mw or my >= mh then return false end
+    local r = mask:getPixel(mx, my)
+    return r > 0.5
+end
+
 --- Returns the fog reveal mask ImageData for the current tier,
 --- or nil when the world is fully revealed (tier >= 5).
 ---
