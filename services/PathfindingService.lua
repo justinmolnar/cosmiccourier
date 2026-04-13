@@ -32,7 +32,7 @@ end
 -- BFS snap to nearest traversable tile on a sandbox (sub-cell) map.
 -- Accepts road-type tiles AND zone_seg-adjacent cells (city streets are edges, not tiles).
 local function _snapToNearestTraversable(plot, map, path_grid, grid_w, grid_h, vehicle, game)
-    local FogService = require("services.FogService")
+    local ScopeService = require("services.ScopeService")
     local x, y = plot.x, plot.y
     local zsv = map.zone_seg_v
     local zsh = map.zone_seg_h
@@ -45,7 +45,7 @@ local function _snapToNearestTraversable(plot, map, path_grid, grid_w, grid_h, v
     end
     local function isTraversable(cx, cy)
         if not inBounds(cx, cy) then return false end
-        if game and not FogService.isRevealed(game, cx, cy) then return false end
+        if game and not ScopeService.isRevealed(game, cx, cy) then return false end
         local t = getTileType(cx, cy)
         -- Accept any tile the vehicle can actually traverse (covers water-mode vehicles too).
         if vehicle:getMovementCostFor(t) < IMPASSABLE then return true end
@@ -83,7 +83,7 @@ end
 -- pathfinding_bounds and treats zone_seg edges as traversable for road
 -- vehicles even when the underlying tile type is plot/downtown_plot.
 local function _buildVehicleCostFn(vehicle, map, grid_w, game)
-    local FogService = require("services.FogService")
+    local ScopeService = require("services.ScopeService")
     local fgi = map.ffi_grid
     local fgw = grid_w
     local path_grid = map.grid
@@ -99,7 +99,7 @@ local function _buildVehicleCostFn(vehicle, map, grid_w, game)
                     or node_y < bounds.y1 or node_y > bounds.y2) then
             return IMPASSABLE
         end
-        if game and not FogService.isRevealed(game, node_x, node_y) then
+        if game and not ScopeService.isRevealed(game, node_x, node_y) then
             return IMPASSABLE
         end
         local t = getTileType(node_x, node_y)

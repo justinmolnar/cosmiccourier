@@ -613,7 +613,7 @@
               "prerequisites": [],
               "position": {"x": 0, "y": 0},
               "effect_type": "set_flag",
-              "effect_target": "fog_tier",
+              "effect_target": "scope_tier",
               "effect_value": 2
             },
             {
@@ -627,7 +627,7 @@
               "prerequisites": ["metro_expansion"],
               "position": {"x": 0, "y": 1},
               "effect_type": "set_flag",
-              "effect_target": "fog_tier",
+              "effect_target": "scope_tier",
               "effect_value": 3
             },
             {
@@ -641,7 +641,7 @@
               "prerequisites": ["regional_network"],
               "position": {"x": 0, "y": 2},
               "effect_type": "set_flag",
-              "effect_target": "fog_tier",
+              "effect_target": "scope_tier",
               "effect_value": 4
             },
             {
@@ -655,7 +655,7 @@
               "prerequisites": ["continental_reach"],
               "position": {"x": 0, "y": 3},
               "effect_type": "set_flag",
-              "effect_target": "fog_tier",
+              "effect_target": "scope_tier",
               "effect_value": 5
             }
           ]

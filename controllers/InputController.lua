@@ -378,13 +378,13 @@ function InputController:handleGameWorldClick(x, y, button)
     end
 
     -- Reject clicks in fogged areas
-    local FogService = require("services.FogService")
+    local ScopeService = require("services.ScopeService")
     local umap = self.game.maps.unified
     if umap then
         local cgx = math.floor(world_x / umap.tile_pixel_size) + 1
         local cgy = math.floor(world_y / umap.tile_pixel_size) + 1
         if cgx >= 1 and cgy >= 1 and cgx <= umap._w and cgy <= umap._h
-           and not FogService.isRevealed(self.game, cgx, cgy) then
+           and not ScopeService.isRevealed(self.game, cgx, cgy) then
             return
         end
     end
@@ -575,7 +575,7 @@ end
 -- their own section to the same menu.
 function InputController:openContextMenu(sx, sy, game)
     local CMI = require("data.context_menu_items")
-    local FogService = require("services.FogService")
+    local ScopeService = require("services.ScopeService")
     local world_x, world_y = game.camera:screenToWorld(sx, sy, game)
     local mpw = (game.world_w or 0) * game.C.MAP.TILE_SIZE
     if mpw > 0 then world_x = ((world_x % mpw) + mpw) % mpw end
@@ -585,7 +585,7 @@ function InputController:openContextMenu(sx, sy, game)
     local gx, gy, umap = _worldToSubcell(world_x, world_y, game)
 
     -- No context menu in fogged areas
-    if gx and not FogService.isRevealed(game, gx, gy) then return end
+    if gx and not ScopeService.isRevealed(game, gx, gy) then return end
 
     -- ── Hit-test: all vehicles in radius ─────────────────────────────────────
     local click_r = game.C.UI.VEHICLE_CLICK_RADIUS / game.camera.scale

@@ -1988,7 +1988,8 @@ function GameView:_drawFogOfWar(sidebar_w, screen_w, screen_h)
     end
 
     -- Rebuild mask GPU image when tier changes
-    local tier = (Game.state.upgrades and Game.state.upgrades.fog_tier) or Game.state.fog_tier or 1
+    local ScopeService = require("services.ScopeService")
+    local tier = ScopeService.getTier(Game)
     if self._fog_mask_tier ~= tier or not self._fog_mask_image then
         self._fog_mask_image = love.graphics.newImage(mask_info.mask_data)
         self._fog_mask_image:setFilter("linear", "linear")

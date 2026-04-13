@@ -18,7 +18,7 @@ local function toUnified(plot, cmap)
 end
 
 function TripGenerator.generateTrip(client_plot, game, city_map)
-    local FogService = require("services.FogService")
+    local ScopeService = require("services.ScopeService")
     local C_GAMEPLAY = game.C.GAMEPLAY
     local upgrades   = game.state.upgrades
 
@@ -27,7 +27,7 @@ function TripGenerator.generateTrip(client_plot, game, city_map)
     local cmap        = city_map or game.maps.city
     local base_payout = C_GAMEPLAY.BASE_TRIP_PAYOUT
     local speed_bonus = C_GAMEPLAY.INITIAL_SPEED_BONUS
-    local max_scope   = FogService.getMaxScope(game)
+    local max_scope   = ScopeService.getMaxScope(game)
 
     -- Destination: same district as client, must be a can_receive zone.
     local district   = plotDistrict(client_plot, cmap)

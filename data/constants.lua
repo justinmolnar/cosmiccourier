@@ -70,6 +70,13 @@ local C = {
         },
 },
 
+    SCOPE = {
+        -- Tier-indexed scope names (tier 1 = district, etc.)
+        NAMES = { "district", "city", "region", "continent", "world" },
+        -- Name → tier for comparison
+        ORDER = { district = 1, city = 2, region = 3, continent = 4, world = 5 },
+    },
+
     GAMEPLAY = {
         INITIAL_MONEY           = 150,
         -- REMOVED: INITIAL_BIKE_SPEED and INITIAL_TRUCK_SPEED (now in vehicle properties)

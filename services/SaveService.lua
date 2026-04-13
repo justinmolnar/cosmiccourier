@@ -11,7 +11,7 @@ local SAVE_SCHEMA = {
         "upgrades_discovered",
         "metro_license_unlocked",
         "current_map_scale",
-        "fog_tier",
+        "scope_tier",
         "unlocked"
     },
     vehicle_data = {

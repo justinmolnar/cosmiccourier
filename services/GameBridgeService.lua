@@ -486,9 +486,9 @@ function GameBridgeService.wire(
         fog_masks[4] = mask4
     end
 
-    game.fog_reveal_masks = fog_masks
-    game.fog_mask_w = sw
-    game.fog_mask_h = sh
+    game.scope_reveal_masks = fog_masks
+    game.scope_mask_w = sw
+    game.scope_mask_h = sh
 
     game._prewarm_pending = true
 end
