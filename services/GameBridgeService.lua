@@ -25,7 +25,8 @@ function GameBridgeService.wire(
     region_map, continent_map,
     city_locations, highway_paths,
     world_w, world_h,
-    water_tile_types
+    water_tile_types,
+    start_district_map
 )
     local C  = game.C
     local hw = highway_map or {}
@@ -410,6 +411,84 @@ function GameBridgeService.wire(
         table.insert(cont.regions[rid].cities, city)
     end
     game.world_continents = continents
+
+    -- ── Fog reveal masks (per-tier ImageData at sub-cell resolution) ───────
+    -- Sub-cell grid is 3× world-cell in each axis.  Each pixel: white = revealed.
+    -- Stored as ImageData; the view promotes to GPU Image on first use.
+    local start_city = game.maps.city
+    local fog_masks = {}
+    local sw, sh = ww * 3, wh * 3
+
+    if start_city then
+        local cmx = start_city.world_mn_x or 1
+        local cmy = start_city.world_mn_y or 1
+        local sox = (cmx - 1) * 3  -- sub-cell origin x
+        local soy = (cmy - 1) * 3  -- sub-cell origin y
+
+        -- Tier 1: Downtown — use district map (poi_idx 1 = downtown)
+        local mask1 = love.image.newImageData(sw, sh)
+        if start_district_map then
+            for sci, poi_idx in pairs(start_district_map) do
+                if poi_idx == 1 then
+                    local px = (sci - 1) % sw
+                    local py = math.floor((sci - 1) / sw)
+                    if px >= 0 and px < sw and py >= 0 and py < sh then
+                        mask1:setPixel(px, py, 1, 1, 1, 1)
+                    end
+                end
+            end
+        end
+        fog_masks[1] = mask1
+
+        -- Tier 2: Full city — all sub-cells owned by any district
+        local mask2 = love.image.newImageData(sw, sh)
+        if start_district_map then
+            for sci, _ in pairs(start_district_map) do
+                local px = (sci - 1) % sw
+                local py = math.floor((sci - 1) / sw)
+                if px >= 0 and px < sw and py >= 0 and py < sh then
+                    mask2:setPixel(px, py, 1, 1, 1, 1)
+                end
+            end
+        end
+        fog_masks[2] = mask2
+    end
+
+    -- Tier 3: Region — fill 3×3 sub-cell blocks for each matching world cell
+    local start_rid = start_city and start_city.region_id
+    if start_rid and region_map then
+        local mask3 = love.image.newImageData(sw, sh)
+        for i = 1, ww * wh do
+            if region_map[i] == start_rid then
+                local wx = (i - 1) % ww
+                local wy = math.floor((i - 1) / ww)
+                for dy = 0, 2 do for dx = 0, 2 do
+                    mask3:setPixel(wx * 3 + dx, wy * 3 + dy, 1, 1, 1, 1)
+                end end
+            end
+        end
+        fog_masks[3] = mask3
+    end
+
+    -- Tier 4: Continent — fill 3×3 sub-cell blocks for each matching world cell
+    local start_cid = start_city and start_city.continent_id
+    if start_cid and continent_map then
+        local mask4 = love.image.newImageData(sw, sh)
+        for i = 1, ww * wh do
+            if continent_map[i] == start_cid then
+                local wx = (i - 1) % ww
+                local wy = math.floor((i - 1) / ww)
+                for dy = 0, 2 do for dx = 0, 2 do
+                    mask4:setPixel(wx * 3 + dx, wy * 3 + dy, 1, 1, 1, 1)
+                end end
+            end
+        end
+        fog_masks[4] = mask4
+    end
+
+    game.fog_reveal_masks = fog_masks
+    game.fog_mask_w = sw
+    game.fog_mask_h = sh
 
     game._prewarm_pending = true
 end

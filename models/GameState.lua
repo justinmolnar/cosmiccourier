@@ -36,6 +36,7 @@ function State:new(C, game)
     instance.rush_hour = { active = false, timer = 0 }
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
     instance.metro_license_unlocked = false
+    instance.fog_tier = 1
     -- Unified name-based variable system available to dispatch rules
     instance.vars             = {}
     instance.broadcast_queue  = {}

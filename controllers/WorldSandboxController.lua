@@ -485,13 +485,15 @@ function WorldSandboxController:sendToGame()
     for i, m in ipairs(game.maps.all_cities) do game.maps["city_" .. i] = m end
 
     -- Wire city maps and world data into the running game.
+    local start_dmap = self.city_district_maps and self.city_district_maps[start_idx]
     GameBridgeService.wire(
         game, new_map, all_claimed,
         self.highway_map, self.city_bounds_list,
         self.region_map, self.continent_map,
         self.city_locations, self.highway_paths,
         w, h,
-        self.water_tile_types
+        self.water_tile_types,
+        start_dmap
     )
 
     -- Free all generation-time scratch data. These fields are no longer needed once
@@ -758,9 +760,8 @@ function WorldSandboxController:_buildCityImage(city_idx, min_x, max_x, min_y, m
     if not bounds then return end
 
     local use_districts  = (self.view_mode == "districts")
-    local fog_downtown   = (self.view_scope == "downtown")
     local dist_colors    = use_districts and self.city_district_colors and self.city_district_colors[city_idx]
-    local dist_owner_map = (use_districts or fog_downtown) and self.city_district_maps and self.city_district_maps[city_idx]
+    local dist_owner_map = use_districts and self.city_district_maps and self.city_district_maps[city_idx]
     local pois_for_city  = (use_districts and self.city_pois_list and self.city_pois_list[city_idx]) or {}
     local art_city_map   = self.city_arterial_maps and self.city_arterial_maps[city_idx]
     local street_city_map = self.city_street_maps  and self.city_street_maps[city_idx]

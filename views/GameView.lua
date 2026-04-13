@@ -431,23 +431,6 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
     love.graphics.scale(Game.camera.scale, Game.camera.scale)
     love.graphics.translate(-Game.camera.x, -Game.camera.y)
     MapRenderer.draw(active_map)
-    -- Fog outside downtown
-    if cur_scale == S.DOWNTOWN then
-        local map = active_map
-        if map.downtown_offset and #map.grid > 0 and #map.grid[1] > 0 then
-            local TS = Game.C.MAP.TILE_SIZE
-            local dt = map.downtown_offset
-            local x1 = (dt.x - 1) * TS;  local y1 = (dt.y - 1) * TS
-            local x2 = (dt.x + map.downtown_grid_width  - 1) * TS
-            local y2 = (dt.y + map.downtown_grid_height - 1) * TS
-            local gw = #map.grid[1] * TS; local gh = #map.grid * TS
-            love.graphics.setColor(0, 0, 0, 0.72)
-            love.graphics.rectangle("fill", 0,  0,  x1,      gh)
-            love.graphics.rectangle("fill", x2, 0,  gw-x2,  gh)
-            love.graphics.rectangle("fill", x1, 0,  x2-x1,  y1)
-            love.graphics.rectangle("fill", x1, y2, x2-x1,  gh-y2)
-        end
-    end
     if Game.active_map_key == "city" then
         local umap = Game.maps.unified
         local uts = umap and umap.tile_pixel_size or Game.C.MAP.TILE_SIZE
@@ -821,15 +804,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                         local bpx = (b.x - 0.5) * uts
                         local bpy = (b.y - 0.5) * uts
                         DrawingUtils.drawWorldIcon(Game, icon, bpx, bpy)
-                        local nc = b.cargo and #b.cargo or 0
-                        if nc > 0 then
-                            local f = Game.fonts and Game.fonts.ui_small
-                            if f then
-                                love.graphics.setFont(f)
-                                love.graphics.setColor(1, 1, 1, 1)
-                                love.graphics.print(tostring(nc), bpx + 6 / cs, bpy - 8 / cs)
-                            end
-                        end
+                        DrawingUtils.drawCountBadge(Game, b.cargo and #b.cargo or 0, bpx, bpy)
                     end
                 end
             end
@@ -840,6 +815,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
             for _, client in ipairs(Game.entities.clients) do
                 if client.px > vp_left and client.px < vp_right and client.py > vp_top and client.py < vp_bot then
                     DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
+                    DrawingUtils.drawCountBadge(Game, client.cargo and #client.cargo or 0, client.px, client.py)
                 end
             end
         end
@@ -861,9 +837,12 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
             end
         end
 
-        -- Event spawner
+        -- Event spawner (clickable coords are city-local; convert to unified pixel space)
         if Game.event_spawner and Game.event_spawner.clickable then
-            DrawingUtils.drawWorldIcon(Game, "☎️", Game.event_spawner.clickable.x, Game.event_spawner.clickable.y)
+            local ec = Game.event_spawner.clickable
+            local ec_x = ec.x + ((Game.world_gen_city_mn_x or 1) - 1) * ts
+            local ec_y = ec.y + ((Game.world_gen_city_mn_y or 1) - 1) * ts
+            DrawingUtils.drawWorldIcon(Game, "☎️", ec_x, ec_y)
         end
 
         -- Vehicles — spatial-grid query: only visits buckets that overlap the viewport.
@@ -1980,6 +1959,7 @@ function GameView:draw()
     else
         self:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, sidebar_w, screen_w, screen_h)
     end
+    self:_drawFogOfWar(sidebar_w, screen_w, screen_h)
     self:_drawHighwayBuildGhost(sidebar_w, screen_w, screen_h)
     self:_drawLogisticsOverlay(active_map, sidebar_w, screen_w, screen_h)
     if not Game.debug_hide_vehicles then
@@ -1987,6 +1967,59 @@ function GameView:draw()
     end
     love.graphics.setScissor()
     if Game.debug_f3 then self:_drawF3Overlay() end
+end
+
+-- Fog of war: screen-space cloud overlay covering unrevealed map areas.
+-- All tunables come from C.FOG constants; reveal mask from FogService.
+function GameView:_drawFogOfWar(sidebar_w, screen_w, screen_h)
+    local Game = self.Game
+    local FogService = require("services.FogService")
+
+    local mask_info = FogService.getRevealMask(Game)
+    if not mask_info then return end
+
+    -- Lazy-init shader + cloud texture (once)
+    if not self._fog_shader then
+        self._fog_shader = love.graphics.newShader("shaders/fog_of_war.glsl")
+        local img_data = FogService.generateCloudTexture(Game.C)
+        self._cloud_texture = love.graphics.newImage(img_data)
+        self._cloud_texture:setFilter("linear", "linear")
+        self._cloud_texture:setWrap("repeat", "repeat")
+    end
+
+    -- Rebuild mask GPU image when tier changes
+    local tier = (Game.state.upgrades and Game.state.upgrades.fog_tier) or Game.state.fog_tier or 1
+    if self._fog_mask_tier ~= tier or not self._fog_mask_image then
+        self._fog_mask_image = love.graphics.newImage(mask_info.mask_data)
+        self._fog_mask_image:setFilter("linear", "linear")
+        self._fog_mask_image:setWrap("clamp", "clamp")
+        self._fog_mask_tier = tier
+    end
+
+    local FC     = Game.C.FOG
+    local shader = self._fog_shader
+    local vw     = screen_w - sidebar_w
+    local ts     = Game.C.MAP.TILE_SIZE
+    -- Each mask pixel = one sub-cell = tile_size/3 world pixels
+    local wpx_w  = mask_info.mask_w * ts / 3
+    local wpx_h  = mask_info.mask_h * ts / 3
+
+    shader:send("cam_pos",          {Game.camera.x, Game.camera.y})
+    shader:send("cam_scale",        Game.camera.scale)
+    shader:send("vp_offset",        {sidebar_w + vw / 2, screen_h / 2})
+    shader:send("world_pixel_size", {wpx_w, wpx_h})
+    shader:send("reveal_mask",      self._fog_mask_image)
+    shader:send("time",             love.timer.getTime())
+    shader:send("fog_color",        FC.COLOR)
+    shader:send("cloud_density",    FC.DENSITY)
+    shader:send("noise_scale",      FC.NOISE_SCALE)
+    shader:send("drift",            {FC.DRIFT_X, FC.DRIFT_Y})
+    shader:send("cloud_tex",        self._cloud_texture)
+
+    love.graphics.setShader(shader)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.rectangle("fill", sidebar_w, 0, vw, screen_h)
+    love.graphics.setShader()
 end
 
 -- Highway build ghost: previews the player's in-progress highway segment.

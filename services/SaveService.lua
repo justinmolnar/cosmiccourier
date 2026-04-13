@@ -6,11 +6,13 @@ local SAVE_SCHEMA = {
     version = "1.0",
     persistent_data = {
         "money",
-        "trips_completed", 
+        "trips_completed",
         "upgrades_purchased",
         "upgrades_discovered",
         "metro_license_unlocked",
-        "current_map_scale"
+        "current_map_scale",
+        "fog_tier",
+        "unlocked"
     },
     vehicle_data = {
         "type",

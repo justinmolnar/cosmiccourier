@@ -106,9 +106,33 @@ local C = {
         ZONE_THRESHOLD           = 6.0,
         ENTITY_THRESHOLD         = 4.0,
         BIKE_THRESHOLD           = 8.0,
-        FOG_THRESHOLD            = 8.0,
         CITY_IMAGE_THRESHOLD     = 1.5,
         DOWNTOWN_IMG_THRESHOLD   = 20.0,
+    },
+
+    FOG = {
+        -- Cloud noise texture generation
+        CLOUD_TEXTURE_SIZE  = 512,       -- px, tileable noise texture
+        CLOUD_OCTAVES       = 4,
+        CLOUD_PERSISTENCE   = 0.5,
+        CLOUD_BASE_FREQ     = 4.0,
+
+        -- Visual appearance
+        COLOR               = {0.85, 0.88, 0.92},  -- light cloud gray
+        DENSITY             = 0.97,                 -- overall fog opacity
+        DRIFT_X             = 0.008,                -- UV offset per second (horizontal)
+        DRIFT_Y             = 0.005,                -- UV offset per second (vertical)
+        NOISE_SCALE         = 0.003,                -- world-px to noise UV
+
+        -- Per-tier edge softness (world pixels).
+        -- Controls how wide the cloud-boundary transition zone is at each reveal tier.
+        EDGE_SOFTNESS = {
+            [1] = 14,   -- DOWNTOWN (small area, tight edge)
+            [2] = 25,   -- CITY
+            [3] = 50,   -- REGION
+            [4] = 100,  -- CONTINENT
+            -- tier 5 = WORLD = no fog
+        },
     },
 
     -- VEHICLES and BUILDINGS are populated after C is fully defined (loaders below).

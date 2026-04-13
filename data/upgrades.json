@@ -592,6 +592,75 @@
           ]
         }
       ]
+    },
+    {
+      "id": "expansion",
+      "name": "Map Expansion",
+      "sub_types": [
+        {
+          "id": "fog_reveal",
+          "name": "Fog Reveal",
+          "icon": "🗺️",
+          "tree": [
+            {
+              "id": "metro_expansion",
+              "name": "Metro Expansion",
+              "description": "Reveal the full metropolitan area beyond downtown.",
+              "icon": "🏙️",
+              "cost": 5000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": [],
+              "position": {"x": 0, "y": 0},
+              "effect_type": "set_flag",
+              "effect_target": "fog_tier",
+              "effect_value": 2
+            },
+            {
+              "id": "regional_network",
+              "name": "Regional Network",
+              "description": "Reveal the surrounding region and neighboring cities.",
+              "icon": "🛤️",
+              "cost": 25000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["metro_expansion"],
+              "position": {"x": 0, "y": 1},
+              "effect_type": "set_flag",
+              "effect_target": "fog_tier",
+              "effect_value": 3
+            },
+            {
+              "id": "continental_reach",
+              "name": "Continental Reach",
+              "description": "Reveal the entire continent.",
+              "icon": "🌍",
+              "cost": 100000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["regional_network"],
+              "position": {"x": 0, "y": 2},
+              "effect_type": "set_flag",
+              "effect_target": "fog_tier",
+              "effect_value": 4
+            },
+            {
+              "id": "global_operations",
+              "name": "Global Operations",
+              "description": "Reveal the entire world map.",
+              "icon": "🌐",
+              "cost": 500000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["continental_reach"],
+              "position": {"x": 0, "y": 3},
+              "effect_type": "set_flag",
+              "effect_target": "fog_tier",
+              "effect_value": 5
+            }
+          ]
+        }
+      ]
     }
   ]
 }
