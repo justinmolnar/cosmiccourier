@@ -22,7 +22,9 @@ function VehicleRenderer.drawDebug(vehicle, game)
             table.insert(pixel_path, px)
             table.insert(pixel_path, py)
         end
-        love.graphics.line(pixel_path)
+        if #pixel_path >= 4 then
+            love.graphics.line(pixel_path)
+        end
         love.graphics.setLineWidth(1)
     end
 

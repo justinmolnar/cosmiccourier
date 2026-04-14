@@ -464,7 +464,9 @@
             { "id": "lawyer_cargo_1",    "name": "Bigger Briefcase", "description": "+1 cargo size bias on Law Firm trips", "icon": "📦", "cost": 2500,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                "required_scope": 1, "position": {"x": 2, "y": 0}, "effect_type": "add_stat", "effect_target": "lawyer_cargo_size_bias", "effect_value": 1 },
             { "id": "lawyer_cargo_2",    "name": "Document Vault",   "description": "+1 cargo size bias on Law Firm trips", "icon": "📦", "cost": 12000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["lawyer_cargo_1"],  "required_scope": 1, "position": {"x": 2, "y": 1}, "effect_type": "add_stat", "effect_target": "lawyer_cargo_size_bias", "effect_value": 1 },
             { "id": "lawyer_rush_1",     "name": "Rush Filings",     "description": "Increases Law Firm Rush frequency.", "icon": "⚡", "cost": 5000,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],               "required_scope": 1, "position": {"x": 3, "y": 0}, "effect_type": "add_stat", "effect_target": "lawyer_rush_probability", "effect_value": 0.05 },
-            { "id": "lawyer_rush_2",     "name": "Courtroom Deadlines","description": "Increases Law Firm Rush frequency.", "icon": "⚡", "cost": 18000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["lawyer_rush_1"], "required_scope": 1, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "lawyer_rush_probability", "effect_value": 0.05 }
+            { "id": "lawyer_rush_2",     "name": "Courtroom Deadlines","description": "Increases Law Firm Rush frequency.", "icon": "⚡", "cost": 18000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["lawyer_rush_1"], "required_scope": 1, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "lawyer_rush_probability", "effect_value": 0.05 },
+            { "id": "lawyer_capacity_1", "name": "Mail Room",         "description": "+2 Law Firm trip capacity.",       "icon": "🏗️", "cost": 1500,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                 "required_scope": 1, "position": {"x": 4, "y": 0}, "effect_type": "add_stat", "effect_target": "lawyer_capacity_bonus", "effect_value": 2 },
+            { "id": "lawyer_capacity_2", "name": "Records Wing",      "description": "+3 Law Firm trip capacity.",       "icon": "🏗️", "cost": 8000,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["lawyer_capacity_1"], "required_scope": 1, "position": {"x": 4, "y": 1}, "effect_type": "add_stat", "effect_target": "lawyer_capacity_bonus", "effect_value": 3 }
           ]
         },
         {
@@ -482,7 +484,9 @@
             { "id": "restaurant_cargo_1",  "name": "Larger Trays",       "description": "+1 cargo size bias on Restaurant trips", "icon": "📦", "cost": 1500,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                    "required_scope": 1, "position": {"x": 2, "y": 0}, "effect_type": "add_stat", "effect_target": "restaurant_cargo_size_bias", "effect_value": 1 },
             { "id": "restaurant_cargo_2",  "name": "Catering Service",   "description": "+1 cargo size bias on Restaurant trips", "icon": "📦", "cost": 8000,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["restaurant_cargo_1"],  "required_scope": 1, "position": {"x": 2, "y": 1}, "effect_type": "add_stat", "effect_target": "restaurant_cargo_size_bias", "effect_value": 1 },
             { "id": "restaurant_rush_1",   "name": "Hot-And-Fast",       "description": "Increases Restaurant Rush frequency.", "icon": "⚡", "cost": 3000,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                    "required_scope": 1, "position": {"x": 3, "y": 0}, "effect_type": "add_stat", "effect_target": "restaurant_rush_probability", "effect_value": 0.05 },
-            { "id": "restaurant_rush_2",   "name": "Time-Critical Menu", "description": "Increases Restaurant Rush frequency.", "icon": "⚡", "cost": 12000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["restaurant_rush_1"],  "required_scope": 1, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "restaurant_rush_probability", "effect_value": 0.05 }
+            { "id": "restaurant_rush_2",   "name": "Time-Critical Menu", "description": "Increases Restaurant Rush frequency.", "icon": "⚡", "cost": 12000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["restaurant_rush_1"],  "required_scope": 1, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "restaurant_rush_probability", "effect_value": 0.05 },
+            { "id": "restaurant_capacity_1","name": "Second Line",        "description": "+2 Restaurant trip capacity.",         "icon": "🏗️", "cost": 1000,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                      "required_scope": 1, "position": {"x": 4, "y": 0}, "effect_type": "add_stat", "effect_target": "restaurant_capacity_bonus", "effect_value": 2 },
+            { "id": "restaurant_capacity_2","name": "Expanded Kitchen",   "description": "+3 Restaurant trip capacity.",         "icon": "🏗️", "cost": 5000,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["restaurant_capacity_1"],"required_scope": 1, "position": {"x": 4, "y": 1}, "effect_type": "add_stat", "effect_target": "restaurant_capacity_bonus", "effect_value": 3 }
           ]
         },
         {
@@ -500,7 +504,9 @@
             { "id": "retail_cargo_1",  "name": "Bulk Packaging",     "description": "+1 cargo size bias on Retail trips", "icon": "📦", "cost": 2000,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                "required_scope": 1, "position": {"x": 2, "y": 0}, "effect_type": "add_stat", "effect_target": "retail_cargo_size_bias", "effect_value": 1 },
             { "id": "retail_cargo_2",  "name": "Pallet Handling",    "description": "+1 cargo size bias on Retail trips", "icon": "📦", "cost": 10000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["retail_cargo_1"],  "required_scope": 1, "position": {"x": 2, "y": 1}, "effect_type": "add_stat", "effect_target": "retail_cargo_size_bias", "effect_value": 1 },
             { "id": "retail_rush_1",   "name": "Same-Day Order",     "description": "Increases Retail Rush frequency.", "icon": "⚡", "cost": 4000,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],               "required_scope": 1, "position": {"x": 3, "y": 0}, "effect_type": "add_stat", "effect_target": "retail_rush_probability", "effect_value": 0.05 },
-            { "id": "retail_rush_2",   "name": "Express Checkout",   "description": "Increases Retail Rush frequency.", "icon": "⚡", "cost": 15000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["retail_rush_1"], "required_scope": 1, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "retail_rush_probability", "effect_value": 0.05 }
+            { "id": "retail_rush_2",   "name": "Express Checkout",   "description": "Increases Retail Rush frequency.", "icon": "⚡", "cost": 15000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["retail_rush_1"], "required_scope": 1, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "retail_rush_probability", "effect_value": 0.05 },
+            { "id": "retail_capacity_1","name": "Stockroom",         "description": "+3 Retail trip capacity.",         "icon": "🏗️", "cost": 1800,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                  "required_scope": 1, "position": {"x": 4, "y": 0}, "effect_type": "add_stat", "effect_target": "retail_capacity_bonus", "effect_value": 3 },
+            { "id": "retail_capacity_2","name": "Backroom Logistics","description": "+5 Retail trip capacity.",         "icon": "🏗️", "cost": 7500,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["retail_capacity_1"],"required_scope": 1, "position": {"x": 4, "y": 1}, "effect_type": "add_stat", "effect_target": "retail_capacity_bonus", "effect_value": 5 }
           ]
         },
         {
@@ -518,7 +524,9 @@
             { "id": "warehouse_cargo_1",  "name": "Forklift Training",  "description": "+1 cargo size bias on Warehouse trips", "icon": "📦", "cost": 8000,   "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                   "required_scope": 2, "position": {"x": 2, "y": 0}, "effect_type": "add_stat", "effect_target": "warehouse_cargo_size_bias", "effect_value": 1 },
             { "id": "warehouse_cargo_2",  "name": "Double-Stacked Pallets","description": "+1 cargo size bias on Warehouse trips", "icon": "📦", "cost": 40000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["warehouse_cargo_1"],  "required_scope": 2, "position": {"x": 2, "y": 1}, "effect_type": "add_stat", "effect_target": "warehouse_cargo_size_bias", "effect_value": 1 },
             { "id": "warehouse_rush_1",   "name": "Expedited Shipping", "description": "Increases Warehouse Rush frequency.", "icon": "⚡", "cost": 15000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                  "required_scope": 2, "position": {"x": 3, "y": 0}, "effect_type": "add_stat", "effect_target": "warehouse_rush_probability", "effect_value": 0.05 },
-            { "id": "warehouse_rush_2",   "name": "Priority Freight",   "description": "Increases Warehouse Rush frequency.", "icon": "⚡", "cost": 50000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["warehouse_rush_1"], "required_scope": 2, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "warehouse_rush_probability", "effect_value": 0.05 }
+            { "id": "warehouse_rush_2",   "name": "Priority Freight",   "description": "Increases Warehouse Rush frequency.", "icon": "⚡", "cost": 50000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["warehouse_rush_1"], "required_scope": 2, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "warehouse_rush_probability", "effect_value": 0.05 },
+            { "id": "warehouse_capacity_1","name": "Extra Bay",         "description": "+10 Warehouse trip capacity.",       "icon": "🏗️", "cost": 8000,  "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                     "required_scope": 2, "position": {"x": 4, "y": 0}, "effect_type": "add_stat", "effect_target": "warehouse_capacity_bonus", "effect_value": 10 },
+            { "id": "warehouse_capacity_2","name": "Mezzanine Storage", "description": "+15 Warehouse trip capacity.",       "icon": "🏗️", "cost": 35000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["warehouse_capacity_1"],"required_scope": 2, "position": {"x": 4, "y": 1}, "effect_type": "add_stat", "effect_target": "warehouse_capacity_bonus", "effect_value": 15 }
           ]
         },
         {
@@ -536,7 +544,9 @@
             { "id": "factory_cargo_1",  "name": "Heavy Equipment",       "description": "+1 cargo size bias on Factory trips", "icon": "📦", "cost": 25000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                 "required_scope": 3, "position": {"x": 2, "y": 0}, "effect_type": "add_stat", "effect_target": "factory_cargo_size_bias", "effect_value": 1 },
             { "id": "factory_cargo_2",  "name": "Oversize Loads",        "description": "+1 cargo size bias on Factory trips", "icon": "📦", "cost": 120000,"max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["factory_cargo_1"],  "required_scope": 3, "position": {"x": 2, "y": 1}, "effect_type": "add_stat", "effect_target": "factory_cargo_size_bias", "effect_value": 1 },
             { "id": "factory_rush_1",   "name": "Just-In-Time",          "description": "Increases Factory Rush frequency.", "icon": "⚡", "cost": 50000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                "required_scope": 3, "position": {"x": 3, "y": 0}, "effect_type": "add_stat", "effect_target": "factory_rush_probability", "effect_value": 0.05 },
-            { "id": "factory_rush_2",   "name": "Emergency Orders",      "description": "Increases Factory Rush frequency.", "icon": "⚡", "cost": 200000,"max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["factory_rush_1"], "required_scope": 3, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "factory_rush_probability", "effect_value": 0.05 }
+            { "id": "factory_rush_2",   "name": "Emergency Orders",      "description": "Increases Factory Rush frequency.", "icon": "⚡", "cost": 200000,"max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["factory_rush_1"], "required_scope": 3, "position": {"x": 3, "y": 1}, "effect_type": "add_stat", "effect_target": "factory_rush_probability", "effect_value": 0.05 },
+            { "id": "factory_capacity_1","name": "Additional Line",      "description": "+15 Factory trip capacity.",       "icon": "🏗️", "cost": 30000, "max_level": 1, "cost_multiplier": 1.0, "prerequisites": [],                "required_scope": 3, "position": {"x": 4, "y": 0}, "effect_type": "add_stat", "effect_target": "factory_capacity_bonus", "effect_value": 15 },
+            { "id": "factory_capacity_2","name": "Expanded Floor Plan",  "description": "+25 Factory trip capacity.",       "icon": "🏗️", "cost": 150000,"max_level": 1, "cost_multiplier": 1.0, "prerequisites": ["factory_capacity_1"],"required_scope": 3, "position": {"x": 4, "y": 1}, "effect_type": "add_stat", "effect_target": "factory_capacity_bonus", "effect_value": 25 }
           ]
         }
       ]
@@ -566,20 +576,6 @@
               "grant_pack_id": "starter_pack"
             },
             {
-              "id": "warehouse_expansion",
-              "name": "Warehouse Expansion",
-              "description": "+5 to max pending trips",
-              "icon": "🏗️",
-              "cost": 800,
-              "max_level": 5,
-              "cost_multiplier": 2.5,
-              "prerequisites": ["auto_dispatch_1"],
-              "position": {"x": 1, "y": 1},
-              "effect_type": "add_stat",
-              "effect_target": "max_pending_trips",
-              "effect_value": 5
-            },
-            {
               "id": "dispatch_algorithm",
               "name": "Dispatch Algorithm",
               "description": "Auto-dispatcher assigns trips 10% faster.",
@@ -587,7 +583,7 @@
               "cost": 5000,
               "max_level": 5,
               "cost_multiplier": 1.9,
-              "prerequisites": ["warehouse_expansion"],
+              "prerequisites": ["auto_dispatch_1"],
               "position": {"x": 1, "y": 2},
               "effect_type": "special",
               "effect_target": "dispatch_speed_bonus",
@@ -615,7 +611,7 @@
               "cost": 7500,
               "max_level": 5,
               "cost_multiplier": 2.1,
-              "prerequisites": ["warehouse_expansion"],
+              "prerequisites": ["auto_dispatch_1"],
               "position": {"x": 2, "y": 2},
               "effect_type": "special",
               "effect_target": "depot_pathfinding_bonus",

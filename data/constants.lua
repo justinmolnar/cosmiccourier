@@ -81,7 +81,6 @@ local C = {
         INITIAL_MONEY           = 150,
         BASE_TRIP_PAYOUT        = 50,
         INITIAL_SPEED_BONUS     = 100,
-        MAX_PENDING_TRIPS       = 10,
         AUTODISPATCH_INTERVAL   = 1,
         BONUS_DECAY_RATE        = 1.0,
         CURRENT_MAP_SCALE       = 1,

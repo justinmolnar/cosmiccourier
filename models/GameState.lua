@@ -28,7 +28,6 @@ function State:new(C, game)
         frenzy_duration = C.EVENTS.INITIAL_DURATION_SEC,
         trip_gen_min_mult = 1.0,
         trip_gen_max_mult = 1.0,
-        max_pending_trips = C.GAMEPLAY.MAX_PENDING_TRIPS,
     }
 
     -- Per-archetype upgrade fields. Seeded from the archetype registry so
@@ -39,6 +38,7 @@ function State:new(C, game)
         instance.upgrades[a.id .. "_payout_mult"]       = 1.0
         instance.upgrades[a.id .. "_cargo_size_bias"]   = 0
         instance.upgrades[a.id .. "_rush_probability"]  = 0   -- additive, 0..1; raised by per-archetype rush upgrades
+        instance.upgrades[a.id .. "_capacity_bonus"]    = 0
     end
     
     instance.rush_hour = { active = false, timer = 0 }

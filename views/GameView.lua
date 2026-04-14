@@ -527,14 +527,16 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
                         local px, py = active_map:getNodePixel(node)
                         table.insert(pixel_path, px); table.insert(pixel_path, py)
                     end
-                    love.graphics.setColor(0.2, 0.8, 1, 0.85)
-                    love.graphics.setLineWidth(3 / Game.camera.scale)
-                    love.graphics.line(pixel_path)
-                    love.graphics.setLineWidth(1)
-                    local cr = 5 / Game.camera.scale
-                    love.graphics.setColor(0.2, 0.8, 1, 1)
-                    love.graphics.circle("fill", pixel_path[1], pixel_path[2], cr)
-                    love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], cr)
+                    if #pixel_path >= 4 then
+                        love.graphics.setColor(0.2, 0.8, 1, 0.85)
+                        love.graphics.setLineWidth(3 / Game.camera.scale)
+                        love.graphics.line(pixel_path)
+                        love.graphics.setLineWidth(1)
+                        local cr = 5 / Game.camera.scale
+                        love.graphics.setColor(0.2, 0.8, 1, 1)
+                        love.graphics.circle("fill", pixel_path[1], pixel_path[2], cr)
+                        love.graphics.circle("fill", pixel_path[#pixel_path-1], pixel_path[#pixel_path], cr)
+                    end
                 end
             end
         end
@@ -1074,7 +1076,9 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                             color = EConfig.MODE_COLORS[seg.mode or "road"] or EConfig.MODE_COLORS.road
                         end
                         love.graphics.setColor(color[1], color[2], color[3], color[4])
-                        love.graphics.line(seg.pts)
+                        if seg.pts and #seg.pts >= 4 then
+                            love.graphics.line(seg.pts)
+                        end
                     end
                     -- Endpoint dots in road color (matches first/last legs which are typically road).
                     if r.endpoints then

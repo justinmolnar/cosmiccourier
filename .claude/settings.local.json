@@ -46,7 +46,13 @@
       "Bash(echo \"exit: $?\")",
       "Bash(python -c \"import json; json.load\\(open\\('data/upgrades.json'\\)\\); print\\('JSON valid'\\)\")",
       "Bash(cat data/vehicles/*.json)",
-      "Bash(find C:\\\\Users\\\\chate\\\\Documents\\\\cosmic courier\\\\models:*)"
+      "Bash(find C:\\\\Users\\\\chate\\\\Documents\\\\cosmic courier\\\\models:*)",
+      "Bash(find:*)",
+      "Bash(timeout 6 \"/c/Program Files/LOVE/lovec.exe\" .)",
+      "Bash(echo \"---EXIT:$?---\")",
+      "Bash(ls data/buildings/)",
+      "Bash(grep -l \"client\" data/buildings/*.json)",
+      "Bash(wc *)"
     ]
   }
 }

@@ -51,8 +51,6 @@ function TripGenerator.generateTrip(client_plot, game, city_map, archetype_id)
     local C_GAMEPLAY = game.C.GAMEPLAY
     local upgrades   = game.state.upgrades
 
-    if #game.entities.trips.pending >= upgrades.max_pending_trips then return nil end
-
     local archetype = resolveArchetype(archetype_id)
 
     -- Cargo size: random within archetype range plus a per-archetype upgrade

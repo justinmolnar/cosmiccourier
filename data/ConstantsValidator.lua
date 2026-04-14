@@ -97,7 +97,6 @@ function ConstantsValidator._validateGameplay(constants, errors)
     ConstantsValidator._validateNumber(gameplay, "INITIAL_MONEY", errors, 0, 10000)
     ConstantsValidator._validateNumber(gameplay, "BASE_TRIP_PAYOUT", errors, 1, 1000)
     ConstantsValidator._validateNumber(gameplay, "INITIAL_SPEED_BONUS", errors, 0, 1000)
-    ConstantsValidator._validateNumber(gameplay, "MAX_PENDING_TRIPS", errors, 1, 100)
     ConstantsValidator._validateNumber(gameplay, "BASE_TILE_SIZE", errors, 8, 32)
 end
 

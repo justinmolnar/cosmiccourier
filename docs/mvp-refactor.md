@@ -366,12 +366,12 @@ Work shipped in this pass:
 
 Every gameplay knob lives in one of these files. Tuning edits go here, not in code.
 
-- **`data/constants.lua`** `GAMEPLAY` — `INITIAL_MONEY`, `BASE_TRIP_PAYOUT`, `INITIAL_SPEED_BONUS`, `BONUS_DECAY_RATE`, `MAX_PENDING_TRIPS`, `AUTODISPATCH_INTERVAL`, `VEHICLE_STUCK_TIMER`, `STATS_WINDOW_SEC`.
+- **`data/constants.lua`** `GAMEPLAY` — `INITIAL_MONEY`, `BASE_TRIP_PAYOUT`, `INITIAL_SPEED_BONUS`, `BONUS_DECAY_RATE`, `AUTODISPATCH_INTERVAL`, `VEHICLE_STUCK_TIMER`, `STATS_WINDOW_SEC`.
 - **`data/constants.lua`** `EVENTS` — rush-hour `SPAWN_MIN_SEC`, `SPAWN_MAX_SEC`, `LIFESPAN_SEC`, `INITIAL_DURATION_SEC`.
 - **`data/constants.lua`** `EFFECTS` — `PAYOUT_TEXT_LIFESPAN_SEC`, `PAYOUT_TEXT_FLOAT_SPEED`.
 - **`data/licenses.lua`** — `cost` per license (`city_license`, `region_license`).
 - **`data/upgrades.json`** — every upgrade's `cost`, `cost_multiplier`, `max_level`, `effect_value`.
-- **`data/client_archetypes.lua`** — per archetype: `base_spawn_seconds`, `payout_multiplier`, `market_cost`, `cargo_size_range`, `dest_scope_weights`, `required_scope_tier`. Also `default_id` for the fresh-save starter.
+- **`data/client_archetypes.lua`** — per archetype: `base_spawn_seconds`, `payout_multiplier`, `market_cost`, `cargo_size_range`, `capacity`, `dest_scope_weights`, `required_scope_tier`. Also `default_id` for the fresh-save starter.
 - **`data/vehicles/{bike,car,truck,ship}.json`** — `base_speed`, `base_capacity`, `base_cost`, `cost_multiplier`, `fuel_rate`, `pathfinding_costs`.
 - **`data/rule_packs.lua`** — pack `count`, `max_complexity`, `tags`, `scope_tier` (no inline costs; grants reference pack ids in `upgrades.json`).
 

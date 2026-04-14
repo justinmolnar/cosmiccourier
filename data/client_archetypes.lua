@@ -15,6 +15,9 @@
 --   spawn_zones           — list of zone ids (data/zones.json) where the archetype
 --                           can be placed. Placement prefers these zones; falls back
 --                           to any can_send plot if none available in the city.
+--   capacity              — max trips a client of this archetype can hold in its
+--                           cargo at once. New trips don't generate once full.
+--                           Per-archetype upgrade `<id>_capacity_bonus` adds to it.
 --   cargo_size_range      — {min, max} inclusive; TripGenerator rolls uniformly.
 --   dest_scope_weights    — weighted distribution of trip destination scope.
 --   base_spawn_seconds    — {min, max} inclusive; base trip-timer interval.
@@ -38,6 +41,7 @@ local Archetypes = {
             icon                = "⚖️",
             description         = "Small parcels, mostly local.",
             spawn_zones         = { "government", "courthouse" },
+            capacity            = 4,
             cargo_size_range    = { 1, 3 },
             dest_scope_weights  = { district = 90, city = 10, region = 0 },
             base_spawn_seconds  = { 8, 14 },
@@ -53,7 +57,8 @@ local Archetypes = {
             icon                = "🍽️",
             description         = "Frequent tiny deliveries, short range.",
             spawn_zones         = { "restaurant_row", "fine_dining", "fast_food_strip" },
-            cargo_size_range    = { 1, 2 },
+            capacity            = 3,
+            cargo_size_range    = { 1, 1 },
             dest_scope_weights  = { district = 100, city = 0, region = 0 },
             base_spawn_seconds  = { 5, 9 },
             payout_multiplier   = 0.85,
@@ -69,6 +74,7 @@ local Archetypes = {
             description         = "General commerce; mostly local with some cross-district.",
             spawn_zones         = { "retail_strip", "shopping_mall", "boutique_shops",
                                     "luxury_retail", "market", "farmers_market" },
+            capacity            = 6,
             cargo_size_range    = { 2, 5 },
             dest_scope_weights  = { district = 70, city = 30, region = 0 },
             base_spawn_seconds  = { 7, 12 },
@@ -84,6 +90,7 @@ local Archetypes = {
             icon                = "📦",
             description         = "Bulk shipments; mix of district / city / region.",
             spawn_zones         = { "warehouse_zone", "freight_yard" },
+            capacity            = 20,
             cargo_size_range    = { 10, 30 },
             dest_scope_weights  = { district = 30, city = 50, region = 20 },
             base_spawn_seconds  = { 15, 25 },
@@ -99,6 +106,7 @@ local Archetypes = {
             icon                = "🏭",
             description         = "Massive cross-region freight.",
             spawn_zones         = { "factory" },
+            capacity            = 30,
             cargo_size_range    = { 25, 60 },
             dest_scope_weights  = { district = 10, city = 40, region = 50 },
             base_spawn_seconds  = { 20, 35 },

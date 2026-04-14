@@ -1,6 +1,7 @@
 -- models/Client.lua
 local Trip = require("models.Trip")
 local TripGenerator = require("services.TripGenerator")
+local Archetypes    = require("data.client_archetypes")
 
 local Client = {}
 Client.__index = Client
@@ -22,10 +23,17 @@ function Client:new(plot, game, city_map, archetype_id)
     instance.trips_generated = 0
     instance.earnings        = 0
 
-    local bcfg = game.C.BUILDINGS and game.C.BUILDINGS["client"]
-    instance.capacity        = bcfg and bcfg.capacity or 5
     instance.cargo           = {}
     return instance
+end
+
+-- Per-archetype base capacity plus the matching upgrade stat. New trips are
+-- blocked once the client's cargo hits this number.
+function Client:getEffectiveCapacity(game)
+    local a = Archetypes.by_id[self.archetype] or Archetypes.by_id[Archetypes.default_id]
+    local base  = a and a.capacity or 1
+    local bonus = game.state.upgrades[self.archetype .. "_capacity_bonus"] or 0
+    return base + bonus
 end
 
 function Client:update(dt, game)
@@ -35,6 +43,9 @@ function Client:update(dt, game)
     if self.trip_timer <= 0 then
         local base_time = TripGenerator.calculateNextTripTime(game, self.archetype)
         self.trip_timer = base_time * math.max(0.1, self.freq_mult or 1.0)
+
+        -- Cargo-full clients silently skip generation this cycle.
+        if #self.cargo >= self:getEffectiveCapacity(game) then return end
 
         local new_trip = TripGenerator.generateTrip(self.plot, game, self.city_map, self.archetype)
         if new_trip then

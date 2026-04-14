@@ -174,7 +174,11 @@ function InputController:keypressed(key)
 
         game.state.money = game.state.money + 9999999
         game.state.upgrades.auto_dispatch_unlocked = true
-        game.state.upgrades.max_pending_trips  = math.max(game.state.upgrades.max_pending_trips,  200)
+        local Archetypes = require("data.client_archetypes")
+        for _, a in ipairs(Archetypes.list) do
+            game.state.upgrades[a.id .. "_capacity_bonus"] = math.max(
+                game.state.upgrades[a.id .. "_capacity_bonus"] or 0, 200)
+        end
 
         for id, _ in pairs(game.C.VEHICLES) do
             for _ = 1, 50 do game.entities:addVehicle(game, id:lower()) end
