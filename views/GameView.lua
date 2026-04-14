@@ -523,19 +523,8 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
                 local path = Game.pathfinder.findPath(path_grid, start_node, end_node, cost_function, active_map)
                 if path then
                     local pixel_path = {}
-                    local tps_pv2 = active_map.tile_pixel_size or Game.C.MAP.TILE_SIZE
-                    local is_rn2  = active_map.road_v_rxs ~= nil
                     for _, node in ipairs(path) do
-                        local px, py
-                        if is_rn2 then
-                            if node.is_tile then
-                                px, py = (node.x + 0.5) * tps_pv2, (node.y + 0.5) * tps_pv2
-                            else
-                                px, py = node.x * tps_pv2, node.y * tps_pv2
-                            end
-                        else
-                            px, py = active_map:getPixelCoords(node.x, node.y)
-                        end
+                        local px, py = active_map:getNodePixel(node)
                         table.insert(pixel_path, px); table.insert(pixel_path, py)
                     end
                     love.graphics.setColor(0.2, 0.8, 1, 0.85)
@@ -966,13 +955,22 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
                         end
 
                         local function nodeToPixel(node)
-                            local orig_px = (node.x - 0.5) * uts
-                            local orig_py = (node.y - 0.5) * uts
+                            local orig_px, orig_py = umap:getNodePixel(node)
+                            -- Infer tile type at the cell the node sits on/abuts.
+                            -- Tile node (0-idx) → cell (x+1, y+1).
+                            -- Corner node (0-idx) → use SE adjacent cell (x+1, y+1).
+                            -- Cell node (legacy) → cell (x, y).
+                            local cx, cy
+                            if node.is_tile or umap.road_v_rxs then
+                                cx, cy = node.x + 1, node.y + 1
+                            else
+                                cx, cy = node.x, node.y
+                            end
                             local tt
-                            if fgi then
-                                tt = _TN[fgi[(node.y-1)*fgw + (node.x-1)].type]
-                            elseif umap.grid and umap.grid[node.y] and umap.grid[node.y][node.x] then
-                                tt = umap.grid[node.y][node.x].type
+                            if fgi and cx >= 1 and cx <= fgw and cy >= 1 then
+                                tt = _TN[fgi[(cy-1)*fgw + (cx-1)].type]
+                            elseif umap.grid and umap.grid[cy] and umap.grid[cy][cx] then
+                                tt = umap.grid[cy][cx].type
                             end
                             if tt == "highway" and hw_smooth then
                                 return nearestOnChains(orig_px, orig_py, hw_smooth, 0, 0)

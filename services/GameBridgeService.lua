@@ -130,10 +130,56 @@ function GameBridgeService.wire(
         end
     end
 
+    local u_road_nodes, u_tile_nodes = {}, {}
+    for _, cmap in ipairs(game.maps.all_cities) do
+        local ox = (cmap.world_mn_x - 1) * 3
+        local oy = (cmap.world_mn_y - 1) * 3
+        if cmap.road_nodes then
+            for ry, row in pairs(cmap.road_nodes) do
+                local uy = oy + ry
+                for rx in pairs(row) do
+                    local ux = ox + rx
+                    if not u_road_nodes[uy] then u_road_nodes[uy] = {} end
+                    u_road_nodes[uy][ux] = true
+                end
+            end
+        end
+        if cmap.tile_nodes then
+            for tty, row in pairs(cmap.tile_nodes) do
+                local uty = oy + tty
+                for ttx in pairs(row) do
+                    local utx = ox + ttx
+                    if not u_tile_nodes[uty] then u_tile_nodes[uty] = {} end
+                    u_tile_nodes[uty][utx] = true
+                end
+            end
+        end
+    end
+    -- Stamp tile nodes for inter-city arterial/highway tiles (outside any city's
+    -- dual-node coverage). ffi_grid types: 3=arterial, 4=highway.
+    -- Tile-node convention: tile at 1-indexed (x,y) registers as (x-1, y-1).
+    for fy = 1, uh do
+        for fx = 1, uw do
+            local ti = ffi_grid[(fy - 1) * uw + (fx - 1)].type
+            if ti == 3 or ti == 4 then
+                local uty, utx = fy - 1, fx - 1
+                if not u_tile_nodes[uty] then u_tile_nodes[uty] = {} end
+                u_tile_nodes[uty][utx] = true
+            end
+        end
+    end
+
     local uts  = C.MAP.TILE_SIZE / 3
-    local umap = { grid = nil, ffi_grid = ffi_grid, tile_pixel_size = uts, _w = uw, _h = uh }
+    local Map  = require("models.Map")
+    local umap = setmetatable(
+        { grid = nil, ffi_grid = ffi_grid, tile_pixel_size = uts, _w = uw, _h = uh, C = C },
+        { __index = Map })
     umap.zone_seg_v = uzsv
     umap.zone_seg_h = uzsh
+    umap.road_nodes = u_road_nodes
+    umap.tile_nodes = u_tile_nodes
+    umap.road_v_rxs = {}
+    umap.road_h_rys = {}
     function umap:isRoad(t)
         if type(t) == "number" then return t >= 1 and t <= 4 end
         return t == "road" or t == "downtown_road" or t == "arterial" or t == "highway"
@@ -141,6 +187,8 @@ function GameBridgeService.wire(
     function umap:getPixelCoords(x, y)
         return (x - 0.5) * self.tile_pixel_size, (y - 0.5) * self.tile_pixel_size
     end
+    -- getNodePixel, pathStartNodeFor, pathEndNodesFor, nodeToCell, findNearestRoadNode
+    -- are inherited from Map via the metatable above.
     function umap:findNearestRoadTile(plot)
         local gw, gh = self._w, self._h
         local fg = self.ffi_grid
@@ -335,9 +383,9 @@ function GameBridgeService.wire(
         if new_depot and game.entities.depots[1] then
             v.depot       = game.entities.depots[1]
             v.depot_plot  = new_depot
-            v.grid_anchor = {x = new_depot.x, y = new_depot.y}
-            v.px = (new_depot.x - 0.5) * uts
-            v.py = (new_depot.y - 0.5) * uts
+            local anchor_node = umap:pathStartNodeFor(new_depot) or {x = new_depot.x, y = new_depot.y}
+            v.grid_anchor = anchor_node
+            v.px, v.py = umap:getNodePixel(anchor_node)
         end
         if States and States.Idle then v:changeState(States.Idle, game) end
     end

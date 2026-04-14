@@ -79,33 +79,65 @@ end
 
 -- ── Vehicle cost function ─────────────────────────────────────────────────────
 
--- Build the vehicle's per-cell cost closure for sandbox-grid A*. Honors
--- pathfinding_bounds and treats zone_seg edges as traversable for road
--- vehicles even when the underlying tile type is plot/downtown_plot.
+-- Build the vehicle's cost closure. Handles three node conventions:
+--   Tile node   {x, y, is_tile=true}   → underlying tile at 1-idx (x+1, y+1).
+--   Corner node {x, y} on dual-node map → road cost (downtown_road if any adjacent
+--                                          cell is downtown_plot/downtown_road).
+--   Cell node   {x, y} (sandbox fallback) → tile type at the cell.
 local function _buildVehicleCostFn(vehicle, map, grid_w, game)
     local ScopeService = require("services.ScopeService")
     local fgi = map.ffi_grid
     local fgw = grid_w
+    local grid_h = map._h or (map.grid and #map.grid) or 0
     local path_grid = map.grid
     local function getTileType(gx, gy)
+        if gx < 1 or gx > fgw or gy < 1 or gy > grid_h then return "grass" end
         if fgi then return _TILE_NAMES[fgi[(gy-1)*fgw + (gx-1)].type] or "grass" end
         return path_grid[gy][gx].type
     end
     local bounds = vehicle.pathfinding_bounds
     local zsv = map.zone_seg_v
     local zsh = map.zone_seg_h
-    return function(node_x, node_y)
-        if bounds and (node_x < bounds.x1 or node_x > bounds.x2
-                    or node_y < bounds.y1 or node_y > bounds.y2) then
+    return function(node_x, node_y, node)
+        local is_tile = node and node.is_tile
+        local is_corner = node and map.road_nodes and map.road_nodes[node_y]
+                               and map.road_nodes[node_y][node_x] and not is_tile
+        local gx, gy
+        if is_tile or is_corner then
+            -- SE-adjacent cell for both (tile node at (x,y) → cell (x+1, y+1);
+            -- corner at (x,y) is between four cells, SE is (x+1, y+1)).
+            gx, gy = node_x + 1, node_y + 1
+        else
+            gx, gy = node_x, node_y
+        end
+        if bounds and (gx < bounds.x1 or gx > bounds.x2
+                    or gy < bounds.y1 or gy > bounds.y2) then
             return IMPASSABLE
         end
-        if game and not ScopeService.isRevealed(game, node_x, node_y) then
+        if game and not ScopeService.isRevealed(game, gx, gy) then
             return IMPASSABLE
         end
+        if is_tile then
+            return vehicle:getMovementCostFor(getTileType(gx, gy))
+        end
+        -- Corner node on dual-node map: cost is road/downtown_road based on
+        -- any adjacent cell that's downtown. No zone_seg fallback needed —
+        -- corner nodes only exist on the street network.
+        if is_corner then
+            local rx, ry = node_x, node_y
+            local t_tr = getTileType(rx+1, ry+1)
+            local t_tl = getTileType(rx,   ry+1)
+            local t_br = getTileType(rx+1, ry)
+            local t_bl = getTileType(rx,   ry)
+            local is_downtown = t_tr == "downtown_plot" or t_tr == "downtown_road"
+                              or t_tl == "downtown_plot" or t_tl == "downtown_road"
+                              or t_br == "downtown_plot" or t_br == "downtown_road"
+                              or t_bl == "downtown_plot" or t_bl == "downtown_road"
+            return vehicle:getMovementCostFor(is_downtown and "downtown_road" or "road")
+        end
+        -- Cell node (sandbox fallback, e.g. world-gen sandbox maps).
         local t = getTileType(node_x, node_y)
         local cost = vehicle:getMovementCostFor(t)
-        -- Streets are edges (zone_seg), not cells. A cell flanking a street edge is
-        -- traversable at road cost even if its tile type is plot/downtown_plot/etc.
         if cost >= IMPASSABLE and (zsv or zsh) then
             local has_edge =
                 (zsv and zsv[node_y] and (zsv[node_y][node_x] or zsv[node_y][node_x-1]))
@@ -127,7 +159,7 @@ function PathfindingService.computePathCost(vehicle, path, game)
     local get_cost = _buildVehicleCostFn(vehicle, map, grid_w, game)
     local total = 0
     for _, node in ipairs(path) do
-        local c = get_cost(node.x, node.y)
+        local c = get_cost(node.x, node.y, node)
         if c < IMPASSABLE then
             total = total + c
         end
@@ -151,31 +183,33 @@ local function _endCandidates(end_plot, get_cost, grid_w, grid_h)
     return out
 end
 
--- ── Sandbox A* (used for all vehicle pathfinding on the unified map) ──────────
+-- ── Dual-node A* (vehicle pathfinding on the unified + city maps) ────────────
 
-local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
-    local path_grid = map.grid  -- nil for unified map (FFI); Lua table for city maps
+local function findVehiclePath_impl(vehicle, start_node, end_plot, map, game)
+    local path_grid = map.grid
     local grid_h = map._h or (path_grid and #path_grid or 0)
     local grid_w = map._w or (path_grid and path_grid[1] and #path_grid[1] or 0)
 
-    local start_sub = _snapToNearestTraversable(start_node, map, path_grid, grid_w, grid_h, vehicle, game)
-    if not start_sub then return nil end
+    -- Tile-node grid_anchor has 0-idx coords that don't match 1-idx cells.
+    -- Convert before snap. Corner nodes are off by ≤1 cell; snap recovers.
+    local start_cell_input = start_node
+    if start_node.is_tile and map.nodeToCell then
+        start_cell_input = map:nodeToCell(start_node)
+    end
+    local start_cell = _snapToNearestTraversable(start_cell_input, map, path_grid, grid_w, grid_h, vehicle, game)
+    if not start_cell then return nil end
 
     local get_cost = _buildVehicleCostFn(vehicle, map, grid_w, game)
-    local sandbox_proxy = setmetatable({road_v_rxs = false}, {__index = map})
     local mode = vehicle.transport_mode or "road"
 
     -- ── Cross-city routing via the entrance graph ────────────────────────────
-    -- Only highway-capable vehicles use it (bikes can't traverse highways).
-    -- _cityOf falls back to original start_node when the snap moved the
-    -- vehicle onto a boundary highway tile just outside city bounds.
     local can_highway = vehicle:getMovementCostFor("highway") < IMPASSABLE
-    local start_city  = can_highway and (_cityOf(start_sub.x, start_sub.y, game)
+    local start_city  = can_highway and (_cityOf(start_cell.x, start_cell.y, game)
                                       or _cityOf(start_node.x, start_node.y, game)) or nil
     local end_city    = can_highway and _cityOf(end_plot.x, end_plot.y, game) or nil
 
     if start_city and end_city and start_city ~= end_city then
-        local plan = RoutePlannerService.findRoute(start_sub, end_plot, game, {[mode] = true})
+        local plan = RoutePlannerService.findRoute(start_cell, end_plot, game, {[mode] = true})
         if not plan then
             local now = love.timer.getTime()
             local lk  = "_pf_err_" .. vehicle.id
@@ -200,51 +234,52 @@ local function findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
         return full
     end
 
-    -- ── Same-city: direct A* with end_candidates and per-(start,end) cache ──
-
-    local end_candidates = _endCandidates(end_plot, get_cost, grid_w, grid_h)
-    if #end_candidates == 0 then
-        local fallback = _snapToNearestTraversable(end_plot, map, path_grid, grid_w, grid_h, vehicle, game)
-        if not fallback then return nil end
-        end_candidates = {fallback}
+    -- ── Same-city: direct A* with dual-node start/end ───────────────────────
+    local start_pf = map.pathStartNodeFor and map:pathStartNodeFor(start_cell)
+    local end_nodes = map.pathEndNodesFor and map:pathEndNodesFor(end_plot) or {}
+    if not start_pf or #end_nodes == 0 then
+        -- Fallback: map lacks dual-node data (e.g. authoring sandbox). Use cells.
+        start_pf = start_cell
+        end_nodes = _endCandidates(end_plot, get_cost, grid_w, grid_h)
+        if #end_nodes == 0 then
+            local fallback = _snapToNearestTraversable(end_plot, map, path_grid, grid_w, grid_h, vehicle, game)
+            if not fallback then return nil end
+            end_nodes = {fallback}
+        end
     end
 
-    local cached = PathCacheService.get(mode, start_sub.x, start_sub.y, end_plot.x, end_plot.y)
+    local cached = PathCacheService.get(mode, start_cell.x, start_cell.y, end_plot.x, end_plot.y)
     if cached then return cached end
-    for _, ec in ipairs(end_candidates) do
-        cached = PathCacheService.get(mode, start_sub.x, start_sub.y, ec.x, ec.y)
-        if cached then return cached end
-    end
 
-    -- For non-road vehicles (ships etc.), the standard A* uses getNeighbors which
-    -- only returns road-connected cells. Pass zero turn_costs to trigger raw
-    -- 4-directional grid expansion gated by the cost function.
+    -- Non-road vehicles (ships etc.) use raw 4-directional expansion via turn_costs=0.
     local turn_costs_arg = nil
     if mode ~= "road" then
         turn_costs_arg = { turn_90 = 0, turn_180 = 0 }
     end
 
     local best_path = nil
-    for _, end_node in ipairs(end_candidates) do
-        if end_node.x == start_sub.x and end_node.y == start_sub.y then return {} end
-        local path = game.pathfinder.findPath(path_grid or {}, start_sub, end_node, get_cost, sandbox_proxy, turn_costs_arg)
+    for _, end_node in ipairs(end_nodes) do
+        if end_node.x == start_pf.x and end_node.y == start_pf.y
+           and (end_node.is_tile or false) == (start_pf.is_tile or false) then
+            return {}
+        end
+        local path = game.pathfinder.findPath(path_grid or {}, start_pf, end_node, get_cost, map, turn_costs_arg)
         if path and (not best_path or #path < #best_path) then best_path = path end
     end
 
     if not best_path then
-        -- Rate-limit pathfinding error spam (once per vehicle per 5 seconds).
         local now = love.timer.getTime()
         local lk  = "_pf_err_" .. vehicle.id
         if not vehicle[lk] or now - vehicle[lk] > 5 then
             vehicle[lk] = now
-            print(string.format("ERROR: PathfindingService - No path found for %s %d. start_sub=(%d,%d) end=(%d,%d) end_candidates=%d mode=%s grid=%dx%d",
-                vehicle.type, vehicle.id, start_sub.x, start_sub.y, end_plot.x, end_plot.y, #end_candidates, mode, grid_w, grid_h))
+            print(string.format("ERROR: PathfindingService - No path found for %s %d. start=(%d,%d) end=(%d,%d) end_nodes=%d mode=%s grid=%dx%d",
+                vehicle.type, vehicle.id, start_pf.x, start_pf.y, end_plot.x, end_plot.y, #end_nodes, mode, grid_w, grid_h))
         end
         return nil
     end
 
     if #best_path > 0 then table.remove(best_path, 1) end
-    PathCacheService.put(mode, start_sub.x, start_sub.y, end_plot.x, end_plot.y, best_path)
+    PathCacheService.put(mode, start_cell.x, start_cell.y, end_plot.x, end_plot.y, best_path)
     return best_path
 end
 
@@ -266,7 +301,7 @@ function PathfindingService.findVehiclePath(vehicle, start_node, end_plot, game)
         print(string.format("ERROR: PathfindingService - No map grid available for %s %d", vehicle.type, vehicle.id))
         return nil
     end
-    return findVehiclePathSandbox(vehicle, start_node, end_plot, map, game)
+    return findVehiclePath_impl(vehicle, start_node, end_plot, map, game)
 end
 
 -- Compute the pixel-path for a single in-city local segment of a route plan.
@@ -281,34 +316,45 @@ function PathfindingService.findLocalSegment(vehicle, from, to, city_idx, game)
     local grid_h = map._h or (path_grid and #path_grid or 0)
     local grid_w = map._w or (path_grid and path_grid[1] and #path_grid[1] or 0)
 
-    local start_sub = _snapToNearestTraversable(from, map, path_grid, grid_w, grid_h, vehicle, game)
-    if not start_sub then return nil end
+    local from_cell = from
+    if from.is_tile and map.nodeToCell then from_cell = map:nodeToCell(from) end
+    local start_cell = _snapToNearestTraversable(from_cell, map, path_grid, grid_w, grid_h, vehicle, game)
+    if not start_cell then return nil end
 
     local get_cost = _buildVehicleCostFn(vehicle, map, grid_w, game)
     local bounds   = city_idx and game.city_sc_bounds and game.city_sc_bounds[city_idx]
-    local function bounded(x, y)
-        if bounds and (x < bounds.x1 or x > bounds.x2
-                    or y < bounds.y1 or y > bounds.y2) then
+    local function bounded(x, y, node)
+        local gx, gy = x, y
+        if node and node.is_tile then gx, gy = x + 1, y + 1 end
+        if bounds and (gx < bounds.x1 or gx > bounds.x2
+                    or gy < bounds.y1 or gy > bounds.y2) then
             return IMPASSABLE
         end
-        return get_cost(x, y)
+        return get_cost(x, y, node)
     end
 
-    local sandbox_proxy = setmetatable({road_v_rxs = false}, {__index = map})
     local mode = vehicle.transport_mode or "road"
     local turn_costs = (mode ~= "road") and {turn_90 = 0, turn_180 = 0} or nil
 
-    -- Pick a traversable end target: prefer the cell itself if traversable,
-    -- otherwise a cardinal neighbor (so building plots work as destinations).
-    local target = {x = to.x, y = to.y}
-    if bounded(target.x, target.y) >= IMPASSABLE then
-        local cands = _endCandidates(target, bounded, grid_w, grid_h)
-        if #cands == 0 then return nil end
-        target = cands[1]
+    local start_pf  = map.pathStartNodeFor and map:pathStartNodeFor(start_cell) or start_cell
+    local end_nodes = map.pathEndNodesFor and map:pathEndNodesFor(to) or {}
+    if #end_nodes == 0 then
+        local target = {x = to.x, y = to.y}
+        if bounded(target.x, target.y) >= IMPASSABLE then
+            local cands = _endCandidates(target, bounded, grid_w, grid_h)
+            if #cands == 0 then return nil end
+            target = cands[1]
+        end
+        end_nodes = {target}
     end
 
-    return game.pathfinder.findPath(path_grid or {}, start_sub, target,
-        bounded, sandbox_proxy, turn_costs)
+    local best_path = nil
+    for _, end_node in ipairs(end_nodes) do
+        local path = game.pathfinder.findPath(path_grid or {}, start_pf, end_node,
+            bounded, map, turn_costs)
+        if path and (not best_path or #path < #best_path) then best_path = path end
+    end
+    return best_path
 end
 
 function PathfindingService.findPathToDepot(vehicle, game)
@@ -321,11 +367,6 @@ function PathfindingService.findPathToPickup(vehicle, trip, game)
     return PathfindingService.findVehiclePath(vehicle, vehicle.grid_anchor, leg.start_plot, game)
 end
 
--- Returns pixel coords for a path node on the unified (sandbox) map.
-local function nodePixel(node, TPS)
-    return (node.x - 0.5) * TPS, (node.y - 0.5) * TPS
-end
-
 function PathfindingService.estimatePathTravelTime(path, vehicle, game)
     if not path or #path == 0 then return 0 end
     local map            = game.maps[vehicle.operational_map_key]
@@ -333,7 +374,7 @@ function PathfindingService.estimatePathTravelTime(path, vehicle, game)
     local total_distance = 0
     local last_px, last_py = vehicle.px, vehicle.py
     for _, node in ipairs(path) do
-        local node_px, node_py = nodePixel(node, TPS)
+        local node_px, node_py = map:getNodePixel(node)
         total_distance = total_distance + math.sqrt((node_px-last_px)^2 + (node_py-last_py)^2)
         last_px, last_py = node_px, node_py
     end

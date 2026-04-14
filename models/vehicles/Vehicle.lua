@@ -46,15 +46,17 @@ function Vehicle:new(id, depot, game, vehicleType)
     local umap = game.maps and game.maps.unified
     if umap then
         instance.operational_map_key = "unified"
-        local uts = umap.tile_pixel_size
-        instance.grid_anchor = { x = anchor.x, y = anchor.y }
-        instance.px = (anchor.x - 0.5) * uts
-        instance.py = (anchor.y - 0.5) * uts
+        local anchor_node = umap.pathStartNodeFor and umap:pathStartNodeFor(anchor)
+                         or { x = anchor.x, y = anchor.y }
+        instance.grid_anchor = anchor_node
+        instance.px, instance.py = umap:getNodePixel(anchor_node)
     else
         instance.operational_map_key = "city"
         local home_map = game.maps["city"]
-        instance.grid_anchor = { x = anchor.x, y = anchor.y }
-        instance.px, instance.py = home_map:getPixelCoords(anchor.x, anchor.y)
+        local anchor_node = home_map.pathStartNodeFor and home_map:pathStartNodeFor(anchor)
+                         or { x = anchor.x, y = anchor.y }
+        instance.grid_anchor = anchor_node
+        instance.px, instance.py = home_map:getNodePixel(anchor_node)
     end
 
     instance.last_trip_end_time = 0
@@ -105,13 +107,7 @@ end
 function Vehicle:recalculatePixelPosition(game)
     local map = game.maps[self.operational_map_key]
     if map then
-        if self.operational_map_key == "unified" then
-            local uts = map.tile_pixel_size
-            self.px = (self.grid_anchor.x - 0.5) * uts
-            self.py = (self.grid_anchor.y - 0.5) * uts
-        else
-            self.px, self.py = map:getPixelCoords(self.grid_anchor.x, self.grid_anchor.y)
-        end
+        self.px, self.py = map:getNodePixel(self.grid_anchor)
     end
 end
 

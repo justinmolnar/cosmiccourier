@@ -11,54 +11,6 @@ local FuelService        = require("services.FuelService")
 
 
 --------------------------------------------------------------------------------
--- Returns pixel coords for a path node, snapped to the nearest zone_seg street
--- boundary when the vehicle is traveling parallel to that street.
--- plot/downtown_plot cells sit BESIDE streets; road tiles sit ON their own center.
-local function _streetSnappedPixel(node, prev_node, tps, map)
-    local px = (node.x - 0.5) * tps
-    local py = (node.y - 0.5) * tps
-
-    -- Only snap non-road cells (plot, downtown_plot) that border zone_seg edges.
-    local fgi = map.ffi_grid
-    local fgw = map._w
-    if fgi and fgw then
-        local ti = fgi[(node.y - 1) * fgw + (node.x - 1)].type
-        if ti >= 1 and ti <= 4 then return px, py end  -- road/arterial/highway: no snap
-    else
-        local g = map.grid
-        if g and g[node.y] then
-            local t = g[node.y][node.x] and g[node.y][node.x].type
-            if t == "road" or t == "downtown_road" or t == "arterial" or t == "highway" then
-                return px, py
-            end
-        end
-    end
-
-    local dx = prev_node and (node.x - prev_node.x) or 0
-    local dy = prev_node and (node.y - prev_node.y) or 0
-    local zsv = map.zone_seg_v
-    local zsh = map.zone_seg_h
-
-    if dx == 0 and dy ~= 0 and zsv then
-        -- Moving N-S: snap x to adjacent N-S street (zone_seg_v boundary)
-        if zsv[node.y] and zsv[node.y][node.x] then
-            px = node.x * tps              -- right boundary
-        elseif zsv[node.y] and zsv[node.y][node.x - 1] then
-            px = (node.x - 1) * tps        -- left boundary
-        end
-    elseif dy == 0 and dx ~= 0 and zsh then
-        -- Moving E-W: snap y to adjacent E-W street (zone_seg_h boundary)
-        if zsh[node.y] and zsh[node.y][node.x] then
-            py = node.y * tps              -- bottom boundary
-        elseif zsh[node.y - 1] and zsh[node.y - 1][node.x] then
-            py = (node.y - 1) * tps        -- top boundary
-        end
-    end
-
-    return px, py
-end
-
---------------------------------------------------------------------------------
 -- A shared function for any state that needs to move along a path.
 -- This encapsulates the movement logic so we don't repeat it.
 --------------------------------------------------------------------------------
@@ -93,7 +45,7 @@ function moveAlongPath(dt, vehicle, game)
                 -- Smooth path exhausted: sync grid_anchor to last node and signal arrival.
                 if vehicle.path and (vehicle.path_i or 1) <= #vehicle.path then
                     local last = vehicle.path[#vehicle.path]
-                    vehicle.grid_anchor = {x = last.x, y = last.y}
+                    vehicle.grid_anchor = {x = last.x, y = last.y, is_tile = last.is_tile}
                 end
                 vehicle.path = {}; vehicle.path_i = 1
                 vehicle.smooth_path   = nil
@@ -111,10 +63,11 @@ function moveAlongPath(dt, vehicle, game)
         -- We pop all but the last node so vehicle.path never empties prematurely.
         if vehicle.path and vehicle.path_i < #vehicle.path then
             local head = vehicle.path[vehicle.path_i]
-            local hdx = (head.x - 0.5) * tps - vehicle.px
-            local hdy = (head.y - 0.5) * tps - vehicle.py
+            local head_px, head_py = map_for_pathing:getNodePixel(head)
+            local hdx = head_px - vehicle.px
+            local hdy = head_py - vehicle.py
             if hdx * hdx + hdy * hdy < (tps * 0.5) * (tps * 0.5) then
-                vehicle.grid_anchor = {x = head.x, y = head.y}
+                vehicle.grid_anchor = {x = head.x, y = head.y, is_tile = head.is_tile}
                 vehicle.path_i = vehicle.path_i + 1
             end
         end
@@ -125,15 +78,14 @@ function moveAlongPath(dt, vehicle, game)
     if not vehicle.path or (vehicle.path_i or 1) > #vehicle.path then return end
 
     local target_node = vehicle.path[vehicle.path_i]
-    local prev_node   = vehicle.path_i > 1 and vehicle.path[vehicle.path_i - 1] or vehicle.grid_anchor
-    local target_px, target_py = _streetSnappedPixel(target_node, prev_node, tps, map_for_pathing)
+    local target_px, target_py = map_for_pathing:getNodePixel(target_node)
 
     local dist_x = target_px - vehicle.px
     local dist_y = target_py - vehicle.py
     local dist_sq = dist_x * dist_x + dist_y * dist_y
 
     if dist_sq <= travel_dist * travel_dist then
-        vehicle.grid_anchor = { x = target_node.x, y = target_node.y }
+        vehicle.grid_anchor = { x = target_node.x, y = target_node.y, is_tile = target_node.is_tile }
         vehicle.px          = target_px
         vehicle.py          = target_py
         vehicle.path_i = vehicle.path_i + 1

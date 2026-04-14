@@ -16,19 +16,9 @@ function VehicleRenderer.drawDebug(vehicle, game)
         table.insert(pixel_path, vehicle.px)
         table.insert(pixel_path, vehicle.py)
         local path_map = game.maps[vehicle.operational_map_key]
-        local path_tps = path_map.tile_pixel_size or game.C.MAP.TILE_SIZE
         for i = _pi, #vehicle.path do
             local node = vehicle.path[i]
-            local px, py
-            if path_map.road_v_rxs then
-                if node.is_tile then
-                    px, py = (node.x + 0.5) * path_tps, (node.y + 0.5) * path_tps
-                else
-                    px, py = node.x * path_tps, node.y * path_tps
-                end
-            else
-                px, py = path_map:getPixelCoords(node.x, node.y)
-            end
+            local px, py = path_map:getNodePixel(node)
             table.insert(pixel_path, px)
             table.insert(pixel_path, py)
         end

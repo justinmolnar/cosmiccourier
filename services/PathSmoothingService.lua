@@ -86,7 +86,7 @@ function PathSmoothingService.buildSmoothPath(vehicle, game)
     local uw = umap and umap._w or 0
 
     local function nodePixels(node)
-        local orig_px, orig_py = map:getPixelCoords(node.x, node.y)
+        local orig_px, orig_py = map:getNodePixel(node)
         if snap_lookup then
             local snapped = snap_lookup[node.y * (uw + 1) + node.x]
             if snapped then return snapped[1], snapped[2] end

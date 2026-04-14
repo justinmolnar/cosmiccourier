@@ -238,29 +238,31 @@ local function _trunkCostFor(mode, game)
     local gw   = umap and umap._w or 0
     if not fgi then return nil end
     if mode == "road" then
-        return function(x, y)
-            local ti = fgi[(y-1)*gw + (x-1)].type
-            if ti == 4 then return 1 end   -- highway
-            if ti == 3 then return 5 end   -- arterial
+        -- Tile nodes (0-idx) index the underlying 1-idx cell at (x+1, y+1).
+        -- Corner nodes on the trunk graph are unreachable (highways don't have
+        -- zone_seg corners), so they return IMPASSABLE.
+        return function(x, y, node)
+            if not (node and node.is_tile) then return IMPASSABLE end
+            local ti = fgi[y*gw + x].type  -- 0-idx already baked in
+            if ti == 4 then return 1 end
+            if ti == 3 then return 5 end
             if ti == 1 or ti == 2 then return 10 end
             return IMPASSABLE
         end
     elseif mode == "water" then
-        return function(x, y)
-            local ti = fgi[(y-1)*gw + (x-1)].type
-            if ti == 12 then return 1 end  -- open ocean
-            if ti == 11 then return 2 end  -- deep water
-            if ti == 10 then return 4 end  -- coastal water
-            if ti == 5  then return 6 end  -- water (river/lake)
+        return function(x, y, node)
+            -- Water trunk uses cell coords (no dual-node graph over water).
+            local gx, gy = x, y
+            if node and node.is_tile then gx, gy = x + 1, y + 1 end
+            local ti = fgi[(gy-1)*gw + (gx-1)].type
+            if ti == 12 then return 1 end
+            if ti == 11 then return 2 end
+            if ti == 10 then return 4 end
+            if ti == 5  then return 6 end
             return IMPASSABLE
         end
     end
     return nil
-end
-
-local function _trunkProxy(game)
-    local umap = game.maps.unified
-    return setmetatable({road_v_rxs = false}, {__index = umap})
 end
 
 -- Read a trunk/intra_city segment from the cache or compute it lazily with
@@ -273,10 +275,18 @@ local function _trunkPath(seg, game)
 
     local cost_fn = _trunkCostFor(seg.mode, game)
     if not cost_fn then return nil end
-    local proxy = _trunkProxy(game)
+    local umap = game.maps.unified
     local turn_costs = (seg.mode ~= "road") and {turn_90 = 0, turn_180 = 0} or nil
-    local p = game.pathfinder.findPath({},
-        {x = a.ux, y = a.uy}, {x = b.ux, y = b.uy}, cost_fn, proxy, turn_costs)
+
+    local start_node, end_node
+    if seg.mode == "road" then
+        start_node = umap and umap.pathStartNodeFor and umap:pathStartNodeFor({x=a.ux, y=a.uy})
+        end_node   = umap and umap.pathStartNodeFor and umap:pathStartNodeFor({x=b.ux, y=b.uy})
+    end
+    if not start_node then start_node = {x = a.ux, y = a.uy} end
+    if not end_node   then end_node   = {x = b.ux, y = b.uy} end
+
+    local p = game.pathfinder.findPath({}, start_node, end_node, cost_fn, umap, turn_costs)
     if p then PathCacheService.put(seg.mode, a.ux, a.uy, b.ux, b.uy, p) end
     return p
 end

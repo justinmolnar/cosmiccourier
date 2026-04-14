@@ -354,7 +354,7 @@ function Pathfinder.findPath(grid, startNode, endNode, costs, map, turn_costs)
             for _, neighbor in ipairs(getNeighbors(current, grid, grid_width, grid_height, map)) do
                 local nk = nodeKey(neighbor)
                 if not closedSet[nk] then
-                    local move_cost = costs(neighbor.x, neighbor.y) * (neighbor.dist or 1)
+                    local move_cost = costs(neighbor.x, neighbor.y, neighbor) * (neighbor.dist or 1)
                     local tentative = gScore[curKey] + move_cost
                     if not gScore[nk] or tentative < gScore[nk] then
                         cameFrom[nk] = current

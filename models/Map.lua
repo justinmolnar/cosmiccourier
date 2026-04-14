@@ -227,8 +227,8 @@ end
 -- pixel position = (rx*tps, ry*tps).  Only valid on road-node maps (road_nodes set).
 function Map:findNearestRoadNode(plot)
     if not plot or not self.road_nodes then return nil end
-    local gw = self.grid and #self.grid[1] or 0
-    local gh = self.grid and #self.grid or 0
+    local gw = self._w or (self.grid and #self.grid[1]) or 0
+    local gh = self._h or (self.grid and #self.grid) or 0
     -- Check all 4 corners of the plot sub-cell first (matches PathfindingService logic).
     local gx, gy = plot.x, plot.y
     for _, c in ipairs({{gx-1,gy-1},{gx,gy-1},{gx-1,gy},{gx,gy}}) do
@@ -395,6 +395,114 @@ end
 function Map:getPixelCoords(grid_x, grid_y)
     local tps = self.tile_pixel_size or self.C.MAP.TILE_SIZE
     return (grid_x - 0.5) * tps, (grid_y - 0.5) * tps
+end
+
+-- Convert a path-graph node to pixel coords. Three conventions coexist:
+--   Tile node   {x, y, is_tile=true}   → ((x+0.5)*tps, (y+0.5)*tps) [0-idx tile centre]
+--   Corner node {x, y} on dual-node map → (x*tps, y*tps)            [0-idx subcell corner]
+--   Cell node   {x, y} on sandbox map   → ((x-0.5)*tps, (y-0.5)*tps) [1-idx cell centre]
+-- Dual-node vs sandbox is decided by the presence of `road_v_rxs` on the map.
+function Map:getNodePixel(node)
+    local tps = self.tile_pixel_size or self.C.MAP.TILE_SIZE
+    if node.is_tile then
+        return (node.x + 0.5) * tps, (node.y + 0.5) * tps
+    end
+    if self.road_v_rxs then
+        return node.x * tps, node.y * tps
+    end
+    return (node.x - 0.5) * tps, (node.y - 0.5) * tps
+end
+
+-- Read a tile type as an integer (FFI grid) or string (Lua grid) with a normalized
+-- string result. Returns "grass" if out of bounds. gx/gy are 1-indexed cells.
+local _NODE_TILE_NAMES = {
+    [0]="grass", [1]="road", [2]="downtown_road", [3]="arterial", [4]="highway",
+    [5]="water",  [6]="mountain", [7]="river", [8]="plot", [9]="downtown_plot",
+    [10]="coastal_water", [11]="deep_water", [12]="open_ocean",
+}
+local function _tileTypeAt(self, gx, gy)
+    local gw = self._w or (self.grid and self.grid[1] and #self.grid[1]) or 0
+    local gh = self._h or (self.grid and #self.grid) or 0
+    if gx < 1 or gx > gw or gy < 1 or gy > gh then return "grass" end
+    if self.ffi_grid then
+        return _NODE_TILE_NAMES[self.ffi_grid[(gy-1)*gw + (gx-1)].type] or "grass"
+    end
+    return self.grid[gy][gx] and self.grid[gy][gx].type or "grass"
+end
+
+-- Given a 1-indexed cell, return the canonical path-graph node to start A* from.
+-- Rules (in order):
+--   1. Cell is arterial/highway → tile node at (gx-1, gy-1, is_tile=true).
+--   2. Cell borders a zone_seg edge → nearest corner node (road_nodes BFS).
+--   3. BFS outward to first node-bearing cell.
+-- Returns nil on maps that lack dual-node data (caller should fall back to cell).
+function Map:pathStartNodeFor(cell)
+    if not cell or not self.road_nodes then return nil end
+    local gx, gy = cell.x, cell.y
+    local t = _tileTypeAt(self, gx, gy)
+    if t == "arterial" or t == "highway" then
+        if self.tile_nodes and self.tile_nodes[gy-1] and self.tile_nodes[gy-1][gx-1] then
+            return {x = gx - 1, y = gy - 1, is_tile = true}
+        end
+    end
+    local corner = self:findNearestRoadNode(cell)
+    if corner then return corner end
+    -- Last resort: BFS cells until we find one with an adjacent node.
+    local gw = self._w or (self.grid and #self.grid[1]) or 0
+    local gh = self._h or (self.grid and #self.grid) or 0
+    local visited = {[gy*10000+gx] = true}
+    local q, qi = {{gx, gy}}, 1
+    while qi <= #q and qi <= 2000 do
+        local cx, cy = q[qi][1], q[qi][2]; qi = qi + 1
+        local ct = _tileTypeAt(self, cx, cy)
+        if (ct == "arterial" or ct == "highway")
+           and self.tile_nodes and self.tile_nodes[cy-1] and self.tile_nodes[cy-1][cx-1] then
+            return {x = cx - 1, y = cy - 1, is_tile = true}
+        end
+        local near = self:findNearestRoadNode({x=cx, y=cy})
+        if near then return near end
+        for _, d in ipairs({{0,-1},{0,1},{-1,0},{1,0}}) do
+            local nx, ny = cx + d[1], cy + d[2]
+            local k = ny*10000 + nx
+            if nx >= 1 and nx <= gw and ny >= 1 and ny <= gh and not visited[k] then
+                visited[k] = true; q[#q+1] = {nx, ny}
+            end
+        end
+    end
+    return nil
+end
+
+-- Returns an array of candidate end nodes for a destination plot. Typically the
+-- four corner nodes surrounding the plot cell (those that exist in road_nodes),
+-- plus the plot's own tile node if it sits on an arterial/highway.
+function Map:pathEndNodesFor(plot)
+    if not plot or not self.road_nodes then return {} end
+    local out = {}
+    local gx, gy = plot.x, plot.y
+    local t = _tileTypeAt(self, gx, gy)
+    if (t == "arterial" or t == "highway")
+       and self.tile_nodes and self.tile_nodes[gy-1] and self.tile_nodes[gy-1][gx-1] then
+        out[#out+1] = {x = gx - 1, y = gy - 1, is_tile = true}
+    end
+    for _, c in ipairs({{gx-1,gy-1},{gx,gy-1},{gx-1,gy},{gx,gy}}) do
+        local rx, ry = c[1], c[2]
+        if self.road_nodes[ry] and self.road_nodes[ry][rx] then
+            out[#out+1] = {x = rx, y = ry}
+        end
+    end
+    if #out == 0 then
+        local near = self:pathStartNodeFor(plot)
+        if near then out[#out+1] = near end
+    end
+    return out
+end
+
+-- Convert a path node back to a 1-indexed cell (for grid_anchor / distance math).
+-- Tile node (x, y, is_tile=true) → cell (x+1, y+1).
+-- Corner node (x, y) → cell (x+1, y+1) — the SE cell of the intersection.
+function Map:nodeToCell(node)
+    if not node then return nil end
+    return {x = node.x + 1, y = node.y + 1}
 end
 
 function Map:getCurrentTileSize()
