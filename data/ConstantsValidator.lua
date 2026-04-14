@@ -12,13 +12,10 @@ function ConstantsValidator.validate(constants)
     
     -- Validate GAMEPLAY constants
     ConstantsValidator._validateGameplay(constants, errors)
-    
+
     -- Validate ZOOM constants
     ConstantsValidator._validateZoom(constants, errors)
-    
-    -- Validate COSTS constants
-    ConstantsValidator._validateCosts(constants, errors)
-    
+
     -- Validate EVENTS constants
     ConstantsValidator._validateEvents(constants, errors)
     
@@ -100,8 +97,6 @@ function ConstantsValidator._validateGameplay(constants, errors)
     ConstantsValidator._validateNumber(gameplay, "INITIAL_MONEY", errors, 0, 10000)
     ConstantsValidator._validateNumber(gameplay, "BASE_TRIP_PAYOUT", errors, 1, 1000)
     ConstantsValidator._validateNumber(gameplay, "INITIAL_SPEED_BONUS", errors, 0, 1000)
-    ConstantsValidator._validateNumber(gameplay, "TRIP_GENERATION_MIN_SEC", errors, 1, 60)
-    ConstantsValidator._validateNumber(gameplay, "TRIP_GENERATION_MAX_SEC", errors, 5, 120)
     ConstantsValidator._validateNumber(gameplay, "MAX_PENDING_TRIPS", errors, 1, 100)
     ConstantsValidator._validateNumber(gameplay, "BASE_TILE_SIZE", errors, 8, 32)
 end
@@ -118,16 +113,6 @@ function ConstantsValidator._validateZoom(constants, errors)
     ConstantsValidator._validateNumber(zoom, "TRANSITION_DURATION", errors, 0.1, 5.0)
     ConstantsValidator._validateNumber(zoom, "MIN_SCALE", errors, 0.1, 10)
     ConstantsValidator._validateNumber(zoom, "MAX_SCALE", errors, 10, 10000)
-end
-
-function ConstantsValidator._validateCosts(constants, errors)
-    local costs = constants.COSTS
-    if not costs then
-        table.insert(errors, "Missing COSTS constants table")
-        return
-    end
-    
-    ConstantsValidator._validateNumber(costs, "AUTO_DISPATCH", errors, 100, 10000)
 end
 
 function ConstantsValidator._validateEvents(constants, errors)

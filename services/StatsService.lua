@@ -2,9 +2,11 @@
 -- Computes per-second income and trip-creation stats from rolling history windows.
 -- Prunes stale entries from state as a side effect.
 
+local C = require("data.constants")
+
 local StatsService = {}
 
-local WINDOW = 15  -- seconds
+local WINDOW = C.GAMEPLAY.STATS_WINDOW_SEC
 
 function StatsService.computePerSecondStats(state)
     local now = love.timer.getTime()

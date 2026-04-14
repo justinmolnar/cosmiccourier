@@ -336,6 +336,45 @@ Numbers that produce the intended pacing:
 
 - Tuning is the whole point, not a gating question. Every number in the game is currently meaningless until this pass runs.
 
+### Status: Implemented
+
+Phase 8 is inherently two-layered:
+
+**Architectural compliance** — done in this pass. Audit confirmed (and this commit closed the remaining gap) that no gameplay-relevant magic numbers live in logic code. Every tunable has a single source of truth in a data file.
+
+**Numeric tuning** — this pass produced math-driven first-pass values for the provably-broken axis (fuel upgrades) and fixed a starter-archetype trap. Final values emerge from playtest iteration, which is user-driven and out of single-commit scope.
+
+Work shipped in this pass:
+
+- `services/StatsService.lua` — `WINDOW = 15` moved to `C.GAMEPLAY.STATS_WINDOW_SEC`. No gameplay-relevant literal remains in any service, controller, or model.
+- `data/constants.lua` — deleted orphan entries with zero runtime readers: `CITY_TRIP_PAYOUT_MULTIPLIER`, `CITY_TRIP_BONUS_MULTIPLIER`, `TRIP_GENERATION_MIN_SEC`, `TRIP_GENERATION_MAX_SEC`, `MIN_DELTA_CALCULATION` from `GAMEPLAY`; `DURATION_UPGRADE_AMOUNT`, `FRENZY_TRIP_MIN_SEC`, `FRENZY_TRIP_MAX_SEC` from `EVENTS`. The entire `COSTS` table was deleted — every entry was a relic from the pre-JSON upgrade era (real upgrade costs live in `data/upgrades.json`, license costs in `data/licenses.lua`, market costs per archetype).
+- `data/ConstantsValidator.lua` — validator entries for deleted constants removed; `_validateCosts` deleted.
+- `data/upgrades.json` — fuel-upgrade costs rescaled to plausible break-even ranges (break-even ≈ 300 trips of savings at the relevant tier):
+  - Bike: `3000 / 15000 / 60000` → `150 / 750 / 3000`
+  - Car:  `5000 / 25000 / 100000` → `800 / 4000 / 16000`
+  - Truck: `12000 / 50000 / 200000` → `2000 / 10000 / 40000`
+- `data/client_archetypes.lua` — default starter archetype changed from `retail` (cargo 2–5, exceeds bike capacity) to `restaurant` (cargo 1–2, fits). The former trapped a fresh save with a client whose trips the starting bike physically couldn't assign.
+
+### Deviations
+
+- The iterative playtest loop is out of scope for this commit. Playtest sessions edit data files directly; no plan needed.
+- `CITY_TRIP_PAYOUT_MULTIPLIER = 20` was suspected of double-counting with per-archetype `payout_multiplier` — grep confirmed it had no runtime reader at all, so it was deleted outright rather than documented-and-kept. The archetype multiplier is now the sole city-scope economy knob.
+- The spec's "30+ minute arc to City license" was left untested numerically. The `city_license` cost ($5000) was retained; re-tune after playtest. The starter-archetype fix was the blocker for the arc even being possible.
+- Fuel-upgrade break-even analysis used estimated trip fuel cost per vehicle ($2.50 bike, $25 car, $50 truck) derived from the pathfinding cost tables, not runtime measurements. Playtest may surface the need for further adjustment.
+
+### Tuning Surface
+
+Every gameplay knob lives in one of these files. Tuning edits go here, not in code.
+
+- **`data/constants.lua`** `GAMEPLAY` — `INITIAL_MONEY`, `BASE_TRIP_PAYOUT`, `INITIAL_SPEED_BONUS`, `BONUS_DECAY_RATE`, `MAX_PENDING_TRIPS`, `AUTODISPATCH_INTERVAL`, `VEHICLE_STUCK_TIMER`, `STATS_WINDOW_SEC`.
+- **`data/constants.lua`** `EVENTS` — rush-hour `SPAWN_MIN_SEC`, `SPAWN_MAX_SEC`, `LIFESPAN_SEC`, `INITIAL_DURATION_SEC`.
+- **`data/constants.lua`** `EFFECTS` — `PAYOUT_TEXT_LIFESPAN_SEC`, `PAYOUT_TEXT_FLOAT_SPEED`.
+- **`data/licenses.lua`** — `cost` per license (`city_license`, `region_license`).
+- **`data/upgrades.json`** — every upgrade's `cost`, `cost_multiplier`, `max_level`, `effect_value`.
+- **`data/client_archetypes.lua`** — per archetype: `base_spawn_seconds`, `payout_multiplier`, `market_cost`, `cargo_size_range`, `dest_scope_weights`, `required_scope_tier`. Also `default_id` for the fresh-save starter.
+- **`data/vehicles/{bike,car,truck,ship}.json`** — `base_speed`, `base_capacity`, `base_cost`, `cost_multiplier`, `fuel_rate`, `pathfinding_costs`.
+- **`data/rule_packs.lua`** — pack `count`, `max_complexity`, `tags`, `scope_tier` (no inline costs; grants reference pack ids in `upgrades.json`).
+
 ---
 
 ## 9. Client Archetypes, Trip Generation, Cargo

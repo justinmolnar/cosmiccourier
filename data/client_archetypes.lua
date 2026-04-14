@@ -103,6 +103,9 @@ end
 
 -- Default archetype id. Services reference this instead of hardcoding a name,
 -- so the archetype pick can be changed in one place.
-Archetypes.default_id = Archetypes.list[3].id
+-- "restaurant" is the starter because its cargo range (1-2) fits the
+-- fresh-save bike's capacity (1) — any larger range strands the player
+-- on trips they can't assign.
+Archetypes.default_id = "restaurant"
 
 return Archetypes

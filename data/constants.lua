@@ -79,21 +79,15 @@ local C = {
 
     GAMEPLAY = {
         INITIAL_MONEY           = 150,
-        -- REMOVED: INITIAL_BIKE_SPEED and INITIAL_TRUCK_SPEED (now in vehicle properties)
         BASE_TRIP_PAYOUT        = 50,
-        CITY_TRIP_PAYOUT_MULTIPLIER = 20,
         INITIAL_SPEED_BONUS     = 100,
-        CITY_TRIP_BONUS_MULTIPLIER = 10,
-        TRIP_GENERATION_MIN_SEC = 10,
-        TRIP_GENERATION_MAX_SEC = 20,
         MAX_PENDING_TRIPS       = 10,
         AUTODISPATCH_INTERVAL   = 1,
         BONUS_DECAY_RATE        = 1.0,
-        MIN_DELTA_CALCULATION   = 0.1,
         CURRENT_MAP_SCALE       = 1,
-        -- REMOVED: VEHICLE_CLICK_RADIUS (moved to UI)
         BASE_TILE_SIZE          = 16,
         VEHICLE_STUCK_TIMER     = 15,
+        STATS_WINDOW_SEC        = 15,   -- rolling window for income/trips-per-second display
     },
 
     ZOOM = {
@@ -198,31 +192,15 @@ local C = {
         SMOOTHING_ENABLED = true,
     },
 
-    COSTS = {
-        -- REMOVED: BIKE and TRUCK (now handled in GameState with proper values)
-        -- REMOVED: CLIENT / CLIENT_MULT (client market cost lives on each
-        --          archetype in data/client_archetypes.lua).
-        SPEED           = 75,
-        AUTO_DISPATCH   = 1000,
-        CAPACITY        = 2500,
-        FRENZY_DURATION = 5000,
-
-        -- REMOVED: BIKE_MULT and TRUCK_MULT (moved to GameState)
-        SPEED_MULT      = 1.5,
-        CAPACITY_MULT   = 1.5,
-        FRENZY_DURATION_MULT = 1.5,
-
-        SPEED_UPGRADE_MULT = 1.2,
-    },
+    -- COSTS table removed 2026-04-14: all entries were orphaned remnants from
+    -- the pre-data-driven upgrade era. Upgrade costs now live in data/upgrades.json,
+    -- license costs in data/licenses.lua, and market costs per archetype.
 
     EVENTS = {
         SPAWN_MIN_SEC           = 60,
         SPAWN_MAX_SEC           = 120,
         LIFESPAN_SEC            = 15,
         INITIAL_DURATION_SEC    = 15,
-        DURATION_UPGRADE_AMOUNT = 5,
-        FRENZY_TRIP_MIN_SEC     = 1,
-        FRENZY_TRIP_MAX_SEC     = 3,
     },
 
     EFFECTS = {
