@@ -567,9 +567,7 @@ function InputController:_tryPlaceDepot(wx, wy, sx, sy)
     local depot    = Depot:new("depot_" .. love.math.random(1000, 9999), {x=gx, y=gy}, game)
     table.insert(game.entities.depots, depot)
     game.entities.build_depot_mode = false
-    if game.ui_manager and game.ui_manager.panel then
-        game.ui_manager.panel.depot_view = depot
-    end
+    game.entities.selected_depot = depot
     require("services.FloatingTextSystem").emit("Depot Built! -$" .. cost, wx, wy, game.C)
 end
 

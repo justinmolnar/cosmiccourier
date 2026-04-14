@@ -64,4 +64,28 @@ function Trip:addLeg(start_plot, end_plot, cargo_size, transport_mode)
     })
 end
 
+-- Atomic "how much cargo is this trip" — sum across legs, for UI display.
+-- Player-facing code treats a trip as one scalar; legs are dispatch-internal.
+function Trip:getCargoSize()
+    local total = 0
+    for _, leg in ipairs(self.legs) do total = total + (leg.cargo_size or 0) end
+    return total
+end
+
+-- Final dropoff plot for the trip, regardless of intermediate legs. UI code
+-- must never reach into legs[] — call this instead.
+function Trip:getFinalDestination()
+    if self.final_destination then return self.final_destination end
+    if self.end_plot then return self.end_plot end
+    local last = self.legs and self.legs[#self.legs]
+    return last and last.end_plot or nil
+end
+
+-- Source pickup plot — first leg's start, or the cached start_plot.
+function Trip:getSourcePlot()
+    if self.start_plot then return self.start_plot end
+    local first = self.legs and self.legs[1]
+    return first and first.start_plot or nil
+end
+
 return Trip

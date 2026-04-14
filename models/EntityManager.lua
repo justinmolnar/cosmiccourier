@@ -243,9 +243,6 @@ function Entities:handle_click(x, y, game)
             if (x - dpx)^2 + (y - dpy)^2 < depot_click_r^2 then
                 self.selected_depot = depot
                 self.selected_vehicle = nil
-                if game.ui_manager and game.ui_manager.panel then
-                    game.ui_manager.panel.depot_view = depot
-                end
                 return true
             end
         end

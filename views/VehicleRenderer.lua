@@ -82,6 +82,16 @@ function VehicleRenderer.draw(vehicle, game)
         g.setLineWidth(1)
     end
 
+    -- Hover ring (from DataGrid row hover or future world hover).
+    local hov = game.ui and game.ui.hovered_entity
+    if hov and hov.kind == "vehicle" and hov.id == vehicle.id then
+        g.setColor(0.3, 0.85, 1.0, 0.85)
+        local radius = 19 / game.camera.scale
+        g.setLineWidth(2 / game.camera.scale)
+        g.circle("line", draw_px, draw_py, radius)
+        g.setLineWidth(1)
+    end
+
     -- Color override disc
     local co = vehicle.color_override
     if co then

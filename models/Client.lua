@@ -27,6 +27,34 @@ function Client:new(plot, game, city_map, archetype_id)
     return instance
 end
 
+-- Mirrors Depot:getCity — finds the city_map containing this client's plot.
+function Client:getCity(game)
+    if not self.plot then return nil end
+    local px, py = self.plot.x, self.plot.y
+    for _, cmap in ipairs(game.maps and game.maps.all_cities or {}) do
+        local ox = (cmap.world_mn_x - 1) * 3
+        local oy = (cmap.world_mn_y - 1) * 3
+        local lx = px - ox
+        local ly = py - oy
+        if lx >= 1 and ly >= 1
+        and cmap.grid and lx <= #(cmap.grid[1] or {}) and ly <= #cmap.grid then
+            return cmap
+        end
+    end
+    return nil
+end
+
+function Client:getDistrict(game)
+    local city_map = self:getCity(game)
+    if not city_map or not city_map.district_map or not city_map.district_types then return nil end
+    local sub_w = (game.world_w or 0) * 3
+    if sub_w == 0 then return nil end
+    local sci = (self.plot.y - 1) * sub_w + self.plot.x
+    local poi_idx = city_map.district_map[sci]
+    if poi_idx then return city_map.district_types[poi_idx] end
+    return nil
+end
+
 -- Per-archetype base capacity plus the matching upgrade stat. New trips are
 -- blocked once the client's cargo hits this number.
 function Client:getEffectiveCapacity(game)

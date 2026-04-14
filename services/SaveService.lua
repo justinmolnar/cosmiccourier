@@ -105,6 +105,9 @@ function SaveService.saveGame(game, filename)
     end
     save_data.game_data.depots = saved_depots
 
+    -- Save per-user UI layout (datagrid column widths / hidden set / sort).
+    save_data.game_data.ui_config = game_state.ui_config
+
     -- Save Clients. Each client's live state is preserved so the game can
     -- resume at identical archetype timing and cargo on next load.
     local saved_clients = {}
@@ -272,6 +275,15 @@ function SaveService.applySaveData(game, save_data)
     game_state.scope_tier = nil
     if game_state.upgrades then game_state.upgrades.scope_tier = nil end
     
+    -- Restore UI layout. Merge so added columns pick up defaults.
+    if data.ui_config then
+        game_state.ui_config = game_state.ui_config or { datagrids = {} }
+        game_state.ui_config.datagrids = game_state.ui_config.datagrids or {}
+        for grid_id, grid_cfg in pairs(data.ui_config.datagrids or {}) do
+            game_state.ui_config.datagrids[grid_id] = grid_cfg
+        end
+    end
+
     -- Restore costs
     if data.costs then
         for vehicle_type, cost in pairs(data.costs) do

@@ -1,5 +1,8 @@
 -- controllers/UIController.lua
 local CR = require("views.ComponentRenderer")
+local DataGrid = require("views.DataGrid")
+local ColumnChooser = require("views.ColumnChooser")
+local UIConfig = require("services.UIConfigService")
 
 local UIController = {}
 UIController.__index = UIController
@@ -14,6 +17,20 @@ function UIController:handleMouseDown(x, y, button)
     local Game       = self.Game
     local ui_manager = Game.ui_manager
     local panel      = ui_manager.panel
+
+    -- 0a. DataGrid column chooser popup (highest-priority overlay)
+    if DataGrid.isChooserOpen() then
+        local chooser = DataGrid.chooser
+        local col_id, outside = ColumnChooser.hitTest(chooser, x, y)
+        if outside then
+            DataGrid.closeChooser()
+            return true
+        end
+        if col_id then
+            ColumnChooser.toggle(chooser, col_id, Game)
+        end
+        return true
+    end
 
     -- 0. Active dropdown check (highest priority overlay)
     local DT = require("views.tabs.DispatchTab")
@@ -66,22 +83,13 @@ function UIController:handleMouseDown(x, y, button)
     if not comps then return false end
 
     local cy  = panel:toContentY(y)
-    local hit = CR.hitTest(comps, panel.x, panel.w, x, cy)
+    local hit = CR.hitTest(comps, panel.x, panel.w, x, cy, Game)
     if not hit or not hit.id then return false end
 
     local id   = hit.id
     local data = hit.data or {}
 
-    if id == "assign_trip" then
-        Game.EventBus:publish("ui_assign_trip_clicked", data.index)
-
-    elseif id == "hire_vehicle" then
-        Game.EventBus:publish("ui_buy_vehicle_clicked", data.vehicle_id)
-
-    elseif id == "hire_vehicle_at_depot" then
-        Game.EventBus:publish("ui_buy_vehicle_at_depot_clicked", { vehicle_id = data.vehicle_id, depot = data.depot })
-
-    elseif id == "toggle_build_depot_mode" then
+    if id == "toggle_build_depot_mode" then
         Game.entities.build_depot_mode = not Game.entities.build_depot_mode
 
     elseif id == "toggle_build_highway_mode" then
@@ -91,24 +99,6 @@ function UIController:handleMouseDown(x, y, button)
             e.highway_build_nodes = {}
             Game._hw_ghost_cache = nil
         end
-
-    elseif id == "market_for_clients" then
-        Game.EventBus:publish("ui_market_for_clients_clicked", {
-            depot = data.depot, archetype_id = data.archetype_id })
-
-    elseif id == "buy_client" then
-        Game.EventBus:publish("ui_buy_client_clicked", {
-            archetype_id = data.archetype_id })
-
-    elseif id == "select_vehicle" then
-        Game.entities.selected_vehicle = data.vehicle
-
-    elseif id == "deselect_vehicle" then
-        Game.entities.selected_vehicle = nil
-
-    elseif id == "unassign_vehicle" then
-        local v = data.vehicle
-        if v then v:unassign(Game) end
 
     elseif id == "dispatch_add_rule" then
         local RTU   = require("services.RuleTreeUtils")
@@ -293,6 +283,44 @@ function UIController:handleMouseDown(x, y, button)
     elseif id == "_noop" then
         -- swallowed click (e.g. invalid palette block) — do nothing
 
+    elseif id == "datagrid_row" then
+        -- Right-click → datasource's context-menu builder → UIManager popup.
+        if button == 2 and data.source and data.source.on_row_context_menu and data.item then
+            local menu_items = data.source.on_row_context_menu(data.item, Game, x, y)
+            if menu_items and #menu_items > 0 then
+                ui_manager:showContextMenu(x, y, menu_items)
+            end
+        -- Left-click → datasource's on_row_click (persistent selection, etc).
+        elseif data.source and data.source.on_row_click and data.item then
+            data.source.on_row_click(data.item, Game)
+        end
+
+    elseif id == "datagrid_sort" and button == 1 then
+        -- Toggle sort: asc → desc → clear → asc …
+        local cfg = UIConfig.getGridConfig(Game, data.grid_id)
+        local cur = cfg.sort
+        if not cur or cur.column ~= data.col_id then
+            UIConfig.setSort(Game, data.grid_id, data.col_id, "asc")
+        elseif cur.direction == "asc" then
+            UIConfig.setSort(Game, data.grid_id, data.col_id, "desc")
+        else
+            UIConfig.setSort(Game, data.grid_id, nil)   -- clear
+        end
+
+    elseif id == "datagrid_resize_start" and button == 1 then
+        local st = DataGrid.getState(data.grid_id)
+        st.resize = {
+            grid_id   = data.grid_id,
+            col_id    = data.col_id,
+            start_w   = data.start_w,
+            start_mx  = data.start_mx,
+            min_width = data.min_width,
+        }
+
+    elseif id == "datagrid_chooser" and button == 1 then
+        -- Anchor the popup just below the chooser button (screen-space).
+        DataGrid.openChooser(data.grid_id, data.source, x - 200, y + 4)
+
     end
 
     return true
@@ -303,6 +331,12 @@ end
 local DRAG_THRESHOLD = 8
 
 function UIController:handleMouseMoved(x, y)
+    -- DataGrid column resize drag (highest precedence — always active when live).
+    if DataGrid.isResizing() then
+        DataGrid.updateResize(x, self.Game)
+        return
+    end
+
     local DT   = require("views.tabs.DispatchTab")
     local drag = DT.getState().drag
     if not drag then return end
@@ -319,6 +353,9 @@ end
 
 function UIController:handleMouseUp(x, y, button, game)
     if button ~= 1 then return end
+    -- End any datagrid resize drag.
+    DataGrid.endResize()
+
     local DT  = require("views.tabs.DispatchTab")
     local RTU = require("services.RuleTreeUtils")
     local RE  = require("services.DispatchRuleEngine")

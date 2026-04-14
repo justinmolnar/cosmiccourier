@@ -41,6 +41,10 @@ function State:new(C, game)
         instance.upgrades[a.id .. "_capacity_bonus"]    = 0
     end
     
+    -- Per-user UI layout config (datagrid widths / hidden / sort).
+    -- Keys are datagrid ids defined in data/datagrids/*.lua.
+    instance.ui_config = { datagrids = {} }
+
     instance.rush_hour = { active = false, timer = 0 }
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
     instance.metro_license_unlocked = false

@@ -485,8 +485,10 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
             for i = 1, nv do _vis_vehicles[i] = nil end
         end
     end
-    if Game.active_map_key == "city" and ui_manager.hovered_trip_index then
-        local trip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
+    local _hov = Game.ui and Game.ui.hovered_entity
+    local _hov_trip = (_hov and _hov.kind == "trip") and _hov.id or nil
+    if Game.active_map_key == "city" and _hov_trip then
+        local trip = _hov_trip
         if trip and trip.legs[trip.current_leg] then
             local leg = trip.legs[trip.current_leg]
             local path_grid = active_map.grid
@@ -789,9 +791,25 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
 
         -- Depots
         if cs >= Z.ZONE_THRESHOLD then
+            local hov = Game.ui and Game.ui.hovered_entity
+            local sel = Game.entities.selected_depot
             for _, depot in ipairs(Game.entities.depots or {}) do
                 local dp = depot.plot
-                DrawingUtils.drawWorldIcon(Game, "🏢", (dp.x - 0.5) * uts, (dp.y - 0.5) * uts)
+                local dpx = (dp.x - 0.5) * uts
+                local dpy = (dp.y - 0.5) * uts
+                if sel == depot then
+                    love.graphics.setColor(1, 1, 0, 0.8)
+                    love.graphics.setLineWidth(2 / cs)
+                    love.graphics.circle("line", dpx, dpy, 16 / cs)
+                    love.graphics.setLineWidth(1)
+                end
+                if hov and hov.kind == "depot" and hov.id == depot then
+                    love.graphics.setColor(0.3, 0.85, 1.0, 0.85)
+                    love.graphics.setLineWidth(2 / cs)
+                    love.graphics.circle("line", dpx, dpy, 19 / cs)
+                    love.graphics.setLineWidth(1)
+                end
+                DrawingUtils.drawWorldIcon(Game, "🏢", dpx, dpy)
             end
         end
 
@@ -812,8 +830,30 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
 
         -- Clients
         if cs >= Z.ZONE_THRESHOLD then
+            local hov = Game.ui and Game.ui.hovered_entity
+            local sel = Game.entities.selected_client
+            -- Trip hover cascades to its source client so hovering a trip row
+            -- also rings the client on the map.
+            local hov_client_from_trip = nil
+            if hov and hov.kind == "trip" and hov.id and hov.id.source_client then
+                hov_client_from_trip = hov.id.source_client
+            end
             for _, client in ipairs(Game.entities.clients) do
                 if client.px > vp_left and client.px < vp_right and client.py > vp_top and client.py < vp_bot then
+                    if sel == client then
+                        love.graphics.setColor(1, 1, 0, 0.8)
+                        love.graphics.setLineWidth(2 / cs)
+                        love.graphics.circle("line", client.px, client.py, 16 / cs)
+                        love.graphics.setLineWidth(1)
+                    end
+                    local is_hov = (hov and hov.kind == "client" and hov.id == client)
+                                 or (hov_client_from_trip == client)
+                    if is_hov then
+                        love.graphics.setColor(0.3, 0.85, 1.0, 0.85)
+                        love.graphics.setLineWidth(2 / cs)
+                        love.graphics.circle("line", client.px, client.py, 19 / cs)
+                        love.graphics.setLineWidth(1)
+                    end
                     DrawingUtils.drawWorldIcon(Game, clientIcon(client), client.px, client.py)
                     DrawingUtils.drawCountBadge(Game, client.cargo and #client.cargo or 0, client.px, client.py)
                 end
@@ -903,8 +943,10 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     end
 
     -- LAYER: Trip preview (multi-modal route via entrance graph, cached per trip)
-    if ui_manager.hovered_trip_index and umap then
-        local htrip = Game.entities.trips.pending[ui_manager.hovered_trip_index]
+    local _hov2 = Game.ui and Game.ui.hovered_entity
+    local _hov2_trip = (_hov2 and _hov2.kind == "trip") and _hov2.id or nil
+    if _hov2_trip and umap then
+        local htrip = _hov2_trip
         local first_leg = htrip and htrip.legs and htrip.legs[1]
         local last_leg  = htrip and htrip.legs and htrip.legs[#htrip.legs]
         if first_leg and last_leg then
@@ -1182,14 +1224,11 @@ function GameView:_drawDeliveryDebug(umap, uts, tile_i0, tile_i1, mpw, cs)
 
     -- T: trip hover debug — highlight hovered trip's leg plots
     if Game.debug_trip_hover then
-        local ui_manager = Game.ui_manager
-        local idx = ui_manager and ui_manager.hovered_trip_index
-        if idx then
-            local trip = Game.entities.trips.pending[idx]
-            local leg  = trip and trip.legs and trip.legs[trip.current_leg]
-            if leg then
-                pairs_to_draw[#pairs_to_draw+1] = {leg.start_plot, leg.end_plot}
-            end
+        local _h = Game.ui and Game.ui.hovered_entity
+        local trip = (_h and _h.kind == "trip") and _h.id or nil
+        local leg  = trip and trip.legs and trip.legs[trip.current_leg]
+        if leg then
+            pairs_to_draw[#pairs_to_draw+1] = {leg.start_plot, leg.end_plot}
         end
     end
 

@@ -52,7 +52,9 @@
       "Bash(echo \"---EXIT:$?---\")",
       "Bash(ls data/buildings/)",
       "Bash(grep -l \"client\" data/buildings/*.json)",
-      "Bash(wc *)"
+      "Bash(wc *)",
+      "Bash(ls data/datagrids)",
+      "Bash(mkdir -p data/datagrids)"
     ]
   }
 }

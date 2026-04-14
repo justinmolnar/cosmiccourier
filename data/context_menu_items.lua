@@ -27,9 +27,10 @@ function ContextMenuItems.depot(depot, game)
     local items = {}
     table.insert(items, { label = depot.id or "Depot", disabled = true })
     table.insert(items, { separator = true })
-    table.insert(items, { icon = "📊", label = "View Depot Info",
+    table.insert(items, { icon = "📊", label = "Select Depot",
         action = function(g)
-            g.ui_manager.panel.depot_view = depot
+            g.entities.selected_depot = depot
+            g.ui_manager.panel:setActiveTab("depot")
         end })
     -- Hire menu per vehicle type
     local sorted = {}

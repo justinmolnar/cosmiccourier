@@ -2,8 +2,10 @@
 local UIManager = {}
 UIManager.__index = UIManager
 
-local CR           = require("views.ComponentRenderer")
-local TripsTab     = require("views.tabs.TripsTab")
+local CR            = require("views.ComponentRenderer")
+local DataGrid      = require("views.DataGrid")
+local ColumnChooser = require("views.ColumnChooser")
+local TripsTab      = require("views.tabs.TripsTab")
 local VehiclesTab  = require("views.tabs.VehiclesTab")
 local UpgradesTab  = require("views.tabs.UpgradesTab")
 local ClientsTab   = require("views.tabs.ClientsTab")
@@ -21,7 +23,6 @@ function UIManager:new(C, game)
     local instance = setmetatable({}, UIManager)
 
     instance.hovered_component  = nil
-    instance.hovered_trip_index = nil   -- derived from hovered_component; read by GameView
     instance.income_per_second  = 0
     instance.trips_per_second   = 0
 
@@ -96,8 +97,14 @@ end
 
 function UIManager:update(dt, game)
     self.modal_manager:update(dt, game)
-    if self.modal_manager:isActive() then return end
-    if self.context_menu then return end  -- freeze hover etc. while menu is open
+    if self.modal_manager:isActive() then
+        DataGrid.applyHover(nil, game)
+        return
+    end
+    if self.context_menu then
+        DataGrid.applyHover(nil, game)
+        return
+    end  -- freeze hover etc. while menu is open
 
     local mx, my = love.mouse.getPosition()
 
@@ -107,20 +114,27 @@ function UIManager:update(dt, game)
     self.panel:update(my)
 
     -- Hover tracking: hitTest against last frame's components
-    self.hovered_component  = nil
-    self.hovered_trip_index = nil
+    self.hovered_component = nil
+    local last_hit = nil
     if self.panel:isInContentArea(mx, my) then
         local comps = self.panel:getComponents()
         if comps then
             local cy = self.panel:toContentY(my)
-            local hit = CR.hitTest(comps, self.panel.x, self.panel.w, mx, cy)
-            if hit and hit.id then
-                self.hovered_component = hit
-                if hit.id == "assign_trip" and hit.data then
-                    self.hovered_trip_index = hit.data.index
-                end
+            local hit = CR.hitTest(comps, self.panel.x, self.panel.w, mx, cy, game)
+            if hit then
+                last_hit = hit
+                if hit.id then self.hovered_component = hit end
             end
         end
+    end
+    -- Route last-frame hit through DataGrid so it can update row-hover +
+    -- game.ui.hovered_entity (consumed by world renderers).
+    DataGrid.applyHover(last_hit, game)
+end
+
+function UIManager:drawDataGridOverlay(game)
+    if DataGrid.isChooserOpen() then
+        ColumnChooser.draw(DataGrid.chooser, game)
     end
 end
 

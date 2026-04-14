@@ -91,9 +91,10 @@ end
 function Vehicle:getEffectiveCapacity(game)
     local vcfg = game.C.VEHICLES[self.type_upper]
     local base = vcfg and vcfg.base_capacity or 1
-    -- Per-vehicle capacity upgrades accumulate in state.upgrades[type.."_capacity"]
-    local upgraded = game.state.upgrades[self.type .. "_capacity"]
-    return upgraded or base
+    -- `<type>_capacity` is a BONUS accumulated by upgrades (add_stat +N per tier).
+    -- Defaults to 0 when the field hasn't been seeded. Effective = base + bonus.
+    local bonus = game.state.upgrades[self.type .. "_capacity"] or 0
+    return base + bonus
 end
 
 function Vehicle:getEffectiveFuelRate(game)

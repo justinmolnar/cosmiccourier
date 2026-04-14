@@ -254,6 +254,7 @@ function love.draw()
 
     Game.zoom_controls:draw(Game)
     Game.ui_manager.modal_manager:draw(Game)
+    Game.ui_manager:drawDataGridOverlay(Game)
     Game.ui_manager:drawContextMenu(Game)
 end
 

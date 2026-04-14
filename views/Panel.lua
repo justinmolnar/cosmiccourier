@@ -75,6 +75,9 @@ end
 function Panel:setActiveTab(id)
     if self.tabs[id] then
         self.active_tab_id = id
+        -- Any grid-level overlay (column chooser) closes on tab switch.
+        local DataGrid = require("views.DataGrid")
+        DataGrid.closeChooser()
     end
 end
 

@@ -7,6 +7,8 @@
 
 local CR = {}
 
+local DataGrid = require("views.DataGrid")
+
 local ICON_SIZE    = 64
 local ICON_SPACING = 12
 local ICON_ROW_H   = ICON_SIZE + 20
@@ -59,6 +61,10 @@ function CR._drawComp(comp, px, pw, p, y, game)
     elseif t == "custom" then
         local h = comp.h or 0
         if comp.draw_fn then comp.draw_fn(px, y, pw, h, game) end
+        return h
+    elseif t == "datagrid" then
+        local h = DataGrid.totalHeight(comp, game)
+        DataGrid.draw(comp, px, pw, p, y, game)
         return h
     end
     return comp.h or 0
@@ -164,10 +170,11 @@ end
 
 -- ─── Hit test ────────────────────────────────────────────────────────────────
 
-function CR.hitTest(components, panel_x, panel_w, cx, cy)
+function CR.hitTest(components, panel_x, panel_w, cx, cy, game)
     if not components then return nil end
     local cursor_y = 0
     local p = 10
+    local _game = game
 
     for _, comp in ipairs(components) do
         local h
@@ -197,6 +204,15 @@ function CR.hitTest(components, panel_x, panel_w, cx, cy)
             if comp.hit_fn and cy >= cursor_y and cy < cursor_y + h then
                 local result = comp.hit_fn(panel_x, cursor_y, panel_w, h, cx, cy)
                 if result then return result end
+            end
+
+        elseif comp.type == "datagrid" then
+            -- Need game for totalHeight; pass through arg if provided.
+            h = DataGrid.totalHeight(comp, _game)
+            if cy >= cursor_y and cy < cursor_y + h then
+                local hit = DataGrid.hitTest(comp, panel_x, panel_w, p,
+                    cy - cursor_y, cx, cy, _game)
+                if hit then return hit end
             end
 
         else
