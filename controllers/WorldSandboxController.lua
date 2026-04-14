@@ -392,8 +392,68 @@ function WorldSandboxController:sendToGame()
     if not self.city_arterial_maps  then self:_gen_all_arterials() end
     if not self.city_street_maps    then self:_gen_all_streets() end
 
-    -- Pick a random starting city
-    local start_idx = love.math.random(1, #self.city_locations)
+    -- Starting city: smallest city in a region that contains ≥ 2 cities.
+    -- If no region qualifies, regenerate the world — the Region license tier
+    -- is meaningless without at least one neighbor city to expand toward.
+    local function boundsCount(bnds)
+        if not bnds then return 0 end
+        local n = 0
+        for _ in pairs(bnds) do n = n + 1 end
+        return n
+    end
+
+    local function pickStartIdx()
+        if not self.region_map or not self.city_bounds_list or not self.city_locations then
+            return nil
+        end
+        local region_to_cities = {}
+        for idx = 1, #self.city_locations do
+            local bnds = self.city_bounds_list[idx]
+            local any_ci = bnds and next(bnds)
+            local rid = any_ci and self.region_map[any_ci]
+            if rid then
+                region_to_cities[rid] = region_to_cities[rid] or {}
+                table.insert(region_to_cities[rid], idx)
+            end
+        end
+        local qualifying = {}
+        for rid, cities in pairs(region_to_cities) do
+            if #cities >= 2 then table.insert(qualifying, rid) end
+        end
+        if #qualifying == 0 then return nil end
+        local chosen_rid = qualifying[love.math.random(1, #qualifying)]
+        local best_idx, best_n = nil, math.huge
+        for _, idx in ipairs(region_to_cities[chosen_rid]) do
+            local n = boundsCount(self.city_bounds_list[idx])
+            if n > 0 and n < best_n then best_n = n; best_idx = idx end
+        end
+        return best_idx
+    end
+
+    local MAX_REGEN_ATTEMPTS = 10
+    local start_idx = pickStartIdx()
+    local regen_attempts = 0
+    while not start_idx and regen_attempts < MAX_REGEN_ATTEMPTS do
+        regen_attempts = regen_attempts + 1
+        print(string.format(
+            "WorldSandboxController: no region with ≥2 cities; regenerating world (attempt %d/%d)",
+            regen_attempts, MAX_REGEN_ATTEMPTS))
+        self:generate()
+        self:place_cities()
+        start_idx = pickStartIdx()
+    end
+
+    if not start_idx then
+        error(string.format(
+            "World generation failed to produce a region with ≥2 cities after %d attempts. Adjust world params.",
+            MAX_REGEN_ATTEMPTS))
+    end
+
+    -- Subsystem maps were invalidated by _gen_all_bounds during regen; rebuild.
+    if not self.city_district_maps then self:_gen_all_districts() end
+    if not self.city_arterial_maps  then self:_gen_all_arterials() end
+    if not self.city_street_maps    then self:_gen_all_streets() end
+
     local start_bounds = self.city_bounds_list[start_idx]
     if not start_bounds then start_idx = 1; start_bounds = self.city_bounds_list[1] end
 

@@ -2,6 +2,12 @@
 local UIView = {}
 UIView.__index = UIView
 
+local LicenseService = require("services.LicenseService")
+
+-- License HUD button bounds (static within sidebar)
+local LICENSE_BTN_Y = 90
+local LICENSE_BTN_H = 24
+
 function UIView:new(game_instance)
     local instance = setmetatable({}, UIView)
     instance.Game = game_instance
@@ -30,10 +36,31 @@ function UIView:draw()
     love.graphics.print("Vehicles: " .. #Game.entities.vehicles, 10, 50)
     love.graphics.print("Clients: " .. #Game.entities.clients, 10, 70)
 
+    -- License HUD button
+    local btn_x, btn_y, btn_w, btn_h = 8, LICENSE_BTN_Y, sidebar_w - 16, LICENSE_BTN_H
+    ui_manager.license_button_bounds = { x = btn_x, y = btn_y, w = btn_w, h = btn_h }
+    local current = LicenseService.getCurrent(Game)
+    local label = current and current.display_name or "No License"
+    local next_lic = LicenseService.getNextAvailable(Game)
+    love.graphics.setColor(0.18, 0.22, 0.32)
+    love.graphics.rectangle("fill", btn_x, btn_y, btn_w, btn_h, 4, 4)
+    love.graphics.setColor(0.42, 0.52, 0.72, 0.8)
+    love.graphics.rectangle("line", btn_x, btn_y, btn_w, btn_h, 4, 4)
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.printf("📜 " .. label, btn_x, btn_y + 4, btn_w, "center")
+    if next_lic then
+        love.graphics.setFont(Game.fonts.ui_small or Game.fonts.ui)
+        love.graphics.setColor(0.75, 0.82, 0.95, 0.9)
+        love.graphics.printf(
+            string.format("next: %s ($%d)", next_lic.display_name, next_lic.cost),
+            btn_x, btn_y + btn_h + 2, btn_w, "center")
+        love.graphics.setFont(Game.fonts.ui)
+    end
+
     if state.rush_hour and state.rush_hour.active then
         love.graphics.setColor(1, 1, 0)
         love.graphics.printf(string.format("RUSH HOUR: %ds", math.ceil(state.rush_hour.timer)),
-            0, 95, sidebar_w, "center")
+            0, 128, sidebar_w, "center")
     end
 
     love.graphics.setScissor()

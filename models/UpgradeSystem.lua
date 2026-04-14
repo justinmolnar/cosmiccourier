@@ -250,12 +250,7 @@ function UpgradeSystem:applySpecialEffect(upgrade)
         -- These might need to modify the costs table or other special handling
         self.state.upgrades[target] = (self.state.upgrades[target] or 0) + value
         print(string.format("Applied special effect: %s = %s", target, self.state.upgrades[target]))
-        
-    elseif target == "truck_capacity" then
-        -- Truck-specific capacity bonus
-        self.state.upgrades[target] = (self.state.upgrades[target] or 0) + value
-        print(string.format("Applied truck capacity: %s", self.state.upgrades[target]))
-        
+
     else
         -- Default: just set the value
         self.state.upgrades[target] = value

@@ -96,9 +96,13 @@ Underneath all of this is a **tuning pass** — most numeric constants in the ga
 
 ---
 
-**Status:** Not started
-**Line count change:** —
-**Deviation from plan:** —
+**Status:** Complete — awaiting user test
+**Line count change:** +~160 / −~75 (approximate; bundled commit with Phase 2)
+**Deviation from plan:**
+- 1-A: fallback-to-smallest-overall DROPPED. A world with no region of ≥2 cities breaks the Region license arc entirely (no neighbor city to expand to), so the picker now regenerates the world (`self:generate()` + `self:place_cities()`) up to 10 times until a qualifying region exists. Hard `error()` if all 10 attempts fail.
+- 1-B: also reduced `truck_speed_1.max_level` from 500 → 5 alongside the cost fix. The 500 was paired with the cost=1 placeholder and equally unreasonable. Grep found no other low-cost stubs.
+- 1-C: retargeted `truck_capacity_1` and `double_trailer` from `effect_type: "special"` to `"add_stat"` so they flow through the generic stat handler now that `applySpecialEffect`'s `truck_capacity` branch is deleted. Added a brand-new `car` sub-tree (`car_capacity_1`, `car_capacity_2`) — `upgrades.json` had no `car` sub-tree at all, which the plan didn't explicitly flag.
+- 1-F: migration block placed immediately after the `current_values` merge loop as planned; idempotent guard via `~= nil`.
 
 ---
 
@@ -141,9 +145,12 @@ Player sees a clearly distinct License purchase moment. Mechanically `scope_tier
 
 ---
 
-**Status:** Not started
-**Line count change:** —
-**Deviation from plan:** —
+**Status:** Complete — awaiting user test
+**Line count change:** +~310 / −~70 (bundled with Phase 1; new files: `data/licenses.lua`, `services/LicenseService.lua`, `views/components/LicenseModal.lua`)
+**Deviation from plan:**
+- 2-B: defensive `set_flag scope_tier` branch in `UpgradeSystem.lua` kept as planned (reachable-but-dead after 2-C; prune in Phase 3).
+- 2-D: `PANEL_Y` bumped 120 → 148 in `views/UIManager.lua` to make HUD room for the License button *and* keep the rush-hour banner non-overlapping. HUD button bounds stored on `ui_manager.license_button_bounds` each frame in `UIView.lua`; hit-tested in `UIController.handleMouseDown` between modal handling and panel tab-bar handling. `LicenseModal` lives at `views/components/LicenseModal.lua` (alongside `PackModal`) with a self-contained draw loop — mirrors `PackModal`, not routed through `ComponentRenderer`. `EventService.setupLicenseEvents` posts a floating-text confirmation on `license_purchased`; no other side effects.
+- 2-F: all sweeps clean. Orphan prereqs = 0. Low costs = 0. `vehicle.fuel_rate` remaining references are in docs only; `state.scope_tier` remaining references are all inside migration code; `vehicle_capacity` remaining references are only inside the capacity migration block.
 
 ---
 

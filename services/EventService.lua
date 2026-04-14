@@ -12,6 +12,19 @@ function EventService.setupGameEvents(state, game)
     EventService.setupCameraEvents(state, game)
     EventService.setupFuelEvents(state, game)
     EventService.setupPackEvents(state, game)
+    EventService.setupLicenseEvents(state, game)
+end
+
+function EventService.setupLicenseEvents(state, game)
+    -- Pure scope gate: on purchase, surface a floating-text confirmation and
+    -- let the modal (if open) refresh on next frame. No bundled effects.
+    game.EventBus:subscribe("license_purchased", function(data)
+        local lic = data and data.license
+        if not lic then return end
+        local msg = string.format("License acquired!\n%s", lic.display_name)
+        FloatingTextSystem.emit(msg, love.graphics.getWidth() / 2, love.graphics.getHeight() / 2, game.C)
+        print(string.format("Licenses: now operating with %s (tier %d)", lic.display_name, lic.scope_tier))
+    end)
 end
 
 function EventService.setupDeliveryEvents(state, game)

@@ -4,11 +4,10 @@
 -- goes through this service. Scope data lives in C.SCOPE (constants.lua).
 local ScopeService = {}
 
---- Returns the current scope tier (integer 1-5).
+--- Returns the current scope tier (integer 1-5), derived from owned licenses.
 function ScopeService.getTier(game)
-    local st = game.state
-    if not st then return 1 end
-    return (st.upgrades and st.upgrades.scope_tier) or st.scope_tier or 1
+    if not game or not game.state then return 1 end
+    return require("services.LicenseService").getCurrentTier(game)
 end
 
 --- Returns the current scope name ("district", "city", "region", "continent", "world").

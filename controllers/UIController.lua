@@ -45,6 +45,17 @@ function UIController:handleMouseDown(x, y, button)
     -- 2. Modals are next.
     if ui_manager.modal_manager:handle_mouse_down(x, y, Game) then return true end
 
+    -- 2a. HUD License button (above the tab panel).
+    local lb = ui_manager.license_button_bounds
+    if lb and x >= lb.x and x <= lb.x + lb.w and y >= lb.y and y <= lb.y + lb.h then
+        local LicenseModal = require("views.components.LicenseModal")
+        local modal = LicenseModal:new(function()
+            ui_manager.modal_manager:hide()
+        end)
+        ui_manager.modal_manager:show(modal)
+        return true
+    end
+
     -- 3. Panel tab bar and scrollbar.
     if panel:handleMouseDown(x, y, button) then return true end
 

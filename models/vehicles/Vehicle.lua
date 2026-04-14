@@ -20,7 +20,6 @@ function Vehicle:new(id, depot, game, vehicleType)
     instance.base_speed        = vcfg and vcfg.base_speed       or 80
     instance.pathfinding_costs = vcfg and vcfg.pathfinding_costs or {}
     instance.transport_mode    = vcfg and vcfg.transport_mode   or "road"
-    instance.fuel_rate         = vcfg and vcfg.fuel_rate        or 0
     instance.path_fuel_cost    = 0
 
     -- Speed modifier: accumulates upgrade multipliers on top of base_speed.
@@ -95,6 +94,14 @@ function Vehicle:getEffectiveCapacity(game)
     return upgraded or base
 end
 
+function Vehicle:getEffectiveFuelRate(game)
+    local vcfg = game.C.VEHICLES[self.type_upper]
+    local base = (vcfg and vcfg.fuel_rate) or 0
+    -- Fuel-efficiency upgrades accumulate as a multiplier in state.upgrades[type.."_fuel_rate"]
+    local mult = game.state.upgrades[self.type .. "_fuel_rate"] or 1.0
+    return base * mult
+end
+
 function Vehicle:recalculatePixelPosition(game)
     local map = game.maps[self.operational_map_key]
     if map then
@@ -166,7 +173,7 @@ end
 
 function Vehicle:isAvailable(game)
     local total_load = #self.trip_queue + #self.cargo
-    return total_load < game.state.upgrades.vehicle_capacity
+    return total_load < self:getEffectiveCapacity(game)
 end
 
 function Vehicle:_resolveOffScreenState(game)

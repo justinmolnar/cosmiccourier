@@ -10,7 +10,7 @@ function VehiclesTab.build(game, ui_manager)
     if sel then
         table.insert(comps, { type = "label", text = "Selected Vehicle", style = "heading", h = 28 })
         local cap_used = #sel.cargo + #sel.trip_queue
-        local cap_max  = state.upgrades.vehicle_capacity
+        local cap_max  = sel:getEffectiveCapacity(game)
         table.insert(comps, {
             type  = "button",
             id    = "deselect_vehicle",
@@ -73,7 +73,7 @@ function VehiclesTab.build(game, ui_manager)
     else
         for _, v in ipairs(game.entities.vehicles) do
             local cap_used = #v.cargo + #v.trip_queue
-            local cap_max  = state.upgrades.vehicle_capacity
+            local cap_max  = v:getEffectiveCapacity(game)
             local is_sel   = (game.entities.selected_vehicle == v)
             local sel_mark = is_sel and "▶ " or ""
             table.insert(comps, {

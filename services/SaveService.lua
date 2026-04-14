@@ -11,7 +11,7 @@ local SAVE_SCHEMA = {
         "upgrades_discovered",
         "metro_license_unlocked",
         "current_map_scale",
-        "scope_tier",
+        "licenses",
         "unlocked",
         "purchasable_vehicles"
     },
@@ -150,6 +150,34 @@ function SaveService.applySaveData(game, save_data)
             end
         end
     end
+
+    -- Migration: legacy player-wide vehicle_capacity -> per-vehicle-type fields.
+    -- Idempotent: re-runs see nil and skip.
+    if game_state.upgrades and game_state.upgrades.vehicle_capacity ~= nil then
+        local legacy = game_state.upgrades.vehicle_capacity
+        local live = game_state.upgrades
+        live.bike_capacity  = live.bike_capacity  or legacy
+        live.car_capacity   = live.car_capacity   or legacy
+        live.truck_capacity = live.truck_capacity or legacy
+        live.vehicle_capacity = nil
+        print("SaveService: migrated legacy vehicle_capacity -> per-type capacities")
+    end
+
+    -- Migration: legacy scope_tier -> owned license set.
+    -- Derives licenses from old scope field; continent/world tiers drop to region.
+    if game_state.licenses == nil then
+        game_state.licenses = { downtown_license = true }
+    end
+    local legacy_tier = data.scope_tier
+        or (data.upgrades and data.upgrades.current_values and data.upgrades.current_values.scope_tier)
+    if legacy_tier then
+        if legacy_tier >= 2 then game_state.licenses.city_license = true end
+        if legacy_tier >= 3 then game_state.licenses.region_license = true end
+        print(string.format("SaveService: migrated legacy scope_tier=%d to licenses", legacy_tier))
+    end
+    -- Clean legacy scope fields so subsequent saves don't re-persist them.
+    game_state.scope_tier = nil
+    if game_state.upgrades then game_state.upgrades.scope_tier = nil end
     
     -- Restore costs
     if data.costs then

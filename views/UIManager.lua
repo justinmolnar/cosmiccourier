@@ -12,7 +12,7 @@ local DepotTab            = require("views.tabs.DepotTab")
 local InfrastructureTab   = require("views.tabs.InfrastructureTab")
 local DispatchTab         = require("views.tabs.DispatchTab")
 
-local PANEL_Y = 120   -- pixels below top of sidebar where panel begins
+local PANEL_Y = 148   -- pixels below top of sidebar where panel begins
 
 function UIManager:new(C, game)
     local Panel        = require("views.Panel")

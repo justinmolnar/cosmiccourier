@@ -24,7 +24,6 @@ function State:new(C, game)
     
     instance.upgrades = {
         auto_dispatch_unlocked = false,
-        vehicle_capacity = 1,
         frenzy_duration = C.EVENTS.INITIAL_DURATION_SEC,
         trip_gen_min_mult = 1.0,
         trip_gen_max_mult = 1.0,
@@ -36,7 +35,7 @@ function State:new(C, game)
     instance.rush_hour = { active = false, timer = 0 }
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
     instance.metro_license_unlocked = false
-    instance.scope_tier = 1
+    instance.licenses = { downtown_license = true }
     instance.purchasable_vehicles = { bike = true }
     -- Unified name-based variable system available to dispatch rules
     instance.vars             = {}
