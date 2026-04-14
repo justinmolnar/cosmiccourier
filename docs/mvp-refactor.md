@@ -195,6 +195,27 @@ Representative upgrades:
 
 - Fuel upgrades should not trivialize fuel cost. Tuning target: upgrades reduce the fuel-vs-payout tension but don't eliminate it. Player still cares about right-sizing even fully upgraded.
 
+### Status: Implemented
+
+Shipped bundled inside commit `dc65f30` ("Phases 1-2: data hygiene + license refactor"). Not called out in the commit message, which is why it read as unaddressed.
+
+- `data/upgrades.json` — 9 nodes under per-vehicle-type sub-trees:
+  - Bike: `bike_fuel_1` ($3k) → `bike_fuel_2` ($15k, prereq `bike_fuel_1`) → `bike_fuel_3` ($60k, prereq `bike_fuel_2`)
+  - Car:  `car_fuel_1` ($5k) → `car_fuel_2` → `car_fuel_3` (prereq chain; `required_scope: 2`)
+  - Truck: `truck_fuel_1` ($12k) → `truck_fuel_2` → `truck_fuel_3` (prereq chain; `required_scope: 3`)
+  - Each: `effect_type: "multiply_stat"`, `effect_target: "{type}_fuel_rate"`, `effect_value: 0.9` (−10%/level). Fully upgraded: 0.729× base.
+- `models/UpgradeSystem.lua:148` — existing `multiply_stat` handler routes `{type}_fuel_rate` into `state.upgrades[target]` multiplicatively. No new handler needed.
+- `models/vehicles/Vehicle.lua:97-103` — `getEffectiveFuelRate(game)` returns `base_fuel_rate × (state.upgrades[type.."_fuel_rate"] or 1.0)`. Lazy-read (no per-instance caching).
+- `services/FuelService.lua:13` — `computeAndStore` consumes via the getter, not a raw field read.
+- `data/vehicles/{bike,car,truck}.json` — base `fuel_rate` values: 0.01 / 0.05 / 0.10.
+- Ship is deliberately out of scope per principles; no ship fuel upgrade exists.
+- "Route optimization" upgrades (the optional half of the target-state notes) are NOT implemented. That was flagged as "decide during implementation" and was not adopted.
+
+### Deviations
+
+- No global `fuel_rate` upgrade; all nodes are strictly per-vehicle-type (matches the MVP principle that per-type trees replace player-wide stats).
+- `max_level: 1` per node with a prerequisite chain, rather than a single multi-level node. Outcome is equivalent (three discrete purchases) but represented as three separate upgrades.
+
 ---
 
 ## 6. Starting City Picker
@@ -223,6 +244,20 @@ This gives the player a credible small home base with at least one neighbor city
 ### Notes
 
 - ~15 lines of change. Lowest-risk item in the refactor.
+
+### Status: Implemented
+
+Selection logic shipped inside commit `dc65f30` ("Phases 1-2: data hygiene + license refactor"); architecture cleanup (data-driven constants, fallback removal, success logging) shipped in the Phase 6 cleanup pass.
+
+- `controllers/WorldSandboxController.lua` — `pickStartIdx()` groups cities by `region_map[ci]`, filters to regions with ≥`STARTING_CITY_MIN_REGION_SIZE` cities, picks a random qualifying region, and returns the smallest city in that region (by `boundsCount`).
+- Regen-on-failure: if no qualifying region exists, `self:generate()` + `self:place_cities()` are re-run up to `STARTING_CITY_MAX_REGEN_ATTEMPTS` times. Exhausting the cap hard-errors (the Region license tier is unplayable without a neighbor city, so fallback is not an option).
+- `data/constants.lua` — `C.WORLD_GEN.STARTING_CITY_MIN_REGION_SIZE` (2) and `C.WORLD_GEN.STARTING_CITY_MAX_REGEN_ATTEMPTS` (10). No magic numbers in the picker.
+- Success log: `WorldSandboxController: starting city idx=N region=R bounds=K` prints once per successful pick.
+
+### Deviations
+
+- Spec permitted "fall back to smallest city overall, or regenerate world — whichever is simpler." Regen-only was chosen; fallback is architecturally forbidden (a world with no ≥2-city region breaks Region scope progression).
+- Two pre-existing silent "just in case" branches (nil-bounds remap to city 1; degenerate-bbox coerce to 30×30) were deleted during cleanup. They now hard-error instead — matches the "Refactoring means deleting" MVP principle.
 
 ---
 

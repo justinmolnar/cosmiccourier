@@ -1,5 +1,6 @@
 -- controllers/WorldSandboxController.lua
 
+local C      = require("data.constants")
 local Biomes = require("data.biomes")
 
 local WorldGenUtils        = require("utils.WorldGenUtils")
@@ -418,36 +419,40 @@ function WorldSandboxController:sendToGame()
         end
         local qualifying = {}
         for rid, cities in pairs(region_to_cities) do
-            if #cities >= 2 then table.insert(qualifying, rid) end
+            if #cities >= C.WORLD_GEN.STARTING_CITY_MIN_REGION_SIZE then table.insert(qualifying, rid) end
         end
-        if #qualifying == 0 then return nil end
+        if #qualifying == 0 then return nil, nil end
         local chosen_rid = qualifying[love.math.random(1, #qualifying)]
         local best_idx, best_n = nil, math.huge
         for _, idx in ipairs(region_to_cities[chosen_rid]) do
             local n = boundsCount(self.city_bounds_list[idx])
             if n > 0 and n < best_n then best_n = n; best_idx = idx end
         end
-        return best_idx
+        return best_idx, chosen_rid
     end
 
-    local MAX_REGEN_ATTEMPTS = 10
-    local start_idx = pickStartIdx()
+    local MAX_REGEN_ATTEMPTS = C.WORLD_GEN.STARTING_CITY_MAX_REGEN_ATTEMPTS
+    local start_idx, chosen_rid = pickStartIdx()
     local regen_attempts = 0
     while not start_idx and regen_attempts < MAX_REGEN_ATTEMPTS do
         regen_attempts = regen_attempts + 1
         print(string.format(
-            "WorldSandboxController: no region with ≥2 cities; regenerating world (attempt %d/%d)",
-            regen_attempts, MAX_REGEN_ATTEMPTS))
+            "WorldSandboxController: no region with ≥%d cities; regenerating world (attempt %d/%d)",
+            C.WORLD_GEN.STARTING_CITY_MIN_REGION_SIZE, regen_attempts, MAX_REGEN_ATTEMPTS))
         self:generate()
         self:place_cities()
-        start_idx = pickStartIdx()
+        start_idx, chosen_rid = pickStartIdx()
     end
 
     if not start_idx then
         error(string.format(
-            "World generation failed to produce a region with ≥2 cities after %d attempts. Adjust world params.",
-            MAX_REGEN_ATTEMPTS))
+            "World generation failed to produce a region with ≥%d cities after %d attempts. Adjust world params.",
+            C.WORLD_GEN.STARTING_CITY_MIN_REGION_SIZE, MAX_REGEN_ATTEMPTS))
     end
+
+    print(string.format(
+        "WorldSandboxController: starting city idx=%d region=%s bounds=%d",
+        start_idx, tostring(chosen_rid), boundsCount(self.city_bounds_list[start_idx])))
 
     -- Subsystem maps were invalidated by _gen_all_bounds during regen; rebuild.
     if not self.city_district_maps then self:_gen_all_districts() end
@@ -455,7 +460,11 @@ function WorldSandboxController:sendToGame()
     if not self.city_street_maps    then self:_gen_all_streets() end
 
     local start_bounds = self.city_bounds_list[start_idx]
-    if not start_bounds then start_idx = 1; start_bounds = self.city_bounds_list[1] end
+    if not start_bounds then
+        error(string.format(
+            "WorldSandboxController: picker returned idx=%d but city_bounds_list[%d] is nil",
+            start_idx, start_idx))
+    end
 
     -- Compute starting city bounding box in world coords
     local city_mn_x, city_mx_x, city_mn_y, city_mx_y = w+1, 0, h+1, 0
@@ -464,8 +473,11 @@ function WorldSandboxController:sendToGame()
         if cx < city_mn_x then city_mn_x = cx end; if cx > city_mx_x then city_mx_x = cx end
         if cy < city_mn_y then city_mn_y = cy end; if cy > city_mx_y then city_mx_y = cy end
     end
-    -- Safety fallback
-    if city_mn_x > city_mx_x then city_mn_x=1; city_mx_x=30; city_mn_y=1; city_mx_y=30 end
+    if city_mn_x > city_mx_x then
+        error(string.format(
+            "WorldSandboxController: starting city idx=%d has empty/invalid bounds (bbox degenerate)",
+            start_idx))
+    end
 
     -- art_sci[sci] = true for sub-cells with arterial roads (direct, no conversion)
     local art_sci = {}

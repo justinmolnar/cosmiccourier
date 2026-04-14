@@ -146,6 +146,13 @@ local C = {
     VEHICLES  = {},
     BUILDINGS = {},
 
+    WORLD_GEN = {
+        -- Starting city picker: smallest city in a region with ≥N cities.
+        -- If no qualifying region exists, the world is regenerated up to MAX attempts.
+        STARTING_CITY_MIN_REGION_SIZE     = 2,
+        STARTING_CITY_MAX_REGEN_ATTEMPTS  = 10,
+    },
+
     MAP_GEN = {
         -- Component Toggles (EXISTING)
         GENERATE_DOWNTOWN = true,
