@@ -1,6 +1,16 @@
 -- views/tabs/DepotTab.lua
 local DepotTab = {}
 
+local Archetypes     = require("data.client_archetypes")
+local LicenseService = require("services.LicenseService")
+
+local function licenseNameForTier(tier)
+    for _, lic in ipairs(LicenseService.getAll()) do
+        if lic.scope_tier == tier then return lic.display_name end
+    end
+    return string.format("tier %d", tier)
+end
+
 function DepotTab.build(game, ui_manager)
     local comps = {}
     local depot = ui_manager.panel.depot_view
@@ -91,17 +101,28 @@ function DepotTab.build(game, ui_manager)
     end
 
     table.insert(comps, { type = "divider", h = 10 })
-    local market_cost = 100
-    table.insert(comps, {
-        type     = "button",
-        id       = "market_for_clients",
-        disabled = game.state.money < market_cost,
-        data     = { depot = depot },
-        lines    = {
-            { text = "📢 Market for Clients ($" .. market_cost .. ")", style = "body" },
-            { text = "Attract a new client to this district", style = "small" },
-        },
-    })
+    table.insert(comps, { type = "label", text = "Market", style = "heading", h = 24 })
+
+    local current_tier = LicenseService.getCurrentTier(game)
+    for _, archetype in ipairs(Archetypes.list) do
+        local tier_ok    = current_tier >= archetype.required_scope_tier
+        local can_afford = (game.state.money or 0) >= (archetype.market_cost or 0)
+        local primary = string.format("%s Market for %s  ($%d)",
+            archetype.icon or "", archetype.display_name, archetype.market_cost or 0)
+        local secondary = tier_ok
+            and (archetype.description or "")
+            or string.format("Requires %s", licenseNameForTier(archetype.required_scope_tier))
+        table.insert(comps, {
+            type     = "button",
+            id       = "market_for_clients",
+            disabled = not (tier_ok and can_afford),
+            data     = { archetype_id = archetype.id, depot = depot },
+            lines    = {
+                { text = primary,   style = "body" },
+                { text = secondary, style = "small" },
+            },
+        })
+    end
 
     return comps
 end

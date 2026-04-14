@@ -93,10 +93,12 @@ function UIController:handleMouseDown(x, y, button)
         end
 
     elseif id == "market_for_clients" then
-        Game.EventBus:publish("ui_market_for_clients_clicked", { depot = data.depot })
+        Game.EventBus:publish("ui_market_for_clients_clicked", {
+            depot = data.depot, archetype_id = data.archetype_id })
 
     elseif id == "buy_client" then
-        Game.EventBus:publish("ui_buy_client_clicked")
+        Game.EventBus:publish("ui_buy_client_clicked", {
+            archetype_id = data.archetype_id })
 
     elseif id == "select_vehicle" then
         Game.entities.selected_vehicle = data.vehicle

@@ -3,6 +3,12 @@
 local FloatingTextSystem = require("services.FloatingTextSystem")
 local VehicleRenderer    = require("views.VehicleRenderer")
 local MapRenderer        = require("views.MapRenderer")
+local Archetypes         = require("data.client_archetypes")
+
+local function clientIcon(client)
+    local a = client and client.archetype and Archetypes.by_id[client.archetype]
+    return (a and a.icon) or "🏠"
+end
 
 -- Shader: desaturate + alpha the city zone image at draw time.
 -- `saturation` 1.0 = full colour, 0.0 = greyscale.  `alpha` controls overall opacity.
@@ -442,7 +448,7 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
             end
         end
         for _, client in ipairs(Game.entities.clients) do
-            DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
+            DrawingUtils.drawWorldIcon(Game, clientIcon(client), client.px, client.py)
         end
         if Game.event_spawner and Game.event_spawner.clickable then
             local ec = Game.event_spawner.clickable
@@ -499,14 +505,17 @@ function GameView:_drawTileGridFallback(active_map, S, cur_scale, ui_manager, si
                     if cfg.transport_mode == leg_mode then vp = cfg; break end
                 end
                 vp = vp or next(Game.C.VEHICLES) and select(2, next(Game.C.VEHICLES))
+                local ScopeService = require("services.ScopeService")
                 local cost_function
                 if is_rn3 then
                     cost_function = function(rx, ry)
+                        if not ScopeService.isRevealed(Game, rx + 1, ry + 1) then return 9999 end
                         local tile = path_grid[ry+1] and path_grid[ry+1][rx+1]
                         return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
                     end
                 else
                     cost_function = function(x, y)
+                        if not ScopeService.isRevealed(Game, x, y) then return 9999 end
                         local tile = path_grid[y] and path_grid[y][x]
                         return tile and (vp.pathfinding_costs[tile.type] or 9999) or 9999
                     end
@@ -814,7 +823,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         if cs >= Z.ZONE_THRESHOLD then
             for _, client in ipairs(Game.entities.clients) do
                 if client.px > vp_left and client.px < vp_right and client.py > vp_top and client.py < vp_bot then
-                    DrawingUtils.drawWorldIcon(Game, "🏠", client.px, client.py)
+                    DrawingUtils.drawWorldIcon(Game, clientIcon(client), client.px, client.py)
                     DrawingUtils.drawCountBadge(Game, client.cargo and #client.cargo or 0, client.px, client.py)
                 end
             end

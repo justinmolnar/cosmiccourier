@@ -77,21 +77,44 @@ function EventService.setupTripEvents(state, game)
 end
 
 function EventService.setupUIEvents(state, game)
-    game.EventBus:subscribe("ui_buy_client_clicked", function()
-        local cost = state.costs.client
-        if state.money >= cost then
-            state.money = state.money - cost
-            state.costs.client = math.floor(state.costs.client * game.C.COSTS.CLIENT_MULT)
-            game.entities:addClient(game, game.entities.depots[1])
+    local Archetypes     = require("data.client_archetypes")
+    local LicenseService = require("services.LicenseService")
+
+    -- Shared helper: validate an archetype purchase and charge the market.
+    -- Returns the archetype on success, or nil on rejection (logs reason).
+    local function validateAndCharge(archetype_id)
+        local archetype = archetype_id and Archetypes.by_id[archetype_id]
+        if not archetype then
+            print(string.format("Market: unknown archetype_id '%s'", tostring(archetype_id)))
+            return nil
         end
+        if LicenseService.getCurrentTier(game) < archetype.required_scope_tier then
+            print(string.format("Market: '%s' requires license tier %d",
+                archetype.id, archetype.required_scope_tier))
+            return nil
+        end
+        local cost = archetype.market_cost or 0
+        if (state.money or 0) < cost then
+            print(string.format("Market: insufficient funds for '%s' ($%d)",
+                archetype.id, cost))
+            return nil
+        end
+        state.money = state.money - cost
+        return archetype
+    end
+
+    game.EventBus:subscribe("ui_buy_client_clicked", function(data)
+        local archetype_id = data and data.archetype_id
+        local archetype    = validateAndCharge(archetype_id)
+        if not archetype then return end
+        game.entities:addClient(game, game.entities.depots[1], archetype.id)
     end)
 
     game.EventBus:subscribe("ui_market_for_clients_clicked", function(data)
         if not data or not data.depot then return end
-        local cost = 100
-        if state.money < cost then return end
-        state.money = state.money - cost
-        game.entities:addClient(game, data.depot)
+        local archetype = validateAndCharge(data.archetype_id)
+        if not archetype then return end
+        game.entities:addClient(game, data.depot, archetype.id)
     end)
 end
 

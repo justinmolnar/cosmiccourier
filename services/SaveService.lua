@@ -24,9 +24,35 @@ local SAVE_SCHEMA = {
         "income_history",
         "trip_creation_history",
         "rush_hour",
-        "entities" -- All vehicles, clients, trips regenerated
+        -- Vehicles + pending-trip queue are regenerated on load.
+        -- Depots and clients are persisted (see depots / clients below).
     }
 }
+
+-- Flatten a client's cargo (trip objects) to plain tables for JSON encoding.
+-- Strips the source_client back-reference (it's the same client; re-attached
+-- on load). Each leg is kept as-is — plots are plain tables already.
+local function serializeCargoTrips(cargo)
+    local out = {}
+    for _, t in ipairs(cargo or {}) do
+        local legs = {}
+        for _, leg in ipairs(t.legs or {}) do
+            table.insert(legs, {
+                start_plot     = leg.start_plot,
+                end_plot       = leg.end_plot,
+                cargo_size     = leg.cargo_size,
+                transport_mode = leg.transport_mode,
+            })
+        end
+        table.insert(out, {
+            scope       = t.scope,
+            base_payout = t.base_payout,
+            speed_bonus = t.speed_bonus,
+            legs        = legs,
+        })
+    end
+    return out
+end
 
 function SaveService.saveGame(game, filename)
     filename = filename or "savegame.json"
@@ -68,7 +94,26 @@ function SaveService.saveGame(game, filename)
         end
     end
     save_data.game_data.depots = saved_depots
-    
+
+    -- Save Clients. Each client's live state is preserved so the game can
+    -- resume at identical archetype timing and cargo on next load.
+    local saved_clients = {}
+    if game.entities and game.entities.clients then
+        for _, c in ipairs(game.entities.clients) do
+            table.insert(saved_clients, {
+                archetype       = c.archetype,
+                plot            = c.plot,
+                trip_timer      = c.trip_timer,
+                active          = c.active,
+                freq_mult       = c.freq_mult,
+                trips_generated = c.trips_generated,
+                earnings        = c.earnings,
+                cargo_trips     = serializeCargoTrips(c.cargo),
+            })
+        end
+    end
+    save_data.game_data.clients = saved_clients
+
     -- Convert to JSON
     local json = require("lib.json")
     local json_string = json.encode(save_data, true)
@@ -151,6 +196,44 @@ function SaveService.applySaveData(game, save_data)
         end
     end
 
+    -- Migration: legacy clients-upgrade purchased entries -> drop.
+    -- The downtown_clients / city_clients sub-trees were replaced by the
+    -- per-archetype sub-trees. Their node ids and dead-code stat fields
+    -- are retired. This migration clears them from an older save so the
+    -- UpgradesTab renders cleanly and stats don't leak.
+    do
+        local LEGACY_UPGRADE_IDS = {
+            "logistics_optimization", "client_relations",
+            "downtown_payouts_1", "downtown_bonus_1", "corporate_sponsorship",
+            "bulk_contracts", "efficient_routing",
+            "city_payouts_1", "interchange_planning", "regional_depots",
+        }
+        local LEGACY_STAT_FIELDS = {
+            "downtown_payout_bonus", "downtown_speed_bonus",
+            "city_payout_bonus", "depot_transition_speed",
+            "multi_trip_chance", "multi_trip_amount",
+            "regional_depots_unlocked",
+        }
+        local dropped = {}
+        if game_state.upgrades_purchased then
+            for _, id in ipairs(LEGACY_UPGRADE_IDS) do
+                if game_state.upgrades_purchased[id] ~= nil then
+                    game_state.upgrades_purchased[id] = nil
+                    table.insert(dropped, id)
+                end
+            end
+        end
+        if game_state.upgrades then
+            for _, key in ipairs(LEGACY_STAT_FIELDS) do
+                game_state.upgrades[key] = nil
+            end
+        end
+        if #dropped > 0 then
+            print("SaveService: dropped legacy clients-upgrade entries: "
+                .. table.concat(dropped, ", "))
+        end
+    end
+
     -- Migration: legacy player-wide vehicle_capacity -> per-vehicle-type fields.
     -- Idempotent: re-runs see nil and skip.
     if game_state.upgrades and game_state.upgrades.vehicle_capacity ~= nil then
@@ -198,7 +281,54 @@ function SaveService.applySaveData(game, save_data)
             table.insert(game.entities.depots, new_depot)
         end
     end
-    
+
+    -- Restore Clients. If the save has a clients array, it is the source
+    -- of truth — replace any default clients spawned by EntityManager:init.
+    -- Legacy saves without client data keep the default starting client.
+    if data.clients and game.entities then
+        local Client     = require("models.Client")
+        local Trip       = require("models.Trip")
+        local Archetypes = require("data.client_archetypes")
+        game.entities.clients = {}
+        game.entities.trips   = game.entities.trips or { pending = {} }
+        game.entities.trips.pending = {}
+
+        for _, c_data in ipairs(data.clients) do
+            local archetype_id = c_data.archetype or Archetypes.default_id
+            local cmap = game.maps and game.maps.city
+            local new_client = Client:new(c_data.plot, game, cmap, archetype_id)
+            new_client.trip_timer      = c_data.trip_timer      or new_client.trip_timer
+            new_client.active          = (c_data.active ~= nil) and c_data.active or true
+            new_client.freq_mult       = c_data.freq_mult       or 1.0
+            new_client.trips_generated = c_data.trips_generated or 0
+            new_client.earnings        = c_data.earnings        or 0
+
+            for _, t_data in ipairs(c_data.cargo_trips or {}) do
+                local trip = Trip:new(t_data.base_payout or 0, t_data.speed_bonus or 0)
+                trip.scope = t_data.scope
+                for _, leg in ipairs(t_data.legs or {}) do
+                    trip:addLeg(leg.start_plot, leg.end_plot,
+                                leg.cargo_size, leg.transport_mode)
+                end
+                trip.source_client = new_client
+                table.insert(new_client.cargo, trip)
+                table.insert(game.entities.trips.pending, trip)
+            end
+
+            table.insert(game.entities.clients, new_client)
+        end
+    else
+        -- Legacy save: the default-spawned starting client stays in place.
+        -- Defensive: ensure it has an archetype string.
+        if game.entities and game.entities.clients then
+            local Archetypes = require("data.client_archetypes")
+            for _, c in ipairs(game.entities.clients) do
+                if not c.archetype then c.archetype = Archetypes.default_id end
+            end
+        end
+        print("SaveService: legacy save detected, default starting client in place")
+    end
+
     print("SaveService: Save data applied to game state")
     return true
 end

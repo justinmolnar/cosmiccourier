@@ -39,7 +39,11 @@ function Entities:init(game)
         local first_depot = Depot:new("downtown_1", start_plot, game)
         table.insert(self.depots, first_depot)
     end
-    self:addClient(game, self.depots[1])
+    -- Starting client uses the default archetype from the registry (Downtown
+    -- tier, general commerce). Every new save begins with this client; legacy
+    -- saves without client data also end up here.
+    local Archetypes = require("data.client_archetypes")
+    self:addClient(game, self.depots[1], Archetypes.default_id)
     -- Start with the cheapest available vehicle type.
     local starter_id, starter_cost = nil, math.huge
     for id, vcfg in pairs(game.C.VEHICLES) do
@@ -51,20 +55,54 @@ function Entities:init(game)
     if starter_id then self:addVehicle(game, starter_id) end
 end
 
-function Entities:addClient(game, depot)
+function Entities:addClient(game, depot, archetype_id)
+    local Archetypes = require("data.client_archetypes")
+    archetype_id = archetype_id or Archetypes.default_id
+    local archetype = Archetypes.by_id[archetype_id]
+    if not archetype then
+        print(string.format("EntityManager: unknown archetype_id '%s'", tostring(archetype_id)))
+        return
+    end
+
+    -- Scope-tier guard (belt-and-braces; UI is the first gate).
+    local LicenseService = require("services.LicenseService")
+    if archetype.required_scope_tier > LicenseService.getCurrentTier(game) then
+        print(string.format(
+            "EntityManager: archetype '%s' requires tier %d; current tier %d — rejected.",
+            archetype.id, archetype.required_scope_tier, LicenseService.getCurrentTier(game)))
+        return
+    end
+
     local cmap = (depot and depot.getCity) and depot:getCity(game) or game.maps.city
     if not cmap then return end
     local depot_district = depot and depot:getDistrict(game)
-    local plot_local = depot_district and cmap:getRandomBuildingPlotForDistrict(depot_district, "can_send")
-                       or cmap:getRandomSendingPlot()
-    if plot_local then
-        local plot = (cmap.world_mn_x and game.maps.unified) and {
-            x = (cmap.world_mn_x - 1) * 3 + plot_local.x,
-            y = (cmap.world_mn_y - 1) * 3 + plot_local.y,
-        } or plot_local
-        local new_client = Client:new(plot, game, cmap)
-        table.insert(self.clients, new_client)
+
+    -- Build a set of the archetype's preferred zones for O(1) membership test.
+    local zone_set = {}
+    for _, z in ipairs(archetype.spawn_zones or {}) do zone_set[z] = true end
+
+    -- Placement order: (1) archetype zone + depot district; (2) archetype zone
+    -- anywhere in the city; (3) any can_send plot (log the degraded fallback).
+    local plot_local = cmap:getRandomBuildingPlotForZones(zone_set, depot_district, "can_send")
+    if not plot_local then
+        plot_local = cmap:getRandomBuildingPlotForZones(zone_set, nil, "can_send")
     end
+    if not plot_local then
+        plot_local = cmap:getRandomSendingPlot()
+        if plot_local then
+            print(string.format(
+                "EntityManager: no '%s' archetype zone available in this city; using any can_send plot.",
+                archetype.id))
+        end
+    end
+    if not plot_local then return end
+
+    local plot = (cmap.world_mn_x and game.maps.unified) and {
+        x = (cmap.world_mn_x - 1) * 3 + plot_local.x,
+        y = (cmap.world_mn_y - 1) * 3 + plot_local.y,
+    } or plot_local
+    local new_client = Client:new(plot, game, cmap, archetype_id)
+    table.insert(self.clients, new_client)
 end
 
 function Entities:addVehicle(game, vehicleType, target_depot)

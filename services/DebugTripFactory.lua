@@ -10,6 +10,9 @@
 local DebugTripFactory = {}
 
 local PAYOUT_MULT = { district = 1.0, city = 1.5, region = 3.0, continent = 5.0, world = 8.0 }
+-- Exported for production trip generation. Single source of truth for
+-- scope-based payout multipliers.
+DebugTripFactory.PAYOUT_MULT = PAYOUT_MULT
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -91,9 +94,13 @@ function DebugTripFactory.pickDestination(scope, depot, game)
     if not origin_city then return nil end
 
     if scope == "district" then
+        -- District-scope trips must stay within the depot's district. If no
+        -- in-district can_receive plot is available the trip is eaten — no
+        -- city-wide fallback, otherwise paths leak outside the player's
+        -- current license coverage.
         local district = depot:getDistrict(game)
-        local pl = district and origin_city:getRandomBuildingPlotForDistrict(district, "can_receive")
-        if not pl then pl = origin_city:getRandomReceivingPlot() end
+        if not district then return nil end
+        local pl = origin_city:getRandomBuildingPlotForDistrict(district, "can_receive")
         return pl and toUnified(pl, origin_city) or nil
 
     elseif scope == "city" then

@@ -5,7 +5,7 @@ local TripGenerator = require("services.TripGenerator")
 local Client = {}
 Client.__index = Client
 
-function Client:new(plot, game, city_map)
+function Client:new(plot, game, city_map, archetype_id)
     local instance = setmetatable({}, Client)
     instance.plot     = plot  -- unified sub-cell coords
     instance.city_map = city_map or (game.maps and game.maps.city)
@@ -15,7 +15,8 @@ function Client:new(plot, game, city_map)
     else
         instance.px, instance.py = game.maps.city:getPixelCoords(plot.x, plot.y)
     end
-    instance.trip_timer      = love.math.random(5, 10)
+    instance.archetype       = archetype_id
+    instance.trip_timer      = TripGenerator.calculateNextTripTime(game, archetype_id)
     instance.active          = true   -- when false, no new trips are generated
     instance.freq_mult       = 1.0    -- multiplies the inter-trip interval (>1 = less frequent)
     instance.trips_generated = 0
@@ -32,10 +33,10 @@ function Client:update(dt, game)
     if not self.active then return end
     self.trip_timer = self.trip_timer - dt
     if self.trip_timer <= 0 then
-        local base_time = TripGenerator.calculateNextTripTime(game)
+        local base_time = TripGenerator.calculateNextTripTime(game, self.archetype)
         self.trip_timer = base_time * math.max(0.1, self.freq_mult or 1.0)
 
-        local new_trip = TripGenerator.generateTrip(self.plot, game, self.city_map)
+        local new_trip = TripGenerator.generateTrip(self.plot, game, self.city_map, self.archetype)
         if new_trip then
             new_trip.source_client = self
             self.trips_generated   = (self.trips_generated or 0) + 1

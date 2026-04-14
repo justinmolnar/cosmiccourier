@@ -13,8 +13,9 @@ function State:new(C, game)
     instance.income_history = {}
     instance.trip_creation_history = {}
     
-    -- Initialize vehicle costs from definitions; non-vehicle costs are kept separately.
-    instance.costs = { client = C.COSTS.CLIENT }
+    -- Initialize vehicle costs from definitions. Client market cost lives
+    -- on each archetype in data/client_archetypes.lua; no global client cost.
+    instance.costs = {}
     for id, vcfg in pairs(C.VEHICLES) do
         instance.costs[id:lower()] = vcfg.base_cost
     end
@@ -27,10 +28,18 @@ function State:new(C, game)
         frenzy_duration = C.EVENTS.INITIAL_DURATION_SEC,
         trip_gen_min_mult = 1.0,
         trip_gen_max_mult = 1.0,
-        multi_trip_chance = 0,
-        multi_trip_amount = 2,
         max_pending_trips = C.GAMEPLAY.MAX_PENDING_TRIPS,
     }
+
+    -- Per-archetype upgrade fields. Seeded from the archetype registry so
+    -- no archetype ids appear in this model — the loop is the source of truth.
+    local Archetypes = require("data.client_archetypes")
+    for _, a in ipairs(Archetypes.list) do
+        instance.upgrades[a.id .. "_spawn_rate_mult"]       = 1.0
+        instance.upgrades[a.id .. "_payout_mult"]           = 1.0
+        instance.upgrades[a.id .. "_cargo_size_bias"]       = 0
+        instance.upgrades[a.id .. "_rush_probability_mult"] = 1.0
+    end
     
     instance.rush_hour = { active = false, timer = 0 }
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE

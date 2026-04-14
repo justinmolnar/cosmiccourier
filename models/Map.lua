@@ -287,16 +287,16 @@ function Map:getRandomBuildingPlot()
 end
 
 -- Returns a random building plot whose district matches `district_name`.
--- Falls back to getRandomDowntownBuildingPlot() for "downtown", getRandomBuildingPlot() otherwise.
--- Pass can_flag = "can_send" or "can_receive" to further filter by zone logistics flags.
+-- Pass can_flag = "can_send" or "can_receive" to further filter by zone
+-- logistics flags. Returns nil if no plot matches — callers decide the
+-- fallback. No blind fallback: strict district/flag contract so downstream
+-- scope gating doesn't leak plots from other districts.
 function Map:getRandomBuildingPlotForDistrict(district_name, can_flag)
+    if not self.district_map or not self.district_types or not self.world_mn_x then
+        return nil
+    end
     local ZT = require("data.zones")
     local flag_table = can_flag and ZT[can_flag == "can_send" and "CAN_SEND" or "CAN_RECEIVE"]
-
-    if not self.district_map or not self.district_types or not self.world_mn_x then
-        return district_name == "downtown" and self:getRandomDowntownBuildingPlot()
-               or self:getRandomBuildingPlot()
-    end
     local sub_w = (self.world_w or 1) * 3
     local ox    = (self.world_mn_x - 1) * 3
     local oy    = (self.world_mn_y - 1) * 3
@@ -316,9 +316,52 @@ function Map:getRandomBuildingPlotForDistrict(district_name, can_flag)
     if #matches > 0 then
         return matches[love.math.random(1, #matches)]
     end
-    -- Fallback (no flag filter)
-    return district_name == "downtown" and self:getRandomDowntownBuildingPlot()
-           or self:getRandomBuildingPlot()
+    return nil
+end
+
+-- Returns a random building plot whose zone is in `zone_ids_set` (a table
+-- keyed by zone id → true). If `district_name` is provided, plots must also
+-- match that district. If `can_flag` is "can_send" or "can_receive", plots
+-- must also satisfy that zone flag. Returns nil if no plot matches — callers
+-- decide the fallback chain (unlike the district / sending / receiving
+-- helpers below which fall back to any building plot).
+function Map:getRandomBuildingPlotForZones(zone_ids_set, district_name, can_flag)
+    if not zone_ids_set then return nil end
+    local ZT = require("data.zones")
+    local flag_table = can_flag and ZT[can_flag == "can_send" and "CAN_SEND" or "CAN_RECEIVE"]
+
+    local sub_w, ox, oy
+    if district_name and self.district_map and self.district_types and self.world_mn_x then
+        sub_w = (self.world_w or 1) * 3
+        ox    = (self.world_mn_x - 1) * 3
+        oy    = (self.world_mn_y - 1) * 3
+    elseif district_name then
+        -- No district data available; caller asked for a district filter we can't honor.
+        return nil
+    end
+
+    local matches = {}
+    for _, plot in ipairs(self.building_plots) do
+        local zone = self.zone_grid and self.zone_grid[plot.y] and self.zone_grid[plot.y][plot.x]
+        if zone and zone_ids_set[zone]
+           and (not flag_table or flag_table[zone]) then
+            local district_ok = true
+            if district_name then
+                local ux  = plot.x + ox
+                local uy  = plot.y + oy
+                local sci = (uy - 1) * sub_w + ux
+                local poi = self.district_map[sci]
+                district_ok = poi and self.district_types[poi] == district_name
+            end
+            if district_ok then
+                matches[#matches + 1] = plot
+            end
+        end
+    end
+    if #matches > 0 then
+        return matches[love.math.random(1, #matches)]
+    end
+    return nil
 end
 
 -- Returns a random building plot whose zone has can_send=true.

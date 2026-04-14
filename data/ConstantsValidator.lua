@@ -127,9 +127,7 @@ function ConstantsValidator._validateCosts(constants, errors)
         return
     end
     
-    ConstantsValidator._validateNumber(costs, "CLIENT", errors, 100, 10000)
     ConstantsValidator._validateNumber(costs, "AUTO_DISPATCH", errors, 100, 10000)
-    ConstantsValidator._validateNumber(costs, "CLIENT_MULT", errors, 1.0, 5.0)
 end
 
 function ConstantsValidator._validateEvents(constants, errors)

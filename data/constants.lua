@@ -193,15 +193,15 @@ local C = {
 
     COSTS = {
         -- REMOVED: BIKE and TRUCK (now handled in GameState with proper values)
+        -- REMOVED: CLIENT / CLIENT_MULT (client market cost lives on each
+        --          archetype in data/client_archetypes.lua).
         SPEED           = 75,
-        CLIENT          = 500,
         AUTO_DISPATCH   = 1000,
         CAPACITY        = 2500,
         FRENZY_DURATION = 5000,
 
         -- REMOVED: BIKE_MULT and TRUCK_MULT (moved to GameState)
         SPEED_MULT      = 1.5,
-        CLIENT_MULT     = 1.2,
         CAPACITY_MULT   = 1.5,
         FRENZY_DURATION_MULT = 1.5,
 
