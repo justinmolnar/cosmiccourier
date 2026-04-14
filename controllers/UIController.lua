@@ -57,7 +57,7 @@ function UIController:handleMouseDown(x, y, button)
     end
 
     -- 3. Panel tab bar and scrollbar.
-    if panel:handleMouseDown(x, y, button) then return true end
+    if panel:handleMouseDown(x, y, button, Game) then return true end
 
     -- 4. Content clicks — only when mouse is in the content area.
     if not panel:isInContentArea(x, y) then return false end

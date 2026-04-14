@@ -28,19 +28,20 @@ function UIManager:new(C, game)
     local screen_h = love.graphics.getHeight()
     instance.panel = Panel:new(0, PANEL_Y, C.UI.SIDEBAR_WIDTH, screen_h - PANEL_Y)
 
-    instance.panel:registerTab({ id = "dispatch",  label = "Dispatch", icon = "⚡", priority = 1,
-        build = function(g) return DispatchTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "trips",    label = "Trips",    icon = "📦", priority = 2,
+    instance.panel:registerTab({ id = "trips",    label = "Trips",    icon = "📦", priority = 1,
         build = function(g) return TripsTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "vehicles", label = "Vehicles", icon = "🚗", priority = 3,
+    instance.panel:registerTab({ id = "vehicles", label = "Vehicles", icon = "🚗", priority = 2,
         build = function(g) return VehiclesTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "upgrades", label = "Upgrades", icon = "⬆️", priority = 3,
+    instance.panel:registerTab({ id = "dispatch", label = "Dispatch", icon = "⚡", priority = 3,
+        build = function(g) return DispatchTab.build(g, instance) end,
+        visible_when = function(g) return g.state.upgrades.auto_dispatch_unlocked == true end })
+    instance.panel:registerTab({ id = "upgrades", label = "Upgrades", icon = "⬆️", priority = 4,
         build = function(g) return UpgradesTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "clients",  label = "Clients",  icon = "🏢", priority = 4,
+    instance.panel:registerTab({ id = "clients",  label = "Clients",  icon = "🏢", priority = 5,
         build = function(g) return ClientsTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "depot",    label = "Depot",    icon = "🏗️", priority = 5,
+    instance.panel:registerTab({ id = "depot",    label = "Depot",    icon = "🏗️", priority = 6,
         build = function(g) return DepotTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "infrastructure", label = "Roads", icon = "🛣️", priority = 6,
+    instance.panel:registerTab({ id = "infrastructure", label = "Roads", icon = "🛣️", priority = 7,
         build = function(g) return InfrastructureTab.build(g, instance) end })
 
     instance.modal_manager  = ModalManager:new()

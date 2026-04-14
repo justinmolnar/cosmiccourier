@@ -37,15 +37,13 @@ function Panel:new(x, y, w, h)
 end
 
 function Panel:registerTab(def)
-    -- def: { id, label, icon, priority, build }
+    -- def: { id, label, icon, priority, build, visible_when? }
+    -- visible_when = optional function(game) -> bool. nil means always visible.
     self.tabs[def.id] = def
     table.insert(self.tab_order, def)
     table.sort(self.tab_order, function(a, b)
         return (a.priority or 0) < (b.priority or 0)
     end)
-    if not self.active_tab_id then
-        self.active_tab_id = def.id
-    end
     self.scroll[def.id] = {
         scroll_y      = 0,
         total_h       = 0,
@@ -53,6 +51,25 @@ function Panel:registerTab(def)
         drag_start_y  = 0,
         scroll_at_drag = 0,
     }
+end
+
+function Panel:_isTabVisible(tab, game)
+    return tab ~= nil and (tab.visible_when == nil or tab.visible_when(game) == true)
+end
+
+-- Resolve the active tab against current visibility. If active_tab_id is unset
+-- or resolves to a hidden tab, pick the first visible tab in priority order.
+-- Called at the top of draw() since visibility depends on live game state.
+function Panel:_resolveActiveTab(game)
+    local current = self.tabs[self.active_tab_id]
+    if self:_isTabVisible(current, game) then return current end
+    for _, tab in ipairs(self.tab_order) do
+        if self:_isTabVisible(tab, game) then
+            self.active_tab_id = tab.id
+            return tab
+        end
+    end
+    return nil
 end
 
 function Panel:setActiveTab(id)
@@ -78,13 +95,14 @@ function Panel:handleScroll(dy)
     s.scroll_y = math.max(0, math.min(s.scroll_y, max_scroll))
 end
 
-function Panel:handleMouseDown(x, y, button)
+function Panel:handleMouseDown(x, y, button, game)
     -- Tab bar click
     if y >= self.y and y < self.y + Panel.TAB_BAR_H then
-        local n = #self.tab_order
+        local visible = self:_visibleTabs(game)
+        local n = #visible
         if n == 0 then return false end
         local tab_w = self.w / n
-        for i, tab in ipairs(self.tab_order) do
+        for i, tab in ipairs(visible) do
             local tx = self.x + (i - 1) * tab_w
             if x >= tx and x < tx + tab_w then
                 local prev = self.active_tab_id
@@ -174,14 +192,26 @@ function Panel:_getScrollbarHandleBounds(s)
     return hx, hy, Panel.SCROLLBAR_W, handle_h
 end
 
+function Panel:_visibleTabs(game)
+    local out = {}
+    for _, tab in ipairs(self.tab_order) do
+        if self:_isTabVisible(tab, game) then out[#out+1] = tab end
+    end
+    return out
+end
+
 function Panel:draw(game)
-    -- Tab bar
-    local n     = #self.tab_order
-    local tab_w = n > 0 and (self.w / n) or self.w
+    -- Tab bar (visible tabs only)
+    local visible = self:_visibleTabs(game)
+    local n       = #visible
+    local tab_w   = n > 0 and (self.w / n) or self.w
+
+    -- Make sure active_tab_id points to a currently-visible tab.
+    local active_tab = self:_resolveActiveTab(game)
 
     love.graphics.setFont(game.fonts.ui)
     love.graphics.setScissor(self.x, self.y, self.w, Panel.TAB_BAR_H)
-    for i, tab in ipairs(self.tab_order) do
+    for i, tab in ipairs(visible) do
         local tx = self.x + (i - 1) * tab_w
         if tab.id == self.active_tab_id then
             love.graphics.setColor(0.28, 0.28, 0.38)
@@ -198,7 +228,6 @@ function Panel:draw(game)
     love.graphics.setScissor()
 
     -- Content area
-    local active_tab = self.tabs[self.active_tab_id]
     if not active_tab or not active_tab.build then return end
 
     local s = self.scroll[self.active_tab_id]

@@ -289,6 +289,24 @@ A fresh player lands on a playable screen and has a legible path to their first 
 
 - This is the smallest item in the refactor mechanically but potentially the highest impact on whether a new player "gets" the game.
 
+### Status: Implemented
+
+Shipped in Phase 7 cleanup pass.
+
+- `views/Panel.lua` — `registerTab` now accepts an optional `visible_when = function(game) -> bool` predicate. `Panel:_visibleTabs(game)` filters the tab bar + click routing; `Panel:_resolveActiveTab(game)` reassigns `active_tab_id` to the first visible tab if the current active is hidden. Framework stays agnostic — no tab ids, no game-state knowledge inside Panel.
+- `views/UIManager.lua` — tab priorities reordered so a playable tab lands first on fresh save:
+  - `trips` (1), `vehicles` (2), `dispatch` (3), `upgrades` (4), `clients` (5), `depot` (6), `infrastructure` (7).
+  - Dispatch carries `visible_when = function(g) return g.state.upgrades.auto_dispatch_unlocked == true end`.
+- `views/tabs/DispatchTab.lua` — the `auto_dispatch_unlocked` gate branch (former L1918–1923) is deleted. Build fn now assumes unlock, since the tab is hidden otherwise.
+- `controllers/UIController.lua` — `panel:handleMouseDown` now receives `Game` so the click router can consult the same visibility filter.
+- Re-show on unlock is automatic: the per-frame `Panel:draw` polling (`views/Panel.lua:210-211` pattern) picks up the new predicate result immediately.
+
+### Deviations
+
+- First-time-hint overlay (stretch in the spec) was not implemented — no scaffolding existed and a fresh save is already playable without it.
+- No `data/tabs.lua` registry refactor. The imperative registration block is small and refactoring it was scope creep.
+- The `visible_when` field was added as a generic framework capability; its only current consumer is Dispatch. Future scope-gated tabs (Depot/Clients) can opt in without further Panel changes.
+
 ---
 
 ## 8. Economy Tuning Pass

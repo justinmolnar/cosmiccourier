@@ -1914,14 +1914,6 @@ end
 function DispatchTab.build(game, ui_manager)
     local comps = {}
 
-    -- Gate: dispatch tab is empty until auto-dispatch is unlocked
-    if not game.state.upgrades.auto_dispatch_unlocked then
-        table.insert(comps, { type = "label", style = "heading", h = 26, text = "Dispatch Rules" })
-        table.insert(comps, { type = "label", style = "body", h = 40,
-            text = "Purchase the Auto-Dispatcher upgrade to unlock dispatch rules." })
-        return comps
-    end
-
     local rules = game.state.dispatch_rules or {}
     local pw    = ui_manager and ui_manager.panel and ui_manager.panel.w or 300
     state.rule_card_tops     = {}
