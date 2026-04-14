@@ -37,6 +37,7 @@ function State:new(C, game)
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
     instance.metro_license_unlocked = false
     instance.scope_tier = 1
+    instance.purchasable_vehicles = { bike = true }
     -- Unified name-based variable system available to dispatch rules
     instance.vars             = {}
     instance.broadcast_queue  = {}

@@ -58,6 +58,7 @@ function DepotTab.build(game, ui_manager)
 
     for _, entry in ipairs(sorted) do
         local vid  = entry.id:lower()
+        if not game.state.purchasable_vehicles[vid] then goto continue_depot_vehicle end
         local vcfg = entry.vcfg
         local cost = game.state.costs[vid] or vcfg.base_cost
         local can_afford = game.state.money >= cost
@@ -86,6 +87,7 @@ function DepotTab.build(game, ui_manager)
             data     = { vehicle_id = vid, depot = depot },
             lines    = lines,
         })
+        ::continue_depot_vehicle::
     end
 
     table.insert(comps, { type = "divider", h = 10 })

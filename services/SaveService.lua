@@ -12,7 +12,8 @@ local SAVE_SCHEMA = {
         "metro_license_unlocked",
         "current_map_scale",
         "scope_tier",
-        "unlocked"
+        "unlocked",
+        "purchasable_vehicles"
     },
     vehicle_data = {
         "type",

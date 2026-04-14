@@ -91,6 +91,7 @@ end
 function EventService.setupVehicleEvents(state, game)
     game.EventBus:subscribe("ui_buy_vehicle_clicked", function(vehicleType)
         if not vehicleType then return end
+        if not state.purchasable_vehicles[vehicleType] then return end
 
         local vcfg = game.C.VEHICLES[vehicleType:upper()]
         if not vcfg then return end
@@ -106,6 +107,7 @@ function EventService.setupVehicleEvents(state, game)
     game.EventBus:subscribe("ui_buy_vehicle_at_depot_clicked", function(data)
         if not data or not data.vehicle_id or not data.depot then return end
         local vehicleType = data.vehicle_id
+        if not state.purchasable_vehicles[vehicleType] then return end
 
         local vcfg = game.C.VEHICLES[vehicleType:upper()]
         if not vcfg then return end

@@ -44,6 +44,7 @@ function VehiclesTab.build(game, ui_manager)
 
     for _, entry in ipairs(sorted) do
         local vid  = entry.id:lower()
+        if not state.purchasable_vehicles[vid] then goto continue_vehicle end
         local vcfg = entry.vcfg
         local cost = state.costs[vid] or vcfg.base_cost
         table.insert(comps, {
@@ -54,6 +55,7 @@ function VehiclesTab.build(game, ui_manager)
                 { text = string.format("%s Hire %s  ($%d)", vcfg.icon, vcfg.display_name, cost), style = "body" },
             },
         })
+        ::continue_vehicle::
     end
 
     -- Active vehicle list

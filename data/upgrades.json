@@ -183,6 +183,7 @@
           "id": "truck",
           "name": "Truck",
           "icon": "🚚",
+          "required_scope": 3,
           "tree": [
             {
               "id": "truck_speed_1",
@@ -193,6 +194,7 @@
               "max_level": 500,
               "cost_multiplier": 1.1,
               "prerequisites": [],
+              "required_scope": 3,
               "position": {"x": 1, "y": 1},
               "effect_type": "multiply_stat",
               "effect_target": "truck_speed",
@@ -221,6 +223,7 @@
               "max_level": 3,
               "cost_multiplier": 2.5,
               "prerequisites": [],
+              "required_scope": 3,
               "position": {"x": 2, "y": 1},
               "effect_type": "special",
               "effect_target": "truck_capacity",
@@ -357,6 +360,7 @@
           "id": "city_clients",
           "name": "City",
           "icon": "🏙️",
+          "required_scope": 2,
           "tree": [
             {
               "id": "bulk_contracts",
@@ -367,6 +371,7 @@
               "max_level": 10,
               "cost_multiplier": 3,
               "prerequisites": [],
+              "required_scope": 2,
               "position": {"x": 1, "y": 1},
               "effect_type": "add_stat",
               "effect_target": "multi_trip_chance",
@@ -395,6 +400,7 @@
               "max_level": 5,
               "cost_multiplier": 2.2,
               "prerequisites": [],
+              "required_scope": 2,
               "position": {"x": 2, "y": 1},
               "effect_type": "special",
               "effect_target": "city_payout_bonus",
@@ -657,6 +663,148 @@
               "effect_type": "set_flag",
               "effect_target": "scope_tier",
               "effect_value": 5
+            }
+          ]
+        },
+        {
+          "id": "vehicle_unlocks",
+          "name": "Fleet Expansion",
+          "icon": "🚗",
+          "required_scope": 2,
+          "tree": [
+            {
+              "id": "unlock_cars",
+              "name": "Car Fleet License",
+              "description": "Unlock cars for city-wide delivery.",
+              "icon": "🚗",
+              "cost": 3000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["metro_expansion"],
+              "required_scope": 2,
+              "position": {"x": 0, "y": 0},
+              "effect_type": "unlock_vehicle",
+              "effect_value": "car"
+            },
+            {
+              "id": "unlock_trucks",
+              "name": "Trucking License",
+              "description": "Unlock trucks for long-haul transport.",
+              "icon": "🚚",
+              "cost": 15000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["regional_network"],
+              "required_scope": 3,
+              "position": {"x": 0, "y": 1},
+              "effect_type": "unlock_vehicle",
+              "effect_value": "truck"
+            },
+            {
+              "id": "unlock_ships",
+              "name": "Maritime License",
+              "description": "Unlock cargo ships for overseas routes.",
+              "icon": "🚢",
+              "cost": 50000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["continental_reach"],
+              "required_scope": 4,
+              "position": {"x": 0, "y": 2},
+              "effect_type": "unlock_vehicle",
+              "effect_value": "ship"
+            }
+          ]
+        },
+        {
+          "id": "dispatch_packs",
+          "name": "Dispatch Training",
+          "icon": "📦",
+          "required_scope": 2,
+          "tree": [
+            {
+              "id": "city_dispatch",
+              "name": "City Dispatch Training",
+              "description": "Receive an assignment strategies rule pack.",
+              "icon": "📦",
+              "cost": 8000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["metro_expansion", "auto_dispatch_1"],
+              "required_scope": 2,
+              "position": {"x": 0, "y": 0},
+              "effect_type": "grant_pack",
+              "grant_pack_id": "assignment_pack"
+            },
+            {
+              "id": "routing_dispatch",
+              "name": "Routing Certification",
+              "description": "Receive a city routing rule pack.",
+              "icon": "📦",
+              "cost": 20000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["city_dispatch"],
+              "required_scope": 2,
+              "position": {"x": 0, "y": 1},
+              "effect_type": "grant_pack",
+              "grant_pack_id": "routing_pack"
+            },
+            {
+              "id": "hub_dispatch",
+              "name": "Hub & Spoke Training",
+              "description": "Receive a hub routing rule pack.",
+              "icon": "📦",
+              "cost": 40000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["routing_dispatch", "regional_network"],
+              "required_scope": 3,
+              "position": {"x": 0, "y": 2},
+              "effect_type": "grant_pack",
+              "grant_pack_id": "hub_routing_pack"
+            },
+            {
+              "id": "fleet_dispatch",
+              "name": "Fleet Management",
+              "description": "Receive a fleet management rule pack.",
+              "icon": "📦",
+              "cost": 60000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["hub_dispatch"],
+              "required_scope": 3,
+              "position": {"x": 0, "y": 3},
+              "effect_type": "grant_pack",
+              "grant_pack_id": "vehicle_pack"
+            },
+            {
+              "id": "economy_dispatch",
+              "name": "Economics Training",
+              "description": "Receive an economy rules pack.",
+              "icon": "📦",
+              "cost": 80000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["fleet_dispatch", "continental_reach"],
+              "required_scope": 4,
+              "position": {"x": 0, "y": 4},
+              "effect_type": "grant_pack",
+              "grant_pack_id": "economy_pack"
+            },
+            {
+              "id": "queue_dispatch",
+              "name": "Queue Optimization",
+              "description": "Receive a queue control rule pack.",
+              "icon": "📦",
+              "cost": 100000,
+              "max_level": 1,
+              "cost_multiplier": 1.0,
+              "prerequisites": ["economy_dispatch"],
+              "required_scope": 4,
+              "position": {"x": 0, "y": 5},
+              "effect_type": "grant_pack",
+              "grant_pack_id": "queue_pack"
             }
           ]
         }

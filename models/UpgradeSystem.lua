@@ -37,14 +37,22 @@ function UpgradeSystem:isUpgradeAvailable(upgradeId)
     local upgrade = self.upgrades_data.AllUpgrades[upgradeId]
     if not upgrade then return false end
 
+    -- Scope tier requirement
+    if upgrade.required_scope then
+        local ScopeService = require("services.ScopeService")
+        if ScopeService.getTier(self.game) < upgrade.required_scope then
+            return false
+        end
+    end
+
     -- Check if all prerequisite upgrades have been purchased to at least level 1
     for _, prereqId in ipairs(upgrade.prerequisites) do
         if (self.state.upgrades_purchased[prereqId] or 0) < 1 then
-            return false -- A prerequisite is not met
+            return false
         end
     end
-    
-    return true -- All prerequisites are met
+
+    return true
 end
 
 function UpgradeSystem:getUpgradeCost(upgradeId)
@@ -151,6 +159,14 @@ local EFFECT_HANDLERS = {
             system.state.upgrades[stat_target] = current * upgrade.effect_value
             print(string.format("Multiplied stat: upgrades.%s = %s (was %s)", stat_target, system.state.upgrades[stat_target], current))
             system:applyStatToGameValues(stat_target, system.state.upgrades[stat_target])
+        end
+    end,
+
+    unlock_vehicle = function(system, upgrade)
+        local vid = upgrade.effect_value
+        if vid and system.state.purchasable_vehicles then
+            system.state.purchasable_vehicles[vid] = true
+            print(string.format("Unlocked vehicle: %s", vid))
         end
     end,
 
