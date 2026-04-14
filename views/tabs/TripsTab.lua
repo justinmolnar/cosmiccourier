@@ -19,11 +19,19 @@ function TripsTab.build(game, ui_manager)
         table.insert(comps, { type = "label", text = "No pending trips.", style = "muted", h = 30 })
     end
 
+    local now = love.timer.getTime()
     for i, trip in ipairs(pending) do
         local current_bonus = math.floor(trip:getCurrentBonus())
+        local header
+        if trip.is_rush then
+            local remaining = math.max(0, math.floor((trip.deadline or now) - now + 0.5))
+            header = string.format("⚡ RUSH  Trip %d:  $%d base  +  $%d bonus  —  %ds left",
+                i, trip.base_payout, current_bonus, remaining)
+        else
+            header = string.format("Trip %d:  $%d base  +  $%d bonus", i, trip.base_payout, current_bonus)
+        end
         local lines = {
-            { text = string.format("Trip %d:  $%d base  +  $%d bonus", i, trip.base_payout, current_bonus),
-              style = "body" },
+            { text = header, style = trip.is_rush and "warning" or "body" },
         }
         for leg_idx, leg in ipairs(trip.legs) do
             local mode = mode_text[leg.transport_mode] or leg.transport_mode or "road"

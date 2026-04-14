@@ -15,6 +15,14 @@ function Trip:new(base_payout, initial_bonus)
     instance.is_in_transit = false
     instance.transit_start_time = 0
     instance.last_update_time = love.timer.getTime()
+
+    -- Rush / deadline state. Populated by TripGenerator when an archetype rolls
+    -- Rush; checked by EntityManager's per-frame expiry pass. `deadline` is an
+    -- absolute wall-clock time from love.timer.getTime(); SaveService stores it
+    -- as remaining-seconds and rebases on load.
+    instance.is_rush          = false
+    instance.deadline         = nil
+    instance.payout_forfeited = false   -- set on in-transit expiry; consumed at delivery
     
     instance.start_plot = nil
     instance.end_plot = nil

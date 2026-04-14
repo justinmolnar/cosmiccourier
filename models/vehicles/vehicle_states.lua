@@ -362,7 +362,10 @@ function States.DoDropoff:enter(vehicle, game)
             local RE = require("services.DispatchRuleEngine")
             RE.fireEvent(game.state.dispatch_rules or {}, "vehicle_trip_complete",
                 { vehicle = vehicle, game = game })
-            local final_payout = trip.base_payout + trip.speed_bonus
+            -- Rush trip missed its deadline: delivery completes but pays $0.
+            local final_payout = trip.payout_forfeited
+                and 0
+                or (trip.base_payout + trip.speed_bonus)
             if trip.source_client then
                 trip.source_client.earnings = (trip.source_client.earnings or 0) + final_payout
             end
@@ -370,7 +373,14 @@ function States.DoDropoff:enter(vehicle, game)
             local vmap = game.maps and game.maps[vehicle.operational_map_key]
             local wx   = vehicle.px + ((vmap and vmap.world_mn_x or 1) - 1) * ts
             local wy   = vehicle.py + ((vmap and vmap.world_mn_y or 1) - 1) * ts
-            local event_data = { payout = final_payout, bonus = trip.speed_bonus, base = trip.base_payout, x = wx, y = wy }
+            local event_data = {
+                payout   = final_payout,
+                bonus    = trip.payout_forfeited and 0 or trip.speed_bonus,
+                base     = trip.payout_forfeited and 0 or trip.base_payout,
+                x        = wx,
+                y        = wy,
+                forfeited = trip.payout_forfeited or false,
+            }
             game.EventBus:publish("package_delivered", event_data)
             trip_index_to_remove = i
         else

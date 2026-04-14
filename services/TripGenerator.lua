@@ -92,6 +92,17 @@ function TripGenerator.generateTrip(client_plot, game, city_map, archetype_id)
     local new_trip = Trip:new(base_payout, speed_bonus)
     new_trip.scope = scope
     new_trip:addLeg(client_plot, dest_plot, cargo_size, "road")
+
+    -- Rush roll. Probability is driven entirely by per-archetype rush upgrades
+    -- (state.upgrades[id.."_rush_probability"], 0..1, additive). Archetypes
+    -- without rush upgrades purchased never roll Rush.
+    local rush_prob = math.min(1, upgrades[archetype.id .. "_rush_probability"] or 0)
+    if rush_prob > 0 and love.math.random() < rush_prob then
+        new_trip.is_rush     = true
+        new_trip.deadline    = love.timer.getTime() + (archetype.rush_deadline_seconds or 60)
+        new_trip.speed_bonus = new_trip.speed_bonus * (archetype.rush_bonus_multiplier or 1)
+    end
+
     return new_trip
 end
 

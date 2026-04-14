@@ -169,12 +169,40 @@ function Entities:update(dt, game)
 
     PathScheduler.flush()
 
-    -- Decay speed bonuses on pending (non-transit) trips.
-    for _, trip in ipairs(self.trips.pending) do
-        if not trip.is_in_transit then
+    -- Decay speed bonuses on pending (non-transit) trips, and expire
+    -- Rush trips past their deadline. Pending + expired → remove + publish;
+    -- in-transit + expired → flag payout_forfeited (consumed at delivery).
+    local now = love.timer.getTime()
+    for i = #self.trips.pending, 1, -1 do
+        local trip = self.trips.pending[i]
+        if trip.is_rush and trip.deadline and now > trip.deadline then
+            table.remove(self.trips.pending, i)
+            if trip.source_client and trip.source_client.cargo then
+                local c = trip.source_client.cargo
+                for j = #c, 1, -1 do
+                    if c[j] == trip then table.remove(c, j); break end
+                end
+            end
+            game.EventBus:publish("rush_trip_expired", { trip = trip })
+        elseif not trip.is_in_transit then
             local b = trip.speed_bonus - decay
             trip.speed_bonus = b < 0 and 0 or b
         end
+    end
+    -- Trips committed to a vehicle (queued or being carried) missed deadline:
+    -- set the forfeit flag (consumed at delivery). Vehicle still completes the
+    -- route; payout is zeroed at arrival.
+    local function maybeForfeit(trip)
+        if trip.is_rush and trip.deadline
+           and not trip.payout_forfeited
+           and now > trip.deadline then
+            trip.payout_forfeited = true
+            game.EventBus:publish("rush_trip_expired", { trip = trip, in_transit = true })
+        end
+    end
+    for _, vehicle in ipairs(self.vehicles) do
+        for _, trip in ipairs(vehicle.trip_queue or {}) do maybeForfeit(trip) end
+        for _, trip in ipairs(vehicle.cargo or {})       do maybeForfeit(trip) end
     end
 
     for _, client in ipairs(self.clients) do

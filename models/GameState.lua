@@ -35,10 +35,10 @@ function State:new(C, game)
     -- no archetype ids appear in this model — the loop is the source of truth.
     local Archetypes = require("data.client_archetypes")
     for _, a in ipairs(Archetypes.list) do
-        instance.upgrades[a.id .. "_spawn_rate_mult"]       = 1.0
-        instance.upgrades[a.id .. "_payout_mult"]           = 1.0
-        instance.upgrades[a.id .. "_cargo_size_bias"]       = 0
-        instance.upgrades[a.id .. "_rush_probability_mult"] = 1.0
+        instance.upgrades[a.id .. "_spawn_rate_mult"]   = 1.0
+        instance.upgrades[a.id .. "_payout_mult"]       = 1.0
+        instance.upgrades[a.id .. "_cargo_size_bias"]   = 0
+        instance.upgrades[a.id .. "_rush_probability"]  = 0   -- additive, 0..1; raised by per-archetype rush upgrades
     end
     
     instance.rush_hour = { active = false, timer = 0 }

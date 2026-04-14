@@ -44,11 +44,21 @@ local function serializeCargoTrips(cargo)
                 transport_mode = leg.transport_mode,
             })
         end
+        -- Rush deadline is stored as remaining-seconds so it survives a
+        -- love.timer.getTime() clock reset between sessions. Non-rush trips
+        -- omit the field entirely.
+        local deadline_remaining = nil
+        if t.is_rush and t.deadline then
+            deadline_remaining = math.max(0, t.deadline - love.timer.getTime())
+        end
         table.insert(out, {
-            scope       = t.scope,
-            base_payout = t.base_payout,
-            speed_bonus = t.speed_bonus,
-            legs        = legs,
+            scope              = t.scope,
+            base_payout        = t.base_payout,
+            speed_bonus        = t.speed_bonus,
+            legs               = legs,
+            is_rush            = t.is_rush or nil,
+            deadline_remaining = deadline_remaining,
+            payout_forfeited   = t.payout_forfeited or nil,
         })
     end
     return out
@@ -310,7 +320,12 @@ function SaveService.applySaveData(game, save_data)
                     trip:addLeg(leg.start_plot, leg.end_plot,
                                 leg.cargo_size, leg.transport_mode)
                 end
-                trip.source_client = new_client
+                trip.source_client    = new_client
+                trip.is_rush          = t_data.is_rush or false
+                trip.payout_forfeited = t_data.payout_forfeited or false
+                if trip.is_rush and t_data.deadline_remaining then
+                    trip.deadline = love.timer.getTime() + t_data.deadline_remaining
+                end
                 table.insert(new_client.cargo, trip)
                 table.insert(game.entities.trips.pending, trip)
             end

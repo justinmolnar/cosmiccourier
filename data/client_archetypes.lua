@@ -7,20 +7,26 @@
 -- appear in service/model code outside this file and data/upgrades.json.
 --
 -- Fields:
---   id                   — unique string; used as key in state.upgrades for
---                          per-archetype multipliers (e.g. "<id>_spawn_rate_mult")
---   display_name         — UI label
---   icon                 — emoji / glyph for UI
---   description          — one-line flavour text
---   spawn_zones          — list of zone ids (data/zones.json) where the archetype
---                          can be placed. Placement prefers these zones; falls back
---                          to any can_send plot if none available in the city.
---   cargo_size_range     — {min, max} inclusive; TripGenerator rolls uniformly.
---   dest_scope_weights   — weighted distribution of trip destination scope.
---   base_spawn_seconds   — {min, max} inclusive; base trip-timer interval.
---   payout_multiplier    — applied to base trip payout.
---   required_scope_tier  — license tier needed to buy this archetype at market.
---   market_cost          — flat cost at the market; no escalation per-buy.
+--   id                    — unique string; used as key in state.upgrades for
+--                           per-archetype multipliers (e.g. "<id>_spawn_rate_mult")
+--   display_name          — UI label
+--   icon                  — emoji / glyph for UI
+--   description           — one-line flavour text
+--   spawn_zones           — list of zone ids (data/zones.json) where the archetype
+--                           can be placed. Placement prefers these zones; falls back
+--                           to any can_send plot if none available in the city.
+--   cargo_size_range      — {min, max} inclusive; TripGenerator rolls uniformly.
+--   dest_scope_weights    — weighted distribution of trip destination scope.
+--   base_spawn_seconds    — {min, max} inclusive; base trip-timer interval.
+--   payout_multiplier     — applied to base trip payout.
+--   required_scope_tier   — license tier needed to buy this archetype at market.
+--   market_cost           — flat cost at the market; no escalation per-buy.
+--   rush_bonus_multiplier — applied to speed_bonus at Rush-trip creation.
+--   rush_deadline_seconds — hard deadline for Rush trips ($0 payout on expiry).
+--
+-- Rush probability is NOT on the archetype — it's driven entirely by per-archetype
+-- rush upgrades (state.upgrades[id.."_rush_probability"], 0..1, additive).
+-- Archetypes without rush upgrades purchased never spawn Rush trips.
 --
 -- All numeric values are placeholders; Phase 8 does the tuning pass.
 
@@ -38,6 +44,8 @@ local Archetypes = {
             payout_multiplier   = 1.20,
             required_scope_tier = 1,
             market_cost         = 150,
+            rush_bonus_multiplier = 2.5,
+            rush_deadline_seconds = 90,
         },
         {
             id                  = "restaurant",
@@ -51,6 +59,8 @@ local Archetypes = {
             payout_multiplier   = 0.85,
             required_scope_tier = 1,
             market_cost         = 100,
+            rush_bonus_multiplier = 3.0,
+            rush_deadline_seconds = 60,
         },
         {
             id                  = "retail",
@@ -65,6 +75,8 @@ local Archetypes = {
             payout_multiplier   = 1.00,
             required_scope_tier = 1,
             market_cost         = 200,
+            rush_bonus_multiplier = 2.0,
+            rush_deadline_seconds = 120,
         },
         {
             id                  = "warehouse",
@@ -78,6 +90,8 @@ local Archetypes = {
             payout_multiplier   = 2.50,
             required_scope_tier = 2,
             market_cost         = 800,
+            rush_bonus_multiplier = 2.5,
+            rush_deadline_seconds = 180,
         },
         {
             id                  = "factory",
@@ -91,6 +105,8 @@ local Archetypes = {
             payout_multiplier   = 4.00,
             required_scope_tier = 3,
             market_cost         = 2500,
+            rush_bonus_multiplier = 3.0,
+            rush_deadline_seconds = 240,
         },
     },
 }

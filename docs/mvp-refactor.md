@@ -443,6 +443,29 @@ Each archetype has its own config record with:
 - No archetype-specific deadline profiles. Deadlines are a two-tier system (regular / rush), with Rush probability driven by archetype upgrades.
 - Eating out-of-scope trips silently is intentional — keeps the pending queue clean and makes archetype/license matchup a real strategic choice.
 
+### Status: Implemented
+
+Shipped across commits `0e83947` (archetypes + trip generation + market UI + per-archetype upgrade scaffolds) and the Phase 9 completion pass (this commit: Rush/Deadline wiring).
+
+Work items 1–5 + target-state A/B + per-archetype upgrade routing all landed earlier. This pass closed the remaining work item 6 (Rush / Deadline):
+
+- `data/client_archetypes.lua` — per-archetype `rush_bonus_multiplier` and `rush_deadline_seconds` added. Rush probability itself is NOT on the archetype — it's driven entirely by per-archetype upgrades (state key `{id}_rush_probability`, additive 0..1, seeded at 0). Archetypes with zero rush upgrades never roll Rush.
+- `data/upgrades.json` — Rush scaffolds activated: effect_target renamed `_rush_probability_mult` → `_rush_probability`, description placeholder text "(Inactive until Rush system ships.)" removed. Existing `add_stat 0.05` semantics retained; two tiers per archetype → 10% max from upgrades.
+- `models/GameState.lua:36-42` — per-archetype seed updated to `_rush_probability = 0` (was `_rush_probability_mult = 1.0`).
+- `models/Trip.lua` — `is_rush` / `deadline` / `payout_forfeited` fields added as data-bag entries.
+- `services/TripGenerator.lua` — Rush roll block after cargo/scope rolls; sets `is_rush`, `deadline = now + archetype.rush_deadline_seconds`, multiplies `speed_bonus` by `rush_bonus_multiplier`.
+- `models/EntityManager.lua` — expiry pass in the existing `update()` loop. Pending rush + past deadline → remove from queue, remove from client cargo, publish `rush_trip_expired`. Vehicle-queued or in-transit rush + past deadline → set `payout_forfeited` flag, publish `rush_trip_expired` with `in_transit = true`.
+- `models/vehicles/vehicle_states.lua:365` — delivery payout zeroed if `trip.payout_forfeited`. Existing `package_delivered` event carries a `forfeited` bool for downstream consumers.
+- `views/tabs/TripsTab.lua` + `views/ComponentRenderer.lua` — Rush trips render with `⚡ RUSH` prefix, `warning`-styled orange text, and a live countdown (`Ns left`). Non-rush rows unchanged. Added a generic `warning` label style; reusable by any future gated/alert content.
+- `services/SaveService.lua` — `is_rush`, `payout_forfeited`, and `deadline_remaining` (remaining-seconds form, NOT absolute wall-clock) persisted per trip. On load, rebuilt as `love.timer.getTime() + remaining` so a Rush trip survives a session boundary without instant-expiring.
+
+### Deviations
+
+- **Rush probability lives in `state.upgrades`, not on the archetype.** The spec left the unlock mechanism open ("could be a card, an upgrade, or part of an archetype tree — decide during implementation"). Adopted: per-archetype upgrade tree with additive `_rush_probability` state. Cleaner than a baseline probability on the archetype plus a multiplier, because (a) it requires one data field not two, and (b) the zero-default means an un-upgraded archetype never spawns Rush — matching player expectation that they opt into the pressure.
+- **In-transit / queued expiry uses a `payout_forfeited` flag consumed at delivery**, rather than mid-transit interruption. Spec called for this behavior; the flag approach keeps path cleanup untouched.
+- **Expiry pass covers vehicle `trip_queue` as well as `cargo`.** A rush trip assigned but not yet picked up still expires if the vehicle can't start it in time — keeps player honest about assignment order under load.
+- **No dispatch property `trip.is_rush` added.** §2/§3 card authoring isn't shipped; a property addition in `data/dispatch_properties.lua` is the right move when the first rush-aware card is authored.
+
 ---
 
 ## Out of Scope (Explicitly)

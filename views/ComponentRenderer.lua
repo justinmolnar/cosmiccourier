@@ -120,12 +120,15 @@ function CR._button(comp, px, pw, p, y, game)
         elseif style == "heading" then
             love.graphics.setFont(game.fonts.ui)
             love.graphics.setColor(0.7, 0.7, 0.9)
+        elseif style == "warning" then
+            love.graphics.setFont(game.fonts.ui)
+            love.graphics.setColor(1.0, 0.65, 0.1)
         else
             love.graphics.setFont(game.fonts.ui)
             love.graphics.setColor(1, 1, 1)
         end
 
-        local indent = (style == "body" or style == "heading") and 4 or 10
+        local indent = (style == "body" or style == "heading" or style == "warning") and 4 or 10
         love.graphics.printf(line.text or "", px + p + indent, cursor, pw - p * 2 - indent - 4, "left")
         cursor = cursor + lh
     end
