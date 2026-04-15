@@ -2,6 +2,17 @@
 local Vehicle = {}
 Vehicle.__index = Vehicle
 
+-- Module-level id counter. Persisted/restored by SaveService.
+local _next_id = 1
+
+function Vehicle.getNextId()     return _next_id end
+function Vehicle.setNextId(n)    _next_id = n    end
+function Vehicle.allocateId()
+    local id = _next_id
+    _next_id = _next_id + 1
+    return id
+end
+
 local _States
 local PathfindingService = require("services.PathfindingService")
 local FuelService        = require("services.FuelService")
@@ -314,5 +325,115 @@ function Vehicle:updateAbstracted(dt, game)
     end
 end
 
+
+-- ─── Serialization (data-driven) ─────────────────────────────────────────────
+-- Every field on a Vehicle persists automatically EXCEPT those listed below.
+-- Adding a new data field to Vehicle:new costs nothing — it ships in the save.
+-- The two declarations here are:
+--   TRANSIENTS: runtime-only state that should NOT persist
+--   REFS:       fields that contain entity refs — saved as ids/uids
+--
+-- Mid-mutation states (DoPickup / DoDropoff) collapse to DecideNextAction on
+-- save so their non-idempotent :enter doesn't re-run at load.
+local NONIDEMPOTENT_STATES = { DoPickup = true, DoDropoff = true }
+
+Vehicle.TRANSIENTS = {
+    -- Computed from VEHICLES config on :new — regenerated, not persisted.
+    type_upper = true, icon = true, base_speed = true,
+    pathfinding_costs = true, transport_mode = true,
+    -- Pixel / path caches — derived from grid_anchor + state on restore.
+    px = true, py = true,
+    path = true, path_i = true,
+    smooth_path = true, smooth_path_i = true,
+    current_path_eta = true,
+    pathfinding_bounds = true,
+    _path_pending = true,
+    -- Rendering-only ephemera.
+    visible = true,
+    speech_bubble = true, flash = true, color_override = true,
+    -- Model refs handled by custom fields below.
+    state = true, previous_state = true,
+    depot = true,       -- replaced by depot_id via REFS
+    -- depot_plot is redundant with depot.plot — skip to avoid drift.
+    depot_plot = true,
+    -- Timestamps suppressed for rate-limited logging; not gameplay state.
+    _pf_err_ = true,
+}
+
+Vehicle.REFS = {
+    -- `depot` (instance) ⇄ `depot_id` (string key). The live field is `depot`
+    -- (excluded via TRANSIENTS); the serialized key is `depot_id` — handled
+    -- in :serialize / fromSerialized below instead of via AutoSerializer.REFS
+    -- because the serialized name differs from the live name.
+    trip_queue = { kind = "uid", list = true },
+    cargo      = { kind = "uid", list = true },
+}
+
+local AutoSerializer = require("services.AutoSerializer")
+
+-- Build a state-object → table-key map. The state machine is keyed by names
+-- like "GoToDropoff" but each state's `.name` field is a display string
+-- ("To Dropoff"). Saves must store the table key, because fromSerialized looks
+-- states up by key (`_States[data.state_key]`).
+local _state_key_by_obj
+local function stateKeyOf(stateObj)
+    if not stateObj then return "Idle" end
+    if not _state_key_by_obj then
+        if not _States then _States = require("models.vehicles.vehicle_states") end
+        _state_key_by_obj = {}
+        for k, s in pairs(_States) do
+            if type(s) == "table" then _state_key_by_obj[s] = k end
+        end
+    end
+    return _state_key_by_obj[stateObj] or "Idle"
+end
+
+function Vehicle:serialize()
+    local out = AutoSerializer.serialize(self, Vehicle.TRANSIENTS, Vehicle.REFS)
+    -- Cross-ref fields whose live name differs from the save name.
+    out.depot_id   = self.depot and self.depot.id or nil
+    out.state_name = stateKeyOf(self.state)
+    if NONIDEMPOTENT_STATES[out.state_name] then
+        out.state_name = "DecideNextAction"
+    end
+    out.previous_state_name = self.previous_state and stateKeyOf(self.previous_state) or nil
+    return out
+end
+
+function Vehicle.fromSerialized(data, game, depots_by_id, trips_by_uid)
+    if not _States then _States = require("models.vehicles.vehicle_states") end
+    local depot = depots_by_id[data.depot_id]
+    if not depot then
+        print("Vehicle.fromSerialized: depot_id " .. tostring(data.depot_id) .. " not found")
+        return nil
+    end
+    local instance = Vehicle:new(data.id, depot, game, data.type)
+
+    -- Pour everything back on (refs resolved through trips_by_uid).
+    local function resolver(kind, id)
+        if kind == "uid" then return trips_by_uid[id] end
+        return nil
+    end
+    AutoSerializer.apply(instance, data, Vehicle.REFS, resolver)
+
+    -- Overwrite with live-only fields that AutoSerializer won't know how to
+    -- reattach (Vehicle:new set them to defaults; save data was already
+    -- applied above — this is for computed/pixel state).
+    if instance.grid_anchor then
+        local map = game.maps[instance.operational_map_key]
+        if map and map.getNodePixel then
+            instance.px, instance.py = map:getNodePixel(instance.grid_anchor)
+        end
+    end
+
+    -- Re-enter state so state-specific pathfinding gets requested fresh.
+    local StateObj = _States[data.state_name or "Idle"] or _States.Idle
+    instance:changeState(StateObj, game)
+    if data.previous_state_name and _States[data.previous_state_name] then
+        instance.previous_state = _States[data.previous_state_name]
+    end
+
+    return instance
+end
 
 return Vehicle

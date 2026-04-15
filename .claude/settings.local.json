@@ -54,7 +54,9 @@
       "Bash(grep -l \"client\" data/buildings/*.json)",
       "Bash(wc *)",
       "Bash(ls data/datagrids)",
-      "Bash(mkdir -p data/datagrids)"
+      "Bash(mkdir -p data/datagrids)",
+      "Bash(sed 's/\".*//')",
+      "Bash(ls *)"
     ]
   }
 }

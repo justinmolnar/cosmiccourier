@@ -130,8 +130,9 @@ function Entities:addVehicle(game, vehicleType, target_depot)
     end
 
     if not depot then return end
-    
-    local new_id = #self.vehicles + 1
+
+    local Vehicle = require("models.vehicles.Vehicle")
+    local new_id = Vehicle.allocateId()
     local new_vehicle = VehicleFactory.createVehicle(vehicleType, new_id, depot, game)
     table.insert(self.vehicles, new_vehicle)
     table.insert(depot.assigned_vehicles, new_vehicle)

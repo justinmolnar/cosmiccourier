@@ -234,47 +234,6 @@ function GameController:emergencyReset()
     end, "Emergency Reset")
 end
 
--- Save game state
-function GameController:saveGame(filename)
-    self.game.error_service.withErrorHandling(function()
-        local SaveService = require("services.SaveService")
-        SaveService.saveGame(self.game, filename or "quicksave.json")
-        self.game.error_service.logInfo("GameController", "Game saved: " .. (filename or "quicksave.json"))
-        
-        -- Publish save event
-        self.game.EventBus:publish("game_saved", {filename = filename})
-        
-    end, "Save Game")
-end
-
--- Load game state
-function GameController:loadGame(filename)
-    self.game.error_service.withErrorHandling(function()
-        local SaveService = require("services.SaveService")
-        local save_data = SaveService.loadGame(filename or "quicksave.json")
-        
-        if save_data then
-            SaveService.applySaveData(self.game.state, save_data)
-            self.game.error_service.logInfo("GameController", "Game loaded: " .. (filename or "quicksave.json"))
-            
-            -- Publish load event
-            self.game.EventBus:publish("game_loaded", {filename = filename})
-        else
-            self.game.error_service.logWarning("GameController", "Failed to load game: " .. (filename or "quicksave.json"))
-        end
-        
-    end, "Load Game")
-end
-
--- Quick save/load functionality
-function GameController:quickSave()
-    self:saveGame("quicksave.json")
-end
-
-function GameController:quickLoad()
-    self:loadGame("quicksave.json")
-end
-
 -- Debug functionality
 function GameController:toggleDebugMode()
     self.game.debug_mode = not self.game.debug_mode
@@ -308,22 +267,6 @@ function GameController:getGameStats()
     end
     
     return stats
-end
-
--- Clean shutdown
-function GameController:shutdown()
-    self.game.error_service.logInfo("GameController", "Game controller shutting down...")
-    
-    -- Save current state
-    self:saveGame("autosave.json")
-    
-    -- Clean up any resources
-    self.game.error_service.withErrorHandling(function()
-        -- Force final garbage collection
-        collectgarbage("collect")
-        
-        self.game.error_service.logInfo("GameController", "Game controller shutdown complete")
-    end, "Controller Shutdown")
 end
 
 return GameController

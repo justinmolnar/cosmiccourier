@@ -158,6 +158,53 @@ function BuildingService.canPlace(building_cfg, gx, gy, umap)
     return validator(gx, gy, umap)
 end
 
+-- ─── Serialization (data-driven) ─────────────────────────────────────────────
+-- Buildings are plain tables (not class instances). Persist everything on
+-- each building record EXCEPT transients; `cfg` is a table ref so it's
+-- flattened to `cfg_id`. Adding new data fields to the `building_ref` in
+-- BuildingService.place ships them automatically.
+
+local BUILDING_TRANSIENTS = {
+    cfg      = true, -- replaced by cfg_id below
+    city     = true, -- identity info; serialize keeps it as `city_idx`
+}
+local BUILDING_REFS = {
+    cargo = { kind = "uid", list = true },
+}
+
+local AutoSerializer = require("services.AutoSerializer")
+
+function BuildingService.serializeAll(game)
+    local out = {}
+    for city_idx, blist in pairs(game.buildings or {}) do
+        for _, b in ipairs(blist) do
+            local rec = AutoSerializer.serialize(b, BUILDING_TRANSIENTS, BUILDING_REFS)
+            rec.cfg_id   = b.cfg and b.cfg.id or nil
+            rec.city_idx = city_idx
+            table.insert(out, rec)
+        end
+    end
+    return out
+end
+
+function BuildingService.restoreAll(game, data, trips_by_uid)
+    game.buildings = {}
+    for _, rec in ipairs(data or {}) do
+        local cfg = game.C.BUILDINGS and game.C.BUILDINGS[rec.cfg_id]
+        if cfg then
+            BuildingService.place(cfg, rec.x, rec.y, rec.city_idx, game)
+            local blist = game.buildings[rec.city_idx]
+            local ref = blist and blist[#blist]
+            if ref then
+                local function resolver(kind, id)
+                    if kind == "uid" then return trips_by_uid[id] end
+                end
+                AutoSerializer.apply(ref, rec, BUILDING_REFS, resolver)
+            end
+        end
+    end
+end
+
 -- Place a building at unified sub-cell (gx, gy) in city city_idx.
 -- Registers the building as an entrance and generates any new trunks.
 function BuildingService.place(building_cfg, gx, gy, city_idx, game)

@@ -2,6 +2,17 @@
 local State = {}
 State.__index = State
 
+-- Data-driven save: everything on a State instance persists EXCEPT these.
+-- Adding a new persistable field to GameState:new costs zero — it ships.
+-- Only add to this list when introducing a computed/ref/transient field.
+State.TRANSIENTS = {
+    Upgrades       = true,  -- static module reference (data.upgrades)
+    upgrade_system = true,  -- runtime system instance
+    income_history = true,  -- rolling per-session stats (not persisted)
+    trip_creation_history = true,
+}
+State.REFS = {}  -- no entity refs on state
+
 function State:new(C, game)
     local instance = setmetatable({}, State)
 
@@ -72,6 +83,28 @@ end
 
 function State:isUpgradeAvailable(upgradeId)
     return self.upgrade_system:isUpgradeAvailable(upgradeId)
+end
+
+-- Data-driven serialize / apply — same pattern as the models.
+function State:serialize()
+    local AutoSerializer = require("services.AutoSerializer")
+    return AutoSerializer.serialize(self, State.TRANSIENTS, State.REFS)
+end
+
+function State:applySerialized(data)
+    -- `upgrades` merges (so new-since-save fields keep their default zeros);
+    -- everything else wholesale-replaces.
+    for k, v in pairs(data or {}) do
+        if v == nil then
+            -- skip
+        elseif State.TRANSIENTS and State.TRANSIENTS[k] then
+            -- skip — not meant to be restored
+        elseif k == "upgrades" and type(v) == "table" and type(self.upgrades) == "table" then
+            for uk, uv in pairs(v) do self.upgrades[uk] = uv end
+        else
+            self[k] = v
+        end
+    end
 end
 
 function State:addMoney(amount)

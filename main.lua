@@ -1,6 +1,6 @@
 local function _initCore()
-    love.math.setRandomSeed(os.time(), math.floor(os.clock() * 1000000))
-
+    -- RNG seeding moved to just-before-worldgen (see love.load) so save-replay
+    -- can set a specific seed. On fresh boot we still use os.time.
     local ErrorService = require("services.ErrorService")
     ErrorService.initialize({
         log_level = 2,
@@ -71,18 +71,13 @@ local function _buildGame(C)
     return Game
 end
 
-local function _loadSave(Game)
-    local SaveService = require("services.SaveService")
-    local save_data = SaveService.loadGame()
-
+-- Read the save file into memory (if any). Creates Game.state. Does NOT
+-- restore entities — that happens post-`_initWorld` via applyEntities.
+-- Returns the save table, or nil.
+local function _readSave(Game)
     Game.state = require("models.GameState"):new(Game.C, Game)
-
-    if save_data then
-        Game.error_service.withErrorHandling(function()
-            SaveService.applySaveData(Game, save_data)
-            Game.error_service.logInfo("Main", "Save game loaded successfully")
-        end, "Save Game Loading")
-    end
+    local SaveService = require("services.SaveService")
+    return SaveService.loadGame()   -- nil or decoded table
 end
 
 local function _initSystems(Game)
@@ -160,6 +155,9 @@ local function _initInputDispatcher(Game)
         Game.input_dispatcher:on(r[1], nil, r[3])
     end
 
+    -- Always run entities:init — it spawns a starter depot/client/vehicle.
+    -- On save-load, applyEntities (called after _initWorld) clears these and
+    -- replaces them with the persisted set.
     Game.entities:init(Game)
 end
 
@@ -189,21 +187,16 @@ end
 local function _initWorld(Game)
     Game.error_service.withErrorHandling(function()
         local wsc = Game.world_sandbox_controller
-        wsc.params.seed_x = love.math.random() * 1000
-        wsc.params.seed_y = love.math.random() * 1000
+        -- Only draw fresh seed_x/seed_y on a brand-new world. On save-replay
+        -- they're already restored in wsc.params.
+        if not wsc.params.seed_x then wsc.params.seed_x = love.math.random() * 1000 end
+        if not wsc.params.seed_y then wsc.params.seed_y = love.math.random() * 1000 end
         wsc:generate()
         wsc:place_cities()
         wsc:build_highways()
         wsc:regen_bounds()
         wsc:sendToGame()
     end, "World Auto-Generation")
-end
-
-local function _initAutoSave(Game)
-    local auto_save_interval = Game.config.get("ui", "auto_save_interval")
-    if auto_save_interval > 0 then
-        Game.auto_save_timer = auto_save_interval
-    end
 end
 
 -- =============================================================================
@@ -213,30 +206,39 @@ function love.load()
     local Game = _buildGame(C)
     collectgarbage("setpause", 300)
     collectgarbage("setstepmul", 400)
-    _loadSave(Game)
+
+    local save = _readSave(Game)
+    Game._save_loaded = save ~= nil
     _initSystems(Game)
     _initInputDispatcher(Game)
     _loadFonts(Game)
+
+    -- Seed the RNG + prime worldgen params. On load, restore the saved seed so
+    -- worldgen re-produces the same world. On fresh boot, pick a seed now and
+    -- stash it on state so the first F5 captures it.
+    local SaveService = require("services.SaveService")
+    if save then
+        SaveService.primeWorld(Game, save)
+    else
+        local a = os.time()
+        local b = math.floor(os.clock() * 1000000)
+        love.math.setRandomSeed(a, b)
+        Game.state._world_seed = { a = a, b = b }
+    end
+
     _initWorld(Game)
-    _initAutoSave(Game)
+
+    if save then
+        Game.error_service.withErrorHandling(function()
+            SaveService.applyEntities(Game, save)
+        end, "Save Game Loading")
+    end
     Game.error_service.logInfo("Main", "Game initialization completed successfully")
 end
 
 function love.update(dt)
     Game.game_controller:update(dt)
     if Game.info_feed then Game.info_feed:update(dt) end
-
-    if Game.auto_save_timer then
-        Game.auto_save_timer = Game.auto_save_timer - dt
-        if Game.auto_save_timer <= 0 then
-            local SaveService = require("services.SaveService")
-            Game.error_service.withErrorHandling(function()
-                SaveService.saveGame(Game, "autosave.json")
-            end, "Auto Save")
-
-            Game.auto_save_timer = Game.config.get("ui", "auto_save_interval")
-        end
-    end
 end
 
 function love.draw()
@@ -267,12 +269,6 @@ function love.textinput(text)          Game.input_dispatcher:dispatch("textinput
 
 function love.quit()
     Game.error_service.logInfo("Main", "Game shutting down...")
-
-    local SaveService = require("services.SaveService")
-    Game.error_service.withErrorHandling(function()
-        SaveService.saveGame(Game, "lastsave.json")
-        Game.error_service.logInfo("Main", "Game state saved on exit")
-    end, "Exit Save")
 
     Game.error_service.withErrorHandling(function()
         Game.config.saveUserConfig()

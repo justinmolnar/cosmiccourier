@@ -6,8 +6,16 @@ local Archetypes    = require("data.client_archetypes")
 local Client = {}
 Client.__index = Client
 
+-- Module-level id counter. Persisted/restored by SaveService.
+local _next_id = 1
+
+function Client.getNextId()    return _next_id end
+function Client.setNextId(n)   _next_id = n    end
+
 function Client:new(plot, game, city_map, archetype_id)
     local instance = setmetatable({}, Client)
+    instance.id       = _next_id
+    _next_id = _next_id + 1
     instance.plot     = plot  -- unified sub-cell coords
     instance.city_map = city_map or (game.maps and game.maps.city)
     local umap = game.maps and game.maps.unified
@@ -93,6 +101,37 @@ function Client:recalculatePixelPosition(game)
     if umap then
         self.px, self.py = umap:getPixelCoords(self.plot.x, self.plot.y)
     end
+end
+
+-- ─── Serialization (data-driven) ─────────────────────────────────────────────
+Client.TRANSIENTS = {
+    -- Derived from plot on :recalculatePixelPosition.
+    px = true, py = true,
+    -- Refs to model objects (reconstructed via game.maps / archetype id).
+    city_map = true,
+}
+Client.REFS = {
+    cargo = { kind = "uid", list = true },
+}
+
+local AutoSerializer = require("services.AutoSerializer")
+
+function Client:serialize()
+    return AutoSerializer.serialize(self, Client.TRANSIENTS, Client.REFS)
+end
+
+function Client.fromSerialized(data, game, trips_by_uid)
+    local cmap = game.maps and game.maps.city
+    local instance = Client:new(data.plot, game, cmap, data.archetype)
+    local function resolver(kind, id)
+        if kind == "uid" then return trips_by_uid[id] end
+    end
+    AutoSerializer.apply(instance, data, Client.REFS, resolver)
+    -- Any trip whose source_client was this client needs its back-ref set.
+    for _, trip in ipairs(instance.cargo or {}) do
+        trip.source_client = instance
+    end
+    return instance
 end
 
 return Client

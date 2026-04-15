@@ -34,7 +34,6 @@ local DEFAULT_CONFIG = {
     ui = {
         show_tooltips = true,
         tooltip_delay = 0.5,
-        auto_save_interval = 300, -- 5 minutes
         show_fps = false,
         sidebar_auto_collapse = false,
         animation_speed = 1.0

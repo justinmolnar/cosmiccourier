@@ -61,4 +61,28 @@ function Depot:getDistrict(game)
     return nil
 end
 
+-- ─── Serialization (data-driven) ─────────────────────────────────────────────
+Depot.TRANSIENTS = {
+    capacity = true,         -- regenerated from building config on :new
+    assigned_vehicles = true, -- reattached by Vehicle restore
+}
+Depot.REFS = {
+    cargo = { kind = "uid", list = true },
+}
+
+local AutoSerializer = require("services.AutoSerializer")
+
+function Depot:serialize()
+    return AutoSerializer.serialize(self, Depot.TRANSIENTS, Depot.REFS)
+end
+
+function Depot.fromSerialized(data, game, trips_by_uid)
+    local instance = Depot:new(data.id, data.plot, game)
+    local function resolver(kind, id)
+        if kind == "uid" then return trips_by_uid[id] end
+    end
+    AutoSerializer.apply(instance, data, Depot.REFS, resolver)
+    return instance
+end
+
 return Depot

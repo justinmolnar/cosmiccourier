@@ -52,10 +52,17 @@ encode = function(val, pretty, level)
             end
             return "[" .. nl .. table.concat(items, "," .. nl) .. nl .. pad .. "]"
         else
+            -- Non-array table → JSON object. Stringify integer keys too so
+            -- sparse integer-keyed tables (district_map[sci], zone_seg_v[y][x],
+            -- road_nodes[ry][rx], etc.) round-trip; SaveService's coerceIntKeys
+            -- flips them back to numbers on decode.
             local items = {}
             for k, v in pairs(val) do
-                if type(k) == "string" then
+                local kt = type(k)
+                if kt == "string" then
                     table.insert(items, pad1 .. encode_string(k) .. sep .. encode(v, pretty, level + 1))
+                elseif kt == "number" then
+                    table.insert(items, pad1 .. encode_string(tostring(k)) .. sep .. encode(v, pretty, level + 1))
                 end
             end
             if #items == 0 then return "{}" end

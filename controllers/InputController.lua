@@ -20,6 +20,22 @@ local HOTKEYS = { ["1"]=true,["2"]=true,["3"]=true,["4"]=true,["5"]=true,
                   ["6"]=true,["7"]=true,["8"]=true,["9"]=true,["0"]=true,
                   ["space"]=true }
 
+-- Save-system keybindings. Single file, manual save / delete only.
+local SAVE_KEY         = "f5"
+local DELETE_KEY       = "f9"
+local SAVE_FILENAME    = "savegame.json"
+
+local COLOR_OK     = { 0.3, 1.0, 0.45 }
+local COLOR_ERR    = { 1.0, 0.3, 0.3 }
+local COLOR_INFO   = { 0.6, 0.75, 1.0 }
+local COLOR_MUTED  = { 0.7, 0.7, 0.7 }
+
+local function pushFeed(game, text, color)
+    if game.info_feed and game.info_feed.push then
+        game.info_feed:push({ text = text, color = color })
+    end
+end
+
 function InputController:keypressed(key)
     -- Route to dispatch input handlers: search field first, then number slot.
     local DT = require("views.tabs.DispatchTab")
@@ -58,6 +74,37 @@ function InputController:keypressed(key)
     -- F3: Minecraft-style debug overlay
     if key == "f3" then
         self.game.debug_f3 = not (self.game.debug_f3 or false)
+        return
+    end
+
+    -- F5: Save   /   F9: Delete save
+    if key == SAVE_KEY then
+        local SaveService = require("services.SaveService")
+        local ok, err = SaveService.saveGame(self.game, SAVE_FILENAME)
+        if ok then
+            local money    = self.game.state.money or 0
+            local clients  = (self.game.entities and #self.game.entities.clients) or 0
+            local depots   = (self.game.entities and #self.game.entities.depots)  or 0
+            pushFeed(self.game, string.format("Saved  ·  $%d  ·  %d clients  ·  %d depots",
+                math.floor(money), clients, depots), COLOR_OK)
+        else
+            pushFeed(self.game, "Save failed: " .. tostring(err or "unknown error"), COLOR_ERR)
+        end
+        return
+    end
+
+    if key == DELETE_KEY then
+        local info = love.filesystem.getInfo(SAVE_FILENAME)
+        if not info then
+            pushFeed(self.game, "No save file to delete", COLOR_MUTED)
+            return
+        end
+        local SaveService = require("services.SaveService")
+        if SaveService.deleteSave(SAVE_FILENAME) then
+            pushFeed(self.game, "Save file deleted", COLOR_INFO)
+        else
+            pushFeed(self.game, "Delete failed", COLOR_ERR)
+        end
         return
     end
 
