@@ -380,11 +380,23 @@ local function sort_queue(block, ctx)
     return false
 end
 
+-- Cancelled trips are destroyed, so they also leave the source client's
+-- inventory. (ctx.trip is handled by the caller's normal cancel flow.)
+local function removeFromSourceCargo(trip)
+    local sc = trip.source_client
+    if sc and sc.cargo then
+        for j = #sc.cargo, 1, -1 do
+            if sc.cargo[j] == trip then table.remove(sc.cargo, j); break end
+        end
+    end
+end
+
 local function cancel_all_scope(block, ctx)
     local scope   = block.slots.scope or "district"
     local pending = ctx.game.entities.trips.pending
     for i = #pending, 1, -1 do
         if pending[i] ~= ctx.trip and (pending[i].scope or "") == scope then
+            removeFromSourceCargo(pending[i])
             table.remove(pending, i)
         end
     end
@@ -397,6 +409,7 @@ local function cancel_all_wait(block, ctx)
     local pending = ctx.game.entities.trips.pending
     for i = #pending, 1, -1 do
         if pending[i] ~= ctx.trip and cmp(pending[i].wait_time or 0, op, secs) then
+            removeFromSourceCargo(pending[i])
             table.remove(pending, i)
         end
     end

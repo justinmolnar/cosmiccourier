@@ -42,10 +42,14 @@ function AutoDispatcher:dispatch(game)
             local trip = game.entities.trips.pending[i]
             if claimed[trip] or cancelled[trip] then
                 table.remove(game.entities.trips.pending, i)
-                local sc = trip.source_client
-                if sc and sc.cargo then
-                    for j = #sc.cargo, 1, -1 do
-                        if sc.cargo[j] == trip then table.remove(sc.cargo, j); break end
+                -- Cancelled trips are destroyed, so they also leave the source
+                -- client's inventory. Claimed trips stay — DoPickup clears them.
+                if cancelled[trip] then
+                    local sc = trip.source_client
+                    if sc and sc.cargo then
+                        for j = #sc.cargo, 1, -1 do
+                            if sc.cargo[j] == trip then table.remove(sc.cargo, j); break end
+                        end
                     end
                 end
             end

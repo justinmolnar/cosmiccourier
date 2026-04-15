@@ -38,4 +38,20 @@ return {
         scope_tier   = 3,
         purchasable  = true,
     },
+    {
+        id           = "continent_license",
+        display_name = "Continent License",
+        description  = "Operate across the continent.",
+        cost         = 100000,
+        scope_tier   = 4,
+        purchasable  = true,
+    },
+    {
+        id           = "world_license",
+        display_name = "World License",
+        description  = "Unrestricted worldwide operations.",
+        cost         = 400000,
+        scope_tier   = 5,
+        purchasable  = true,
+    },
 }

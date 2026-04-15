@@ -18,6 +18,30 @@ function UIController:handleMouseDown(x, y, button)
     local ui_manager = Game.ui_manager
     local panel      = ui_manager.panel
 
+    -- 0a-pre. DataGrid filter popup (highest-priority overlay, parallel to chooser).
+    if DataGrid.isFilterPopupOpen() then
+        local FilterPopup = require("views.FilterPopup")
+        local popup       = DataGrid.filter_popup
+        local kind, value = FilterPopup.hitTest(popup, x, y)
+        if kind == "outside" then
+            DataGrid.closeFilterPopup()
+            return true
+        elseif kind == "clear" then
+            FilterPopup.clearAll(popup, Game)
+            return true
+        elseif kind == "search" then
+            popup.search_focused = true
+            return true
+        elseif kind == "toggle_value" then
+            FilterPopup.toggleValue(popup, value, Game)
+            return true
+        else
+            -- Inside but nothing hit — consume and drop search focus.
+            popup.search_focused = false
+            return true
+        end
+    end
+
     -- 0a. DataGrid column chooser popup (highest-priority overlay)
     if DataGrid.isChooserOpen() then
         local chooser = DataGrid.chooser
@@ -31,6 +55,10 @@ function UIController:handleMouseDown(x, y, button)
         end
         return true
     end
+
+    -- Blur any focused filter input on every click; focus gets re-seeded below
+    -- only if the click lands on a filter cell.
+    DataGrid.blurFilter(Game)
 
     -- 0. Active dropdown check (highest priority overlay)
     local DT = require("views.tabs.DispatchTab")
@@ -320,6 +348,12 @@ function UIController:handleMouseDown(x, y, button)
     elseif id == "datagrid_chooser" and button == 1 then
         -- Anchor the popup just below the chooser button (screen-space).
         DataGrid.openChooser(data.grid_id, data.source, x - 200, y + 4)
+
+    elseif id == "datagrid_filter_focus" and button == 1 then
+        DataGrid.focusFilter(data.grid_id, data.col_id, Game)
+
+    elseif id == "datagrid_filter_popup" and button == 1 then
+        DataGrid.openFilterPopup(data.grid_id, data.source, data.col_id, x, y + 4, Game)
 
     end
 

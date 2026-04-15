@@ -73,6 +73,10 @@ function Vehicle:new(id, depot, game, vehicleType)
     instance.last_trip_end_time = 0
     instance.trips_completed    = 0
 
+    -- Randomized driver name — simple first-last for now (no context signals).
+    local NameService  = require("services.NameService")
+    instance.driver_name = NameService.person()
+
     instance.state = nil
     instance:changeState(_States.Idle, game)
     instance.visible = true
@@ -155,21 +159,28 @@ end
 function Vehicle:unassign(game)
     if not _States then _States = require("models.vehicles.vehicle_states") end
     local BS = require("services.BuildingService")
-    -- Return trips to the building at their current leg's start_plot.
-    local function returnTrip(trip)
+    -- trip_queue: trip was never picked up, still sits in source_client.cargo.
+    -- Just re-add to the pending index so dispatch can claim it again.
+    for _, trip in ipairs(self.trip_queue) do
+        table.insert(game.entities.trips.pending, trip)
+    end
+    -- cargo: trip was picked up (removed from source_client.cargo). Re-deposit
+    -- at the current leg's start_plot holder. If that holder is the source
+    -- client, also re-add to pending (clients dispatch via pending). Waypoint
+    -- buildings dispatch via assign_from_building rules instead.
+    for _, trip in ipairs(self.cargo) do
+        trip:thaw()
         local leg = trip.legs and trip.legs[trip.current_leg]
         local sp  = leg and leg.start_plot
-        local building = sp and BS.findAtPlot(sp.x, sp.y, game)
-        if building then
-            BS.depositTrip(building, trip, game)
+        local holder = sp and BS.findAtPlot(sp.x, sp.y, game)
+        if holder then
+            BS.depositTrip(holder, trip, game)
+            if holder == trip.source_client then
+                table.insert(game.entities.trips.pending, trip)
+            end
         else
             table.insert(game.entities.trips.pending, trip)
         end
-    end
-    for _, trip in ipairs(self.trip_queue) do returnTrip(trip) end
-    for _, trip in ipairs(self.cargo) do
-        trip:thaw()
-        returnTrip(trip)
     end
     self.trip_queue     = {}
     self.cargo          = {}

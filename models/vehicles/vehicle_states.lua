@@ -229,7 +229,17 @@ function States.DoPickup:enter(vehicle, game)
         end
     end
     vehicle.trip_queue = remaining_trips
+    local BS = require("services.BuildingService")
     for _, trip in ipairs(trips_to_pickup) do
+        -- Trip leaves its holder's inventory (source client for leg 1, or a
+        -- waypoint building for later legs) and becomes vehicle cargo.
+        local sc = trip.source_client
+        if sc and sc.cargo then
+            for j = #sc.cargo, 1, -1 do
+                if sc.cargo[j] == trip then table.remove(sc.cargo, j); break end
+            end
+        end
+        BS.withdrawTripFromAny(trip, game)
         -- FREEZE the trip as it enters vehicle cargo
         trip:freeze()
         table.insert(vehicle.cargo, trip)

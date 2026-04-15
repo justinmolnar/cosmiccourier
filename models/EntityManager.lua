@@ -102,6 +102,18 @@ function Entities:addClient(game, depot, archetype_id)
         y = (cmap.world_mn_y - 1) * 3 + plot_local.y,
     } or plot_local
     local new_client = Client:new(plot, game, cmap, archetype_id)
+
+    -- Generate an archetype-appropriate, context-aware business name.
+    local NameService        = require("services.NameService")
+    local NameContextService = require("services.NameContextService")
+    local ok, tmpl = pcall(require, "data.names.templates.client." .. archetype_id)
+    if ok and tmpl then
+        self._used_names = self._used_names or {}
+        local ctx = NameContextService.forBuilding(plot, cmap, game)
+        local success, name = pcall(NameService.generate, tmpl, ctx, self._used_names)
+        if success then new_client.name = name end
+    end
+
     table.insert(self.clients, new_client)
 end
 

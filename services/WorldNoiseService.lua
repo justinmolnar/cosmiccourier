@@ -1054,6 +1054,104 @@ local function classifyWaterTiles(w, h, pre_ridge, painted, p)
     return result
 end
 
+-- ── Phase 6: enrich continent / region entries with centroid + feature tags ──
+-- Derived from biome_data, heightmap, and the continent/region maps so the
+-- naming pass downstream has ready-made context signals without re-walking
+-- world cells.
+local function enrichGeography(continents, regions_list, continent_map, region_map,
+                               biome_data, heightmap, p, w, h)
+    local cont_acc, reg_acc = {}, {}
+    for _, c in ipairs(continents) do
+        cont_acc[c.id] = { count=0, sumx=0, sumy=0, mtn=0, coast=0,
+                           river=0, lake=0, forest=0, desert=0,
+                           cold=0, hot=0, wet=0 }
+    end
+    for rid, _ in pairs(regions_list) do
+        reg_acc[rid] = { count=0, sumx=0, sumy=0, mtn=0, coast=0,
+                         river=0, lake=0, forest=0, desert=0,
+                         cold=0, hot=0, wet=0 }
+    end
+
+    local DIRS4 = { {1,0},{-1,0},{0,1},{0,-1} }
+    for y = 1, h do
+        local base = (y - 1) * w
+        for x = 1, w do
+            local i   = base + x
+            local cid = continent_map[i] or 0
+            local rid = region_map[i]    or 0
+            local cacc = cid > 0 and cont_acc[cid] or nil
+            local racc = rid > 0 and reg_acc[rid]   or nil
+            if cacc or racc then
+                local b       = biome_data and biome_data[i]
+                local bname   = b and b.name or ""
+                local is_mtn  = bname == "Snow Cap" or bname == "Mountain Rock"
+                             or bname == "Frozen Rock"
+                             or bname:find("Highland", 1, true) ~= nil
+                local is_des  = bname == "Desert" or bname == "Semi-arid"
+                local is_for  = bname:find("Forest", 1, true) ~= nil
+                             or bname == "Jungle" or bname == "Woodland"
+                local is_cold = b and b.temp and b.temp <= 0.35 or false
+                local is_hot  = b and b.temp and b.temp >= 0.65 or false
+                local is_wet  = b and b.wet  and b.wet  >= 0.6  or false
+                local is_river = b and b.is_river or false
+                local is_lakv  = b and b.is_lake  or false
+
+                -- Ocean adjacency (land cell with any 4-neighbor below ocean_max).
+                local adj_ocean = false
+                if heightmap[y] and heightmap[y][x] and heightmap[y][x] > p.ocean_max then
+                    for _, d in ipairs(DIRS4) do
+                        local nx, ny = x + d[1], y + d[2]
+                        if nx >= 1 and nx <= w and ny >= 1 and ny <= h then
+                            local hv = heightmap[ny] and heightmap[ny][nx]
+                            if hv and hv <= p.ocean_max then
+                                adj_ocean = true; break
+                            end
+                        end
+                    end
+                end
+
+                local function accum(a)
+                    a.count = a.count + 1
+                    a.sumx  = a.sumx + x
+                    a.sumy  = a.sumy + y
+                    if is_mtn   then a.mtn    = a.mtn    + 1 end
+                    if is_des   then a.desert = a.desert + 1 end
+                    if is_for   then a.forest = a.forest + 1 end
+                    if is_cold  then a.cold   = a.cold   + 1 end
+                    if is_hot   then a.hot    = a.hot    + 1 end
+                    if is_wet   then a.wet    = a.wet    + 1 end
+                    if is_river then a.river  = a.river  + 1 end
+                    if is_lakv  then a.lake   = a.lake   + 1 end
+                    if adj_ocean then a.coast = a.coast  + 1 end
+                end
+                if cacc then accum(cacc) end
+                if racc then accum(racc) end
+            end
+        end
+    end
+
+    local function derive(acc, target)
+        if not acc or acc.count == 0 then
+            target.centroid = { cx = 0, cy = 0 }
+            return
+        end
+        target.centroid    = { cx = acc.sumx / acc.count, cy = acc.sumy / acc.count }
+        target.mountainous = acc.mtn    / acc.count >= 0.20
+        target.desert      = acc.desert / acc.count >= 0.25
+        target.forest      = acc.forest / acc.count >= 0.25
+        target.coastal     = acc.coast  / acc.count >= 0.04
+        target.near_river  = acc.river  > 0
+        target.near_lake   = acc.lake   > 0
+        target.cold        = acc.cold   / acc.count >= 0.35
+        target.hot         = acc.hot    / acc.count >= 0.35
+        target.wet         = acc.wet    / acc.count >= 0.40
+        target.lowland     = not target.mountainous
+                         and (acc.mtn / acc.count) <= 0.05
+    end
+    for _, c in ipairs(continents) do derive(cont_acc[c.id], c) end
+    for rid, r in pairs(regions_list) do derive(reg_acc[rid], r) end
+end
+
 -- ── Public entry point ────────────────────────────────────────────────────────
 function WorldNoiseService.generate(w, h, p)
     local heightmap, colormap, pre_ridge, moisture_map =
@@ -1068,6 +1166,9 @@ function WorldNoiseService.generate(w, h, p)
     local continent_colormap, continent_map, continents,
           region_colormap, region_map, regions_list =
         detectContinentsAndRegions(w, h, p, heightmap, pre_ridge, painted)
+
+    enrichGeography(continents, regions_list, continent_map, region_map,
+                    biome_data, heightmap, p, w, h)
 
     local water_tile_types = classifyWaterTiles(w, h, pre_ridge, painted, p)
 

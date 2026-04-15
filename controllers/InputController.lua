@@ -37,6 +37,11 @@ local function pushFeed(game, text, color)
 end
 
 function InputController:keypressed(key)
+    -- DataGrid filter row (focused cell or popup search) takes priority over
+    -- dispatch inputs and global hotkeys.
+    local DataGrid = require("views.DataGrid")
+    if DataGrid.routeKeyPressed(key, self.game) then return end
+
     -- Route to dispatch input handlers: search field first, then number slot.
     local DT = require("views.tabs.DispatchTab")
     if DT.handleSearchKey(key)  then return end
@@ -291,12 +296,29 @@ function InputController:keypressed(key)
 end
 
 function InputController:textinput(text)
+    local DataGrid = require("views.DataGrid")
+    if DataGrid.routeTextInput(text, self.game) then return end
+
     local DT = require("views.tabs.DispatchTab")
     if DT.handleSearchInput(text) then return end  -- palette search consumes first
     DT.handleTextInput(text)
 end
 
 function InputController:mousewheelmoved(x, y)
+    -- DataGrid filter popup scrolls its value list when open.
+    local DataGrid = require("views.DataGrid")
+    if DataGrid.isFilterPopupOpen() then
+        local mx, my = love.mouse.getPosition()
+        local popup  = DataGrid.filter_popup
+        local px, py = popup._draw_x or popup.x, popup._draw_y or popup.y
+        local pw, ph = popup._draw_w or 240, popup._draw_h or 240
+        if mx >= px and mx < px + pw and my >= py and my < py + ph then
+            local FilterPopup = require("views.FilterPopup")
+            FilterPopup.wheelmoved(popup, y)
+            return
+        end
+    end
+
     -- Modal gets scroll priority
     local mm = self.game.ui_manager and self.game.ui_manager.modal_manager
     if mm and mm:isActive() and mm.active_modal.wheelmoved then

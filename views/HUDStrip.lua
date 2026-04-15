@@ -21,6 +21,35 @@ function HUDStrip:registerOverlay(def)
     table.insert(self.overlays, def)
 end
 
+-- ─── Field helpers: support dotted paths like "state.show_map_labels" ───────
+
+local function splitPath(field)
+    local parts = {}
+    for p in string.gmatch(field, "[^.]+") do parts[#parts + 1] = p end
+    return parts
+end
+
+local function getField(game, field)
+    local parts = splitPath(field)
+    local t = game
+    for _, p in ipairs(parts) do
+        if type(t) ~= "table" then return nil end
+        t = t[p]
+    end
+    return t
+end
+
+local function setField(game, field, value)
+    local parts = splitPath(field)
+    local t = game
+    for i = 1, #parts - 1 do
+        local p = parts[i]
+        if type(t[p]) ~= "table" then return end
+        t = t[p]
+    end
+    t[parts[#parts]] = value
+end
+
 -- ─── Input ───────────────────────────────────────────────────────────────────
 
 function HUDStrip:handleMouseDown(x, y, game)
@@ -28,7 +57,7 @@ function HUDStrip:handleMouseDown(x, y, game)
     for _, ov in ipairs(self.overlays) do
         if x >= bx and x < bx + BTN and y >= by and y < by + BTN then
             if not ov.locked then
-                game[ov.field] = not (game[ov.field] or false)
+                setField(game, ov.field, not (getField(game, ov.field) or false))
             end
             return true
         end
@@ -40,7 +69,7 @@ end
 function HUDStrip:handleKey(key, game)
     for _, ov in ipairs(self.overlays) do
         if ov.key == key and not ov.locked then
-            game[ov.field] = not (game[ov.field] or false)
+            setField(game, ov.field, not (getField(game, ov.field) or false))
             return true
         end
     end
@@ -55,7 +84,7 @@ function HUDStrip:draw(game)
     local mx, my = love.mouse.getPosition()
 
     for _, ov in ipairs(self.overlays) do
-        local active  = game[ov.field] or false
+        local active  = getField(game, ov.field) or false
         local hovered = mx >= bx and mx < bx + BTN and my >= by and my < by + BTN
 
         -- Background

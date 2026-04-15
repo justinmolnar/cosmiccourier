@@ -110,6 +110,13 @@ local function _initSystems(Game)
         key     = "p",
         field   = "debug_pickup_locations",
     })
+    Game.hud_strip:registerOverlay({
+        id      = "map_labels",
+        icon    = "🏷️",
+        tooltip = "Place labels (cities / regions / continents)",
+        key     = "l",
+        field   = "state.show_map_labels",
+    })
 
     -- Information feed (event log, bottom-left of world view)
     Game.info_feed = require("views.InformationFeed"):new(Game)

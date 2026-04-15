@@ -14,13 +14,15 @@ end
 function UIConfigService.getGridConfig(game, grid_id)
     local root = ensureRoot(game)
     root.datagrids[grid_id] = root.datagrids[grid_id] or {
-        widths = {},
-        hidden = {},
-        sort   = nil,
+        widths  = {},
+        hidden  = {},
+        sort    = nil,
+        filters = {},
     }
     local cfg = root.datagrids[grid_id]
-    cfg.widths = cfg.widths or {}
-    cfg.hidden = cfg.hidden or {}
+    cfg.widths  = cfg.widths  or {}
+    cfg.hidden  = cfg.hidden  or {}
+    cfg.filters = cfg.filters or {}
     return cfg
 end
 
@@ -45,6 +47,57 @@ function UIConfigService.setSort(game, grid_id, column_id, direction)
     end
 end
 
+-- ─── Filters ────────────────────────────────────────────────────────────────
+-- Per-column filter state has up to two independent pieces:
+--   query  — case-insensitive substring match; empty string means "no query"
+--   values — whitelist of exact-match values; empty/nil means "no whitelist"
+-- A row passes a column when query matches AND whitelist matches (or either
+-- is empty). Column filters combine with AND across the grid.
+
+local function ensureFilter(cfg, col_id)
+    cfg.filters[col_id] = cfg.filters[col_id] or { query = "", values = {} }
+    local f = cfg.filters[col_id]
+    f.query  = f.query  or ""
+    f.values = f.values or {}
+    return f
+end
+
+function UIConfigService.getFilter(game, grid_id, col_id)
+    local cfg = UIConfigService.getGridConfig(game, grid_id)
+    return ensureFilter(cfg, col_id)
+end
+
+function UIConfigService.setFilterQuery(game, grid_id, col_id, query)
+    local cfg = UIConfigService.getGridConfig(game, grid_id)
+    local f   = ensureFilter(cfg, col_id)
+    f.query   = query or ""
+    -- Drop the entry entirely when both sides are empty.
+    if f.query == "" and (not f.values or #f.values == 0) then
+        cfg.filters[col_id] = nil
+    end
+end
+
+function UIConfigService.setFilterValues(game, grid_id, col_id, values)
+    local cfg = UIConfigService.getGridConfig(game, grid_id)
+    local f   = ensureFilter(cfg, col_id)
+    f.values  = values or {}
+    if f.query == "" and #f.values == 0 then
+        cfg.filters[col_id] = nil
+    end
+end
+
+function UIConfigService.clearFilter(game, grid_id, col_id)
+    local cfg = UIConfigService.getGridConfig(game, grid_id)
+    cfg.filters[col_id] = nil
+end
+
+function UIConfigService.isFilterActive(game, grid_id, col_id)
+    local cfg = UIConfigService.getGridConfig(game, grid_id)
+    local f   = cfg.filters[col_id]
+    if not f then return false end
+    return (f.query ~= nil and f.query ~= "") or (f.values and #f.values > 0)
+end
+
 -- Strip entries whose column ids no longer exist in the datasource. Called on
 -- load before applying so renamed/removed columns don't linger in the save.
 function UIConfigService.pruneOrphans(game, grid_id, valid_column_ids)
@@ -56,6 +109,11 @@ function UIConfigService.pruneOrphans(game, grid_id, valid_column_ids)
     end
     for id in pairs(cfg.hidden) do
         if not valid[id] then cfg.hidden[id] = nil end
+    end
+    if cfg.filters then
+        for id in pairs(cfg.filters) do
+            if not valid[id] then cfg.filters[id] = nil end
+        end
     end
     if cfg.sort and cfg.sort.column and not valid[cfg.sort.column] then
         cfg.sort = nil

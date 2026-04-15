@@ -26,6 +26,11 @@ local columns = {
         end,
     },
     {
+        id = "driver", label = "Driver", width = 140, min_width = 80,
+        format   = function(item) return item.driver_name or "—" end,
+        sort_key = function(item) return item.driver_name or "" end,
+    },
+    {
         id = "type", label = "Type", width = 60, min_width = 40,
         format   = function(item) return tostring(item.type or "?") end,
         sort_key = function(item) return tostring(item.type or "") end,

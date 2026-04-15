@@ -5,7 +5,9 @@
 --   default_sort, columns
 -- and renders a sortable, resizable, column-choosable table of items.
 
-local UIConfig = require("services.UIConfigService")
+local UIConfig     = require("services.UIConfigService")
+local FilterSvc    = require("services.DataGridFilterService")
+local utf8         = require("utf8")
 
 local DataGrid = {}
 
@@ -15,9 +17,19 @@ DataGrid.RESIZE_HOT  = 5
 DataGrid.CHOOSER_BTN_W = 20
 DataGrid.ROW_PAD_X   = 4
 
+-- Filter row (DevExpress-style search/select row under the header).
+DataGrid.FILTER_ROW_H        = 26
+DataGrid.FILTER_FUNNEL_W     = 16
+DataGrid.FILTER_INPUT_PAD_X  = 4
+
 -- Per-grid ephemeral state (resize drag, hovered row, hovered resize zone).
--- Persisted state (widths, hidden, sort) lives in game.state.ui_config.
+-- Persisted state (widths, hidden, sort, filters) lives in game.state.ui_config.
 local _grid_state = {}
+
+-- Single globally-focused filter input (one at a time across all grids).
+DataGrid._focused_filter = nil   -- { grid_id, col_id, buffer }
+-- Filter popup overlay state (same "only one open" rule as the column chooser).
+DataGrid.filter_popup = nil      -- { grid_id, source, col_id, x, y, ... }
 
 local function getState(grid_id)
     _grid_state[grid_id] = _grid_state[grid_id] or {
@@ -100,10 +112,23 @@ end
 
 -- ─── Height ──────────────────────────────────────────────────────────────────
 
+-- A source shows a filter row when at least one column is filterable. Kept as
+-- a helper so layout, hit tests and row offsets all agree on the same predicate.
+function DataGrid.hasFilterRow(source)
+    if not source or not source.columns then return false end
+    for _, c in ipairs(source.columns) do
+        if FilterSvc.isFilterable(c) then return true end
+    end
+    return false
+end
+
 function DataGrid.totalHeight(comp, game)
-    local items = comp.source.items_fn(game) or {}
-    local nrows = math.max(1, #items)   -- reserve one row for "empty" message
-    return DataGrid.HEADER_H + nrows * DataGrid.ROW_H + 4
+    local source = comp.source
+    local items  = source.items_fn(game) or {}
+    items        = FilterSvc.applyFilters(items, source, game)
+    local nrows  = math.max(1, #items)   -- reserve one row for "empty" message
+    local filter_h = DataGrid.hasFilterRow(source) and DataGrid.FILTER_ROW_H or 0
+    return DataGrid.HEADER_H + filter_h + nrows * DataGrid.ROW_H + 4
 end
 
 -- ─── Draw ────────────────────────────────────────────────────────────────────
@@ -133,8 +158,10 @@ function DataGrid.draw(comp, panel_x, panel_w, p, y, game)
     local eff_cols = DataGrid.effectiveColumns(source, game)
     local sort     = DataGrid.effectiveSort(source, game)
     local state    = getState(source.id)
+    local show_filters = DataGrid.hasFilterRow(source)
 
     local items = source.items_fn(game) or {}
+    items = FilterSvc.applyFilters(items, source, game)
     items = sortItems(items, source, game)
 
     local gx = panel_x + p
@@ -182,8 +209,111 @@ function DataGrid.draw(comp, panel_x, panel_w, p, y, game)
         cell_x = cell_x + cw
     end
 
+    -- Filter row (DevExpress-style search/whitelist per column).
+    local filter_y = y + DataGrid.HEADER_H
+    if show_filters then
+        -- Row background
+        love.graphics.setColor(0.12, 0.12, 0.16)
+        love.graphics.rectangle("fill", gx, filter_y, gw, DataGrid.FILTER_ROW_H)
+
+        cell_x = gx
+        love.graphics.setFont(game.fonts.ui_small)
+        for _, e in ipairs(eff_cols) do
+            local col = e.col
+            local cw  = e.width
+            if cell_x + cw > gx + avail_w then cw = (gx + avail_w) - cell_x end
+            if cw <= 0 then break end
+
+            if FilterSvc.isFilterable(col) then
+                local funnel_w = DataGrid.FILTER_FUNNEL_W
+                local pad      = DataGrid.FILTER_INPUT_PAD_X
+                local input_x  = cell_x + 2
+                local input_y  = filter_y + 3
+                local input_w  = cw - funnel_w - 4
+                local input_h  = DataGrid.FILTER_ROW_H - 6
+
+                -- Background + border (focused input brighter).
+                local is_focused = DataGrid._focused_filter
+                               and DataGrid._focused_filter.grid_id == source.id
+                               and DataGrid._focused_filter.col_id  == col.id
+                if is_focused then
+                    love.graphics.setColor(0.05, 0.08, 0.15)
+                else
+                    love.graphics.setColor(0.08, 0.08, 0.12)
+                end
+                love.graphics.rectangle("fill", input_x, input_y, input_w, input_h, 2)
+                if is_focused then
+                    love.graphics.setColor(0.45, 0.65, 1.0)
+                else
+                    love.graphics.setColor(0.3, 0.3, 0.4)
+                end
+                love.graphics.rectangle("line", input_x, input_y, input_w, input_h, 2)
+
+                -- Text: either the focused buffer or the persisted query.
+                local text
+                if is_focused then
+                    text = DataGrid._focused_filter.buffer or ""
+                else
+                    local f = UIConfig.getFilter(game, source.id, col.id)
+                    text = f.query or ""
+                end
+
+                local fh = game.fonts.ui_small:getHeight()
+                local ty = input_y + (input_h - fh) * 0.5
+                if text == "" and not is_focused then
+                    love.graphics.setColor(0.5, 0.5, 0.55)
+                    love.graphics.printf("Filter…", input_x + pad, ty,
+                        input_w - pad * 2, "left")
+                else
+                    love.graphics.setColor(1, 1, 1)
+                    love.graphics.printf(text, input_x + pad, ty,
+                        input_w - pad * 2, "left")
+                end
+
+                -- Cursor on focus (blink).
+                if is_focused then
+                    local tw = game.fonts.ui_small:getWidth(text or "")
+                    local cx = math.min(input_x + input_w - 3, input_x + pad + tw)
+                    local blink = math.floor(love.timer.getTime() * 2) % 2 == 0
+                    if blink then
+                        love.graphics.setColor(1, 1, 1)
+                        love.graphics.line(cx, input_y + 2, cx, input_y + input_h - 2)
+                    end
+                end
+
+                -- Funnel icon (highlighted if a filter is set for this column).
+                local funnel_x = cell_x + cw - funnel_w - 2
+                local active   = UIConfig.isFilterActive(game, source.id, col.id)
+                if active then
+                    love.graphics.setColor(0.25, 0.55, 0.90)
+                    love.graphics.rectangle("fill", funnel_x, input_y,
+                        funnel_w, input_h, 2)
+                    love.graphics.setColor(1, 1, 1)
+                else
+                    love.graphics.setColor(0.22, 0.22, 0.30)
+                    love.graphics.rectangle("fill", funnel_x, input_y,
+                        funnel_w, input_h, 2)
+                    love.graphics.setColor(0.7, 0.7, 0.85)
+                end
+                love.graphics.printf("▼", funnel_x, input_y + 2,
+                    funnel_w, "center")
+            else
+                -- Non-filterable column: empty greyed cell.
+                love.graphics.setColor(0.10, 0.10, 0.14)
+                love.graphics.rectangle("fill", cell_x + 2, filter_y + 3,
+                    cw - 4, DataGrid.FILTER_ROW_H - 6, 2)
+            end
+
+            -- Column separator (same as header).
+            love.graphics.setColor(0.4, 0.4, 0.5)
+            love.graphics.rectangle("fill", cell_x + cw - 1, filter_y + 2, 1,
+                DataGrid.FILTER_ROW_H - 4)
+            cell_x = cell_x + cw
+        end
+    end
+
     -- Rows
-    local row_y = y + DataGrid.HEADER_H
+    local row_y = filter_y + (show_filters and DataGrid.FILTER_ROW_H or 0)
 
     if #items == 0 then
         love.graphics.setFont(game.fonts.ui_small)
@@ -241,6 +371,7 @@ function DataGrid.hitTest(comp, panel_x, panel_w, p, cy_rel, cx, cy, game)
     local gx       = panel_x + p
     local gw       = panel_w - p * 2
     local avail_w  = gw - DataGrid.CHOOSER_BTN_W
+    local show_filters = DataGrid.hasFilterRow(source)
 
     -- In header row?
     if cy_rel >= 0 and cy_rel < DataGrid.HEADER_H then
@@ -278,12 +409,42 @@ function DataGrid.hitTest(comp, panel_x, panel_w, p, cy_rel, cx, cy, game)
         return nil
     end
 
+    -- In the filter row?
+    if show_filters
+       and cy_rel >= DataGrid.HEADER_H
+       and cy_rel <  DataGrid.HEADER_H + DataGrid.FILTER_ROW_H then
+        local cell_x = gx
+        for _, e in ipairs(eff_cols) do
+            local col = e.col
+            local cw  = e.width
+            if cell_x + cw > gx + avail_w then cw = (gx + avail_w) - cell_x end
+            if cw <= 0 then break end
+            if FilterSvc.isFilterable(col) and cx >= cell_x and cx < cell_x + cw then
+                local funnel_x = cell_x + cw - DataGrid.FILTER_FUNNEL_W - 2
+                if cx >= funnel_x then
+                    return { id = "datagrid_filter_popup", data = {
+                        grid_id = source.id, source = source, col_id = col.id,
+                        anchor_x = funnel_x,
+                        anchor_y = cell_x * 0 + cx,  -- unused; popup positions off mouse below
+                    }}
+                end
+                return { id = "datagrid_filter_focus", data = {
+                    grid_id = source.id, col_id = col.id,
+                }}
+            end
+            cell_x = cell_x + cw
+        end
+        return nil
+    end
+
     -- In a row?
     local items = source.items_fn(game) or {}
+    items = FilterSvc.applyFilters(items, source, game)
     items = sortItems(items, source, game)
     if #items == 0 then return nil end
 
     local row_rel = cy_rel - DataGrid.HEADER_H
+                  - (show_filters and DataGrid.FILTER_ROW_H or 0)
     local idx = math.floor(row_rel / DataGrid.ROW_H) + 1
     if idx < 1 or idx > #items then return nil end
 
@@ -374,6 +535,144 @@ end
 
 function DataGrid.isChooserOpen()
     return DataGrid.chooser ~= nil
+end
+
+-- ─── Filter row: focus + input routing ──────────────────────────────────────
+
+local function commitFocusedBuffer(game)
+    local f = DataGrid._focused_filter
+    if not (f and game) then return end
+    UIConfig.setFilterQuery(game, f.grid_id, f.col_id, f.buffer or "")
+end
+
+-- Start editing the filter cell for (grid_id, col_id). Seeds the buffer from
+-- the currently-stored query so typing appends rather than replacing.
+function DataGrid.focusFilter(grid_id, col_id, game)
+    -- Commit any previously focused filter before swapping.
+    if DataGrid._focused_filter then commitFocusedBuffer(game) end
+    local f = UIConfig.getFilter(game, grid_id, col_id)
+    DataGrid._focused_filter = {
+        grid_id = grid_id,
+        col_id  = col_id,
+        buffer  = f.query or "",
+    }
+end
+
+-- Blur the active filter cell (if any), committing the buffer to persisted state.
+function DataGrid.blurFilter(game)
+    if DataGrid._focused_filter then
+        commitFocusedBuffer(game)
+        DataGrid._focused_filter = nil
+    end
+end
+
+-- Handle a mouse-down hit from DataGrid.hitTest — dispatches filter-row clicks.
+function DataGrid.handleFilterHit(hit, game)
+    if not hit then return false end
+    if hit.id == "datagrid_filter_focus" then
+        DataGrid.focusFilter(hit.data.grid_id, hit.data.col_id, game)
+        return true
+    end
+    if hit.id == "datagrid_filter_popup" then
+        -- Source is carried on the hit so callers don't need the tab context.
+        local mx, my = love.mouse.getPosition()
+        DataGrid.openFilterPopup(hit.data.grid_id, hit.data.source,
+                                 hit.data.col_id, mx, my, game)
+        -- Also blur any focused filter input — popup is exclusive.
+        DataGrid.blurFilter(game)
+        return true
+    end
+    return false
+end
+
+-- Character from love.textinput. Routes to the filter popup's search input
+-- first (if focused), then to the focused filter cell. Live-writes cell
+-- queries to UIConfig so rows filter in real time.
+function DataGrid.routeTextInput(text, game)
+    -- Popup search input wins when focused.
+    if DataGrid.filter_popup and DataGrid.filter_popup.search_focused then
+        local FilterPopup = require("views.FilterPopup")
+        return FilterPopup.handleTextInput(DataGrid.filter_popup, text)
+    end
+    local f = DataGrid._focused_filter
+    if not f then return false end
+    f.buffer = (f.buffer or "") .. (text or "")
+    if game then
+        UIConfig.setFilterQuery(game, f.grid_id, f.col_id, f.buffer)
+    end
+    return true
+end
+
+-- Key from love.keypressed. Handles editing + commit/cancel keys.
+function DataGrid.routeKeyPressed(key, game)
+    -- Popup first: its search field absorbs editing keys, and Escape closes
+    -- the whole popup when no field is focused.
+    if DataGrid.filter_popup then
+        local FilterPopup = require("views.FilterPopup")
+        if DataGrid.filter_popup.search_focused then
+            if FilterPopup.handleKeyPressed(DataGrid.filter_popup, key) then
+                return true
+            end
+        end
+        if key == "escape" then
+            DataGrid.closeFilterPopup()
+            return true
+        end
+    end
+    local f = DataGrid._focused_filter
+    if not f then return false end
+    if key == "backspace" then
+        local s = f.buffer or ""
+        local offset = utf8.offset(s, -1)
+        if offset then
+            f.buffer = s:sub(1, offset - 1)
+        else
+            f.buffer = ""
+        end
+        if game then UIConfig.setFilterQuery(game, f.grid_id, f.col_id, f.buffer) end
+        return true
+    elseif key == "delete" then
+        f.buffer = ""
+        if game then UIConfig.setFilterQuery(game, f.grid_id, f.col_id, "") end
+        return true
+    elseif key == "escape" then
+        -- Abandon edits: revert buffer to whatever's persisted and blur.
+        local stored = UIConfig.getFilter(game, f.grid_id, f.col_id)
+        f.buffer = stored.query or ""
+        DataGrid._focused_filter = nil
+        return true
+    elseif key == "return" or key == "kpenter" or key == "tab" then
+        DataGrid.blurFilter(game)
+        return true
+    end
+    return false
+end
+
+-- ─── Filter popup overlay ───────────────────────────────────────────────────
+
+function DataGrid.openFilterPopup(grid_id, source, col_id, anchor_x, anchor_y, game)
+    -- Snapshot distinct values at open time so the list doesn't reshuffle
+    -- beneath the user while the popup is visible.
+    local values = FilterSvc.distinctValues(source, col_id, game)
+    DataGrid.filter_popup = {
+        grid_id = grid_id,
+        source  = source,
+        col_id  = col_id,
+        x       = anchor_x,
+        y       = anchor_y,
+        values  = values,      -- all distinct values in this column
+        search  = "",          -- narrows the visible subset (popup-local)
+        scroll  = 0,
+        search_focused = false,
+    }
+end
+
+function DataGrid.closeFilterPopup()
+    DataGrid.filter_popup = nil
+end
+
+function DataGrid.isFilterPopupOpen()
+    return DataGrid.filter_popup ~= nil
 end
 
 return DataGrid

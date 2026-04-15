@@ -136,7 +136,7 @@ function LicenseModal:draw(game)
         love.graphics.rectangle("line", current_x, next_y, card_w, CARD_H, 6, 6)
         love.graphics.setFont(font)
         love.graphics.setColor(0.75, 0.78, 0.88)
-        love.graphics.printf("You hold the highest MVP license.",
+        love.graphics.printf("You hold the highest license.",
             current_x, next_y + CARD_H / 2 - 10, card_w, "center")
     end
 

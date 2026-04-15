@@ -136,6 +136,10 @@ function UIManager:drawDataGridOverlay(game)
     if DataGrid.isChooserOpen() then
         ColumnChooser.draw(DataGrid.chooser, game)
     end
+    if DataGrid.isFilterPopupOpen() then
+        local FilterPopup = require("views.FilterPopup")
+        FilterPopup.draw(DataGrid.filter_popup, game)
+    end
 end
 
 function UIManager:_calculatePerSecondStats(game)

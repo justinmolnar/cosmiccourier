@@ -61,15 +61,10 @@ function EventService.setupTripEvents(state, game)
             return
         end
 
-        -- If all checks pass, remove the trip and assign it
+        -- If all checks pass, remove the trip and assign it. The trip stays in
+        -- source_client.cargo (the building's "inventory") until DoPickup runs.
         trip_to_assign = table.remove(game.entities.trips.pending, trip_index)
         if trip_to_assign then
-            local sc = trip_to_assign.source_client
-            if sc and sc.cargo then
-                for j = #sc.cargo, 1, -1 do
-                    if sc.cargo[j] == trip_to_assign then table.remove(sc.cargo, j); break end
-                end
-            end
             print(string.format("Assigned trip to %s %d.", selected_vehicle.type, selected_vehicle.id))
             selected_vehicle:assignTrip(trip_to_assign, game)
         end

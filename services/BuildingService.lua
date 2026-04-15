@@ -221,6 +221,29 @@ function BuildingService.place(building_cfg, gx, gy, city_idx, game)
         cargo    = {},
         capacity = building_cfg.capacity,
     }
+
+    -- Context-aware name. Try cfg-id-specific templates first, fall back to
+    -- placed_building_default. `kind` = cfg.display_name for "{kind}" slots.
+    do
+        local NameService        = require("services.NameService")
+        local NameContextService = require("services.NameContextService")
+        local cmap = game.maps and game.maps.all_cities and game.maps.all_cities[city_idx]
+        local plot = { x = gx, y = gy }
+        local ok_mod, tmpl = false, nil
+        if building_cfg.id then
+            ok_mod, tmpl = pcall(require, "data.names.templates.placed_building." .. building_cfg.id)
+        end
+        if not (ok_mod and tmpl) then
+            ok_mod, tmpl = pcall(require, "data.names.templates.placed_building_default")
+        end
+        if ok_mod and tmpl then
+            local ctx = NameContextService.forBuilding(plot, cmap, game,
+                                                       building_cfg.display_name or building_cfg.id or "Building")
+            local ok, name = pcall(NameService.generate, tmpl, ctx)
+            if ok then building_ref.name = name end
+        end
+    end
+
     table.insert(game.buildings[city_idx], building_ref)
 
     -- Register as an entrance for this mode.

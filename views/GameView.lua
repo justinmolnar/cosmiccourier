@@ -2015,6 +2015,7 @@ function GameView:draw()
     if not Game.debug_hide_vehicles then
         self:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
     end
+    require("views.MapLabels").render(Game, sidebar_w, screen_w, screen_h)
     love.graphics.setScissor()
     if Game.debug_f3 then self:_drawF3Overlay() end
 end

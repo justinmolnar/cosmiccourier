@@ -56,6 +56,10 @@ function State:new(C, game)
     -- Keys are datagrid ids defined in data/datagrids/*.lua.
     instance.ui_config = { datagrids = {} }
 
+    -- Map labels (city/region/continent overlay) — default from data/names config.
+    local _map_label_cfg = require("data.names.map_label_config")
+    instance.show_map_labels = _map_label_cfg.toggle_default
+
     instance.rush_hour = { active = false, timer = 0 }
     instance.current_map_scale = C.GAMEPLAY.CURRENT_MAP_SCALE
     instance.metro_license_unlocked = false

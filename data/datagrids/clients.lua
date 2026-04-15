@@ -19,6 +19,11 @@ local columns = {
         end,
     },
     {
+        id = "name", label = "Name", width = 140, min_width = 80,
+        format   = function(item) return item.name or "—" end,
+        sort_key = function(item) return item.name or "" end,
+    },
+    {
         id = "archetype", label = "Type", width = 80, min_width = 50,
         format   = function(item)
             local a = archetypeOf(item)

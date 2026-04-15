@@ -568,6 +568,27 @@ function WorldSandboxController:sendToGame()
         start_dmap
     )
 
+    -- Expose raw continent / region lists for the naming pass (and any later
+    -- consumer that needs by-id lookup). The hierarchy set up by GameBridge
+    -- is cities→regions→continents; these tables carry the per-entity feature
+    -- flags added by WorldNoiseService.enrichGeography.
+    game.world_continents_list  = self.continents or {}
+    game.world_continents_by_id = {}
+    for _, c in ipairs(game.world_continents_list) do
+        game.world_continents_by_id[c.id] = c
+    end
+    game.world_regions_by_id = self.regions_list or {}
+    game.world_regions_list  = {}
+    for rid, r in pairs(game.world_regions_by_id) do
+        r.id = r.id or rid
+        table.insert(game.world_regions_list, r)
+    end
+    table.sort(game.world_regions_list, function(a, b) return (a.id or 0) < (b.id or 0) end)
+
+    -- Name continents → regions → cities (hierarchy order).
+    local WorldNamingService = require("services.WorldNamingService")
+    WorldNamingService.nameWorld(game)
+
     -- Free all generation-time scratch data. These fields are no longer needed once
     -- the game world is built. Game and map objects hold the only live references.
     self.water_tile_types     = nil
