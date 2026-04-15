@@ -237,8 +237,11 @@ function InputController:keypressed(key)
         end
         for _ = 1, 25 do game.entities:addClient(game)           end
 
-        local payout = game.C.GAMEPLAY.BASE_TRIP_PAYOUT
-        local bonus  = game.C.GAMEPLAY.INITIAL_SPEED_BONUS
+        local payout      = game.C.GAMEPLAY.BASE_TRIP_PAYOUT
+        local bonus_ratio = game.C.GAMEPLAY.SPEED_BONUS_RATIO   or 0.5
+        local base_dur    = game.C.GAMEPLAY.BASE_BONUS_DURATION or 30
+        local scope_time  = (game.C.GAMEPLAY.SCOPE_TIME_MULT
+                             and game.C.GAMEPLAY.SCOPE_TIME_MULT.city) or 1.5
 
         local function toUnified(plot_local)
             return { x = (cmap.world_mn_x - 1) * 3 + plot_local.x,
@@ -264,7 +267,11 @@ function InputController:keypressed(key)
                                y = (city2.world_mn_y - 1) * 3 + dpl.y }
                 local spl  = cmap:getRandomBuildingPlot()
                 local src  = spl and toUnified(spl) or (game.entities.depots[1] and game.entities.depots[1].plot)
-                local t    = Trip:new(payout * 3, bonus * 2)
+                local base = payout * 3
+                local sb   = math.floor(base * bonus_ratio + 0.5)
+                local t    = Trip:new(base, sb)
+                t.speed_bonus_initial = sb
+                t.bonus_duration      = base_dur * scope_time
                 t:addLeg(src, dest, 1, "road")
                 table.insert(game.entities.trips.pending, t)
             end

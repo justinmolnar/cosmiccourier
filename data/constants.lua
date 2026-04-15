@@ -79,14 +79,32 @@ local C = {
 
     GAMEPLAY = {
         INITIAL_MONEY           = 150,
-        BASE_TRIP_PAYOUT        = 50,
-        INITIAL_SPEED_BONUS     = 100,
+        -- District-scoped baseline; scope scaling multiplies this per trip.
+        -- Target: a same-district restaurant regular delivers ~$10.
+        BASE_TRIP_PAYOUT        = 10,
         AUTODISPATCH_INTERVAL   = 1,
-        BONUS_DECAY_RATE        = 1.0,
         CURRENT_MAP_SCALE       = 1,
         BASE_TILE_SIZE          = 16,
         VEHICLE_STUCK_TIMER     = 15,
         STATS_WINDOW_SEC        = 15,   -- rolling window for income/trips-per-second display
+
+        -- Scope scaling for trip economy. Keyed by scope id (see SCOPE.NAMES).
+        -- Payout = BASE_TRIP_PAYOUT × archetype.payout_multiplier
+        --        × SCOPE_PAYOUT_MULT[scope] × per-archetype payout upgrade.
+        SCOPE_PAYOUT_MULT = { district = 1.0, city = 2.5, region = 6.0,
+                              continent = 12.0, world = 25.0 },
+        -- Time scaling: both the speed-bonus decay window and the rush hard
+        -- deadline are multiplied by this. District = 1× baseline; farther
+        -- scopes get proportionally more travel headroom.
+        SCOPE_TIME_MULT   = { district = 1.0, city = 1.5, region = 2.5,
+                              continent = 4.0, world = 6.0 },
+        -- Initial speed bonus is a fraction of base payout so big-scope trips
+        -- keep bonus meaningful while tiny district trips don't overpay.
+        -- 1.0 = bonus equals base (deliver instantly → 2× payout, full decay → 1×).
+        SPEED_BONUS_RATIO   = 1.0,
+        -- Baseline decay window for a district trip. Scaled by SCOPE_TIME_MULT
+        -- per trip. A district trip's bonus fully decays over this window.
+        BASE_BONUS_DURATION = 30,
     },
 
     ZOOM = {

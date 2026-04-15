@@ -9,10 +9,9 @@
 
 local DebugTripFactory = {}
 
-local PAYOUT_MULT = { district = 1.0, city = 1.5, region = 3.0, continent = 5.0, world = 8.0 }
--- Exported for production trip generation. Single source of truth for
--- scope-based payout multipliers.
-DebugTripFactory.PAYOUT_MULT = PAYOUT_MULT
+-- Scope-based payout + time scaling now lives in a single place:
+-- game.C.GAMEPLAY.SCOPE_PAYOUT_MULT / SCOPE_TIME_MULT (data/constants.lua).
+-- This service reads from there via `game` so tuning stays in data.
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -180,12 +179,21 @@ function DebugTripFactory.create(scope, depot, game)
     if not dest then return nil end
     if dest.x == src.x and dest.y == src.y then return nil end
 
-    local base  = math.floor((game.C.GAMEPLAY.BASE_TRIP_PAYOUT or 200) * (PAYOUT_MULT[scope] or 1))
-    local bonus = game.C.GAMEPLAY.INITIAL_SPEED_BONUS or 100
+    -- Match the production payout shape so debug-spawned trips feel the same.
+    local C_GAMEPLAY   = game.C.GAMEPLAY
+    local scope_payout = (C_GAMEPLAY.SCOPE_PAYOUT_MULT and C_GAMEPLAY.SCOPE_PAYOUT_MULT[scope]) or 1.0
+    local scope_time   = (C_GAMEPLAY.SCOPE_TIME_MULT   and C_GAMEPLAY.SCOPE_TIME_MULT[scope])   or 1.0
+    local cargo_size   = 1   -- debug trips carry a single parcel
+    local base_payout  = math.floor((C_GAMEPLAY.BASE_TRIP_PAYOUT or 0) * scope_payout * cargo_size)
+    local bonus_ratio  = C_GAMEPLAY.SPEED_BONUS_RATIO   or 0.5
+    local base_dur     = C_GAMEPLAY.BASE_BONUS_DURATION or 30
+    local speed_bonus  = math.floor(base_payout * bonus_ratio + 0.5)
 
-    local t = Trip:new(base, bonus)
-    t.scope = scope
-    t:addLeg(src, dest, 1, "road")
+    local t = Trip:new(base_payout, speed_bonus)
+    t.scope               = scope
+    t.speed_bonus_initial = speed_bonus
+    t.bonus_duration      = base_dur * scope_time
+    t:addLeg(src, dest, cargo_size, "road")
     return t
 end
 

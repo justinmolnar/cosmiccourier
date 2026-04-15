@@ -177,14 +177,13 @@ function Entities:removeVehicle(vehicle, game)
 end
 
 function Entities:update(dt, game)
-    local C_GAMEPLAY = game.C.GAMEPLAY
-    local decay = dt * C_GAMEPLAY.BONUS_DECAY_RATE
-
     PathScheduler.flush()
 
     -- Decay speed bonuses on pending (non-transit) trips, and expire
     -- Rush trips past their deadline. Pending + expired → remove + publish;
     -- in-transit + expired → flag payout_forfeited (consumed at delivery).
+    -- Per-trip decay rate = speed_bonus_initial / bonus_duration (set at
+    -- generation via scope scaling). Legacy trips fall back to 1/sec.
     local now = love.timer.getTime()
     for i = #self.trips.pending, 1, -1 do
         local trip = self.trips.pending[i]
@@ -198,7 +197,8 @@ function Entities:update(dt, game)
             end
             game.EventBus:publish("rush_trip_expired", { trip = trip })
         elseif not trip.is_in_transit then
-            local b = trip.speed_bonus - decay
+            local rate = trip.getBonusDecayRate and trip:getBonusDecayRate() or 1.0
+            local b = trip.speed_bonus - dt * rate
             trip.speed_bonus = b < 0 and 0 or b
         end
     end

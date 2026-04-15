@@ -16,10 +16,17 @@ function Trip:new(base_payout, initial_bonus)
 
     instance.base_payout = base_payout
     instance.speed_bonus = initial_bonus
+    -- `speed_bonus_initial` + `bonus_duration` power scope-aware decay: the
+    -- per-second decay rate = initial / duration, so the bonus reaches zero
+    -- at the end of the scope-scaled window. TripGenerator populates both at
+    -- creation; pre-change saves without them fall back to the legacy 1/sec
+    -- rate (see :thaw / :getCurrentBonus).
+    instance.speed_bonus_initial = initial_bonus
+    instance.bonus_duration      = nil
 
     instance.legs = {}
     instance.current_leg = 1
-    
+
     instance.scope         = nil   -- "district"|"city"|"region"|"continent"|"world"|nil
     instance.wait_time     = 0    -- seconds this trip has spent in the pending queue
     instance.is_in_transit = false
@@ -47,10 +54,23 @@ function Trip:freeze()
     self.transit_start_time = love.timer.getTime()
 end
 
+-- Per-trip decay rate (bonus lost per second of wait/transit). When
+-- `bonus_duration` and `speed_bonus_initial` are present the bonus reaches
+-- exactly zero after `bonus_duration` seconds regardless of the initial
+-- magnitude. Legacy trips without these fields fall back to 1/sec.
+function Trip:getBonusDecayRate()
+    local init = self.speed_bonus_initial
+    local dur  = self.bonus_duration
+    if init and dur and dur > 0 then
+        return init / dur
+    end
+    return 1.0
+end
+
 function Trip:thaw()
     if self.is_in_transit then
         local time_in_transit = love.timer.getTime() - self.transit_start_time
-        self.speed_bonus = math.max(0, self.speed_bonus - time_in_transit)
+        self.speed_bonus = math.max(0, self.speed_bonus - time_in_transit * self:getBonusDecayRate())
         self.is_in_transit = false
         self.last_update_time = love.timer.getTime()
     end
@@ -59,7 +79,7 @@ end
 function Trip:getCurrentBonus()
     if self.is_in_transit then
         local time_in_transit = love.timer.getTime() - self.transit_start_time
-        return math.max(0, self.speed_bonus - time_in_transit)
+        return math.max(0, self.speed_bonus - time_in_transit * self:getBonusDecayRate())
     else
         return self.speed_bonus
     end
