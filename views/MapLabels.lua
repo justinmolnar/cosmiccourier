@@ -10,6 +10,7 @@ local MapLabels = {}
 
 local Config       = require("data.names.map_label_config")
 local ScopeService = require("services.ScopeService")
+local WrapRender   = require("views.WrapRender")
 
 -- ─── Opacity easing ──────────────────────────────────────────────────────────
 -- Returns an alpha in [0, 1] for a given camera scale `cs` within a scope's
@@ -34,14 +35,29 @@ local function cityCentroidWorldCells(city_map)
     return (city_map.world_mn_x or 1) + w, (city_map.world_mn_y or 1) + h
 end
 
--- Project world-pixel (wpx, wpy) to screen (sx, sy) using the camera.
-local function worldToScreen(Game, wpx, wpy, sidebar_w, screen_w, screen_h)
+-- Project world-pixel (wpx, wpy) to screen (sx, sy) using the camera. The
+-- optional `offset_x` shifts the world position to project a wrapped copy.
+local function worldToScreen(Game, wpx, wpy, sidebar_w, screen_w, screen_h, offset_x)
     local game_world_w = screen_w - sidebar_w
     local cx, cy = Game.camera.x, Game.camera.y
     local cs     = Game.camera.scale
-    local sx = sidebar_w + game_world_w * 0.5 + (wpx - cx) * cs
+    local sx = sidebar_w + game_world_w * 0.5 + (wpx + (offset_x or 0) - cx) * cs
     local sy = screen_h  * 0.5 + (wpy - cy) * cs
     return sx, sy
+end
+
+-- Per-city scale from grid width, clamped to the config range.
+local function cityEntryScale(e, cfg)
+    if not cfg.proportional_to_city_size then return 1 end
+    local w = e.city_grid_width or 0
+    if w <= 0 then return 1 end
+    local ref  = cfg.city_size_ref or 60
+    local lo   = cfg.city_size_min or 0.7
+    local hi   = cfg.city_size_max or 1.8
+    local s    = w / ref
+    if s < lo then s = lo end
+    if s > hi then s = hi end
+    return s
 end
 
 -- Core draw — one loop per scope, most-transparent on top. Skips labels whose
@@ -52,6 +68,7 @@ local function drawScope(Game, entries, cfg, alpha, font, sidebar_w, screen_w, s
     love.graphics.setFont(font)
     local color  = cfg.color  or {1, 1, 1, 1}
     local shadow = cfg.shadow or {0, 0, 0, 0.75}
+    local th     = font:getHeight()
     for _, e in ipairs(entries) do
         local cxw, cyw
         if e.centroid then
@@ -60,24 +77,40 @@ local function drawScope(Game, entries, cfg, alpha, font, sidebar_w, screen_w, s
             cxw, cyw = cityCentroidWorldCells(e)
         end
         if e.name and cxw then
-            -- Fog cull: centroid's sub-cell must be revealed.
-            local scx = math.max(1, math.floor(cxw * 3))
-            local scy = math.max(1, math.floor(cyw * 3))
-            if ScopeService.isRevealed(Game, scx, scy) then
+            -- Fog cull: only when the scope opts in (cities). Continents and
+            -- regions are area-scale labels; they stay visible so the player
+            -- can orient across unexplored territory.
+            local revealed = true
+            if cfg.fog_cull then
+                local scx = math.max(1, math.floor(cxw * 3))
+                local scy = math.max(1, math.floor(cyw * 3))
+                revealed = ScopeService.isRevealed(Game, scx, scy)
+            end
+            if revealed then
                 local wpx = (cxw - 0.5) * ts
                 local wpy = (cyw - 0.5) * ts
-                local sx, sy = worldToScreen(Game, wpx, wpy, sidebar_w, screen_w, screen_h)
-                if sx >= sidebar_w - 200 and sx <= screen_w + 200
-                   and sy >= -50 and sy <= screen_h + 50 then
-                    local tw = font:getWidth(e.name)
-                    local th = font:getHeight()
-                    love.graphics.setColor(shadow[1], shadow[2], shadow[3], (shadow[4] or 1) * alpha)
-                    for _, d in ipairs({{-1,0},{1,0},{0,-1},{0,1}}) do
-                        love.graphics.print(e.name, sx - tw * 0.5 + d[1], sy - th * 0.5 + d[2])
+                local text = cfg.uppercase and string.upper(e.name) or e.name
+                local entry_scale = cityEntryScale(e, cfg)
+                local tw = font:getWidth(text) * entry_scale
+                local dh = th * entry_scale
+
+                -- Render once per visible world copy. Outside an active wrap
+                -- context this collapses to a single pass at offset=0.
+                WrapRender.eachOffset(Game, function(offset_x)
+                    local sx, sy = worldToScreen(Game, wpx, wpy,
+                                                 sidebar_w, screen_w, screen_h, offset_x)
+                    if sx >= sidebar_w - 200 and sx <= screen_w + 200
+                       and sy >= -50 and sy <= screen_h + 50 then
+                        love.graphics.setColor(shadow[1], shadow[2], shadow[3], (shadow[4] or 1) * alpha)
+                        for _, d in ipairs({{-1,0},{1,0},{0,-1},{0,1}}) do
+                            love.graphics.print(text, sx - tw * 0.5 + d[1], sy - dh * 0.5 + d[2],
+                                                0, entry_scale, entry_scale)
+                        end
+                        love.graphics.setColor(color[1], color[2], color[3], (color[4] or 1) * alpha)
+                        love.graphics.print(text, sx - tw * 0.5, sy - dh * 0.5,
+                                            0, entry_scale, entry_scale)
                     end
-                    love.graphics.setColor(color[1], color[2], color[3], (color[4] or 1) * alpha)
-                    love.graphics.print(e.name, sx - tw * 0.5, sy - th * 0.5)
-                end
+                end)
             end
         end
     end

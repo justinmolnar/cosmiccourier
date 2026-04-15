@@ -23,13 +23,30 @@ local CityTemplates      = require("data.names.templates.city")
 
 local DepotTemplates = require("data.names.templates.depot")
 
+-- Build an rng-callable matching love.math.random's signature, backed by a
+-- fresh RandomGenerator seeded from the world seed. Naming becomes independent
+-- of however many randoms worldgen consumed before this point — the same
+-- world seed always produces the same names. The global love.math state is
+-- never touched, so naming can't perturb downstream gameplay rolls.
+local function buildNamingRng(game)
+    local seed = (game and game.state and game.state._world_seed) or { a = 1, b = 2 }
+    local a, b = (seed.a or 1) + 1, (seed.b or 2) + 1
+    local generator = love.math.newRandomGenerator(a, b)
+    return function(lo, hi)
+        if lo == nil then return generator:random() end
+        if hi == nil then return generator:random(lo) end
+        return generator:random(lo, hi)
+    end
+end
+
 function WorldNamingService.nameWorld(game, used_set)
     used_set = used_set or {}
+    local rng = buildNamingRng(game)
 
     -- 1. Continents (no parents to reference).
     for _, c in ipairs(game.world_continents_list or {}) do
-        local ctx = NameContextService.forContinent(c, game)
-        c.name = NameService.generate(ContinentTemplates, ctx, used_set)
+        local ctx = NameContextService.forContinent(c, game, rng)
+        c.name = NameService.generate(ContinentTemplates, ctx, used_set, nil, rng)
     end
 
     -- 2. Regions — attach parent continent name onto each region so the
@@ -38,21 +55,21 @@ function WorldNamingService.nameWorld(game, used_set)
     for _, r in ipairs(game.world_regions_list or {}) do
         local parent = by_continent_id[r.continent_id]
         if parent and parent.name then r.continent_name = parent.name end
-        local ctx = NameContextService.forRegion(r, game)
-        r.name = NameService.generate(RegionTemplates, ctx, used_set)
+        local ctx = NameContextService.forRegion(r, game, rng)
+        r.name = NameService.generate(RegionTemplates, ctx, used_set, nil, rng)
     end
 
     -- 3. Cities — context pulls parent region/continent names from the
     --    by_id lookups, which now have names set.
     for _, city in ipairs(game.maps.all_cities or {}) do
-        local ctx = NameContextService.forCity(city, game)
-        city.name = NameService.generate(CityTemplates, ctx, used_set)
+        local ctx = NameContextService.forCity(city, game, rng)
+        city.name = NameService.generate(CityTemplates, ctx, used_set, nil, rng)
     end
 
     -- 4. Starter depots & clients — re-name with city context now that
     --    cities have proper names. (Their constructors ran during wire,
     --    before cities were named.)
-    WorldNamingService.renameStarterEntities(game, used_set)
+    WorldNamingService.renameStarterEntities(game, used_set, rng)
 
     return used_set
 end
@@ -60,13 +77,14 @@ end
 -- Re-generate names for starter depots and clients using the now-named cities.
 -- Safe to call multiple times; only runs on entities whose city context has
 -- a resolved name.
-function WorldNamingService.renameStarterEntities(game, used_set)
+function WorldNamingService.renameStarterEntities(game, used_set, rng)
     used_set = used_set or {}
+    rng      = rng or buildNamingRng(game)
     for _, d in ipairs(game.entities and game.entities.depots or {}) do
         local cmap = d.getCity and d:getCity(game) or nil
         if cmap and cmap.name then
-            local ctx = NameContextService.forBuilding(d.plot, cmap, game)
-            local ok, name = pcall(NameService.generate, DepotTemplates, ctx, used_set)
+            local ctx = NameContextService.forBuilding(d.plot, cmap, game, nil, rng)
+            local ok, name = pcall(NameService.generate, DepotTemplates, ctx, used_set, nil, rng)
             if ok then d.name = name end
         end
     end
@@ -76,8 +94,8 @@ function WorldNamingService.renameStarterEntities(game, used_set)
         if cmap and cmap.name and archetype then
             local ok_mod, tmpl = pcall(require, "data.names.templates.client." .. archetype)
             if ok_mod and tmpl then
-                local ctx = NameContextService.forBuilding(cl.plot, cmap, game)
-                local ok, name = pcall(NameService.generate, tmpl, ctx, used_set)
+                local ctx = NameContextService.forBuilding(cl.plot, cmap, game, nil, rng)
+                local ok, name = pcall(NameService.generate, tmpl, ctx, used_set, nil, rng)
                 if ok then cl.name = name end
             end
         end

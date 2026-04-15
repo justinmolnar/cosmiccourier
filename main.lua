@@ -231,6 +231,13 @@ function love.load()
         local b = math.floor(os.clock() * 1000000)
         love.math.setRandomSeed(a, b)
         Game.state._world_seed = { a = a, b = b }
+        -- Randomize noise seeds on fresh boot. The controller's default is 0
+        -- (a truthy value in Lua), so the nil-guard in _initWorld can't do it
+        -- for us — without this, every fresh launch would produce the same
+        -- world from seed (0, 0).
+        local wsc = Game.world_sandbox_controller
+        wsc.params.seed_x = love.math.random() * 1000
+        wsc.params.seed_y = love.math.random() * 1000
     end
 
     _initWorld(Game)

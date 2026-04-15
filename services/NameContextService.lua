@@ -22,9 +22,14 @@ local TILE = {
 
 -- ─── Small helpers ───────────────────────────────────────────────────────────
 
-local function pickFromPool(pool)
+-- `rng` is an optional callable matching love.math.random's (lo, hi) signature.
+-- Defaulting to love.math.random keeps backwards-compat for runtime callers
+-- that don't care about determinism. The naming pass passes a dedicated rng
+-- so its picks are independent of the global RNG state.
+local function pickFromPool(pool, rng)
     if not pool or #pool == 0 then return nil end
-    return pool[love.math.random(1, #pool)]
+    rng = rng or love.math.random
+    return pool[rng(1, #pool)]
 end
 
 local function climateFromTemp(temp)
@@ -47,7 +52,7 @@ end
 
 -- ─── Continent ───────────────────────────────────────────────────────────────
 
-function NameContextService.forContinent(continent, game)
+function NameContextService.forContinent(continent, game, rng)
     local tags, slots = {}, {}
     local T = Tags.thresholds
 
@@ -63,18 +68,18 @@ function NameContextService.forContinent(continent, game)
     if continent.cold        then tags.cold        = true end
     if continent.hot         then tags.hot         = true end
 
-    slots.climate_adj          = pickFromPool(Climate[tags.cold and "cold" or tags.hot and "hot" or "temperate"])
-    slots.highland_descriptor  = pickFromPool(Geography.highland)
-    slots.lowland_descriptor   = pickFromPool(Geography.lowland)
-    slots.forest_descriptor    = pickFromPool(Geography.forest)
-    slots.desert_descriptor    = pickFromPool(Geography.desert)
+    slots.climate_adj          = pickFromPool(Climate[tags.cold and "cold" or tags.hot and "hot" or "temperate"], rng)
+    slots.highland_descriptor  = pickFromPool(Geography.highland, rng)
+    slots.lowland_descriptor   = pickFromPool(Geography.lowland,  rng)
+    slots.forest_descriptor    = pickFromPool(Geography.forest,   rng)
+    slots.desert_descriptor    = pickFromPool(Geography.desert,   rng)
 
     return { tags = tags, slots = slots }
 end
 
 -- ─── Region ──────────────────────────────────────────────────────────────────
 
-function NameContextService.forRegion(region, game)
+function NameContextService.forRegion(region, game, rng)
     local tags, slots = {}, {}
 
     if region.continent_name then
@@ -92,11 +97,11 @@ function NameContextService.forRegion(region, game)
     if region.hot         then tags.hot         = true end
     if region.lowland     then tags.lowland     = true end
 
-    slots.climate_adj          = pickFromPool(Climate[tags.cold and "cold" or tags.hot and "hot" or "temperate"])
-    slots.highland_descriptor  = pickFromPool(Geography.highland)
-    slots.lowland_descriptor   = pickFromPool(Geography.lowland)
-    slots.forest_descriptor    = pickFromPool(Geography.forest)
-    slots.desert_descriptor    = pickFromPool(Geography.desert)
+    slots.climate_adj          = pickFromPool(Climate[tags.cold and "cold" or tags.hot and "hot" or "temperate"], rng)
+    slots.highland_descriptor  = pickFromPool(Geography.highland, rng)
+    slots.lowland_descriptor   = pickFromPool(Geography.lowland,  rng)
+    slots.forest_descriptor    = pickFromPool(Geography.forest,   rng)
+    slots.desert_descriptor    = pickFromPool(Geography.desert,   rng)
 
     return { tags = tags, slots = slots }
 end
@@ -157,7 +162,7 @@ local function parentNames(city_map, game)
     return region_name, continent_name
 end
 
-function NameContextService.forCity(city_map, game)
+function NameContextService.forCity(city_map, game, rng)
     local tags, slots = {}, {}
 
     local water = detectCityWater(city_map, game)
@@ -192,7 +197,7 @@ function NameContextService.forCity(city_map, game)
     end
     local climate = climateFromTemp(temp)
     if climate ~= "temperate" then tags[climate] = true end
-    slots.climate_adj = pickFromPool(Climate[climate])
+    slots.climate_adj = pickFromPool(Climate[climate], rng)
 
     return { tags = tags, slots = slots }
 end
@@ -237,11 +242,11 @@ end
 
 -- Build a building-scope context. The caller supplies the parent city_map
 -- explicitly so it works for clients, depots, and placed buildings uniformly.
-function NameContextService.forBuilding(plot, city_map, game, kind_override)
+function NameContextService.forBuilding(plot, city_map, game, kind_override, rng)
     local tags, slots = {}, {}
 
     if city_map then
-        local city_ctx = NameContextService.forCity(city_map, game)
+        local city_ctx = NameContextService.forCity(city_map, game, rng)
         -- Inherit city-level tags/slots as the starting point.
         for k, v in pairs(city_ctx.tags  or {}) do tags[k]  = v end
         for k, v in pairs(city_ctx.slots or {}) do slots[k] = v end

@@ -402,13 +402,17 @@ function GameView:_drawFloatingTexts(sidebar_w, screen_w, screen_h)
     local game_world_w = screen_w - sidebar_w
     local cx, cy = Game.camera.x, Game.camera.y
     local cs = Game.camera.scale
+    local WrapRender = require("views.WrapRender")
     love.graphics.setFont(Game.fonts.ui)
     for _, ft in ipairs(texts) do
-        -- ft.x/ft.y are world-pixel coords (city origin already baked in at emit time)
-        local sx = sidebar_w + game_world_w / 2 + (ft.x - cx) * cs
-        local sy = screen_h / 2 + (ft.y - cy) * cs
-        love.graphics.setColor(1, 1, 0.3, ft.alpha)
-        love.graphics.printf(ft.text, sx - 60, sy, 120, "center")
+        -- ft.x/ft.y are world-pixel coords (city origin already baked in at emit time).
+        -- Render once per visible wrapped world copy so floating texts appear in loops.
+        WrapRender.eachOffset(Game, function(off)
+            local sx = sidebar_w + game_world_w / 2 + (ft.x + off - cx) * cs
+            local sy = screen_h / 2 + (ft.y - cy) * cs
+            love.graphics.setColor(1, 1, 0.3, ft.alpha)
+            love.graphics.printf(ft.text, sx - 60, sy, 120, "center")
+        end)
     end
 end
 
@@ -580,7 +584,9 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     love.graphics.translate(-Game.camera.x, -Game.camera.y)
     love.graphics.setColor(1, 1, 1)
 
-    -- Compute horizontal tile range once; all layers reuse tile_i0/tile_i1
+    -- Compute horizontal tile range once; all layers reuse tile_i0/tile_i1.
+    -- Also publish the wrap context so non-tile-loop draws (icons, labels,
+    -- floating text, etc.) can iterate the same offsets via WrapRender.
     local mpw = (Game.world_w or 0) * ts
     local tile_i0, tile_i1 = 0, 0
     if mpw > 0 then
@@ -588,6 +594,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         tile_i0 = math.floor((Game.camera.x - half) / mpw)
         tile_i1 = math.ceil( (Game.camera.x + half) / mpw)
     end
+    require("views.WrapRender").beginFrame(Game, tile_i0, tile_i1, mpw)
 
     -- Viewport AABB in world coords (used to cull off-screen cities)
     local vp_half_w = vw * 0.5 / cs
@@ -782,12 +789,14 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     end  -- end debug overlay tile loop
     love.graphics.setColor(1, 1, 1)
 
-    -- LAYER: Entities — depot, clients, vehicles (unified world pixels, tiled)
+    -- LAYER: Entities — depot, clients, vehicles (unified world pixels, tiled).
+    -- Wrap via WrapRender so DrawingUtils helpers called inside (drawWorldIcon,
+    -- drawCountBadge) see the active wrap depth and don't double-iterate.
     local umap = Game.maps.unified
     local uts  = umap and umap.tile_pixel_size or (ts / 3)
-    for i = tile_i0, tile_i1 do
+    require("views.WrapRender").eachOffset(Game, function(_off)
         love.graphics.push()
-        love.graphics.translate(i * mpw, 0)
+        love.graphics.translate(_off, 0)
 
         -- Depots
         if cs >= Z.ZONE_THRESHOLD then
@@ -940,7 +949,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         end
 
         love.graphics.pop()
-    end
+    end)
 
     -- LAYER: Trip preview (multi-modal route via entrance graph, cached per trip)
     local _hov2 = Game.ui and Game.ui.hovered_entity
@@ -1154,6 +1163,9 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     end
 
     love.graphics.pop()  -- camera transform pop
+    -- WrapRender context published here stays active through the rest of
+    -- GameView:draw (fog, ghost, logistics, floating text, MapLabels) so
+    -- those layers wrap consistently. Cleared at the end of GameView:draw.
 end
 
 function GameView:_drawDeliveryDebug(umap, uts, tile_i0, tile_i1, mpw, cs)
@@ -1341,6 +1353,10 @@ function GameView:_drawDistrictOverlay(active_map, sidebar_w, screen_w, screen_h
     love.graphics.scale(Game.camera.scale, Game.camera.scale)
     love.graphics.translate(-Game.camera.x, -Game.camera.y)
 
+    local _WR = require("views.WrapRender")
+    _WR.eachOffset(Game, function(_off)
+        love.graphics.push()
+        love.graphics.translate(_off, 0)
     for _, m in ipairs(district_maps) do
         local city_mn_x = m.world_mn_x or (Game.world_gen_city_mn_x or 1)
         local city_mn_y = m.world_mn_y or (Game.world_gen_city_mn_y or 1)
@@ -1386,6 +1402,8 @@ function GameView:_drawDistrictOverlay(active_map, sidebar_w, screen_w, screen_h
         end
         ::next_map::
     end
+        love.graphics.pop()
+    end)
     love.graphics.setLineWidth(1)
     love.graphics.pop()
 
@@ -1484,37 +1502,42 @@ function GameView:_drawLogisticsOverlay(active_map, sidebar_w, screen_w, screen_
     love.graphics.scale(Game.camera.scale, Game.camera.scale)
     love.graphics.translate(-Game.camera.x, -Game.camera.y)
 
-    for _, m in ipairs(city_maps) do
-        local tps = m.tile_pixel_size or ts
-        local ox  = ((m.world_mn_x or 1) - 1) * ts
-        local oy  = ((m.world_mn_y or 1) - 1) * ts
+    require("views.WrapRender").eachOffset(Game, function(_off)
+        love.graphics.push()
+        love.graphics.translate(_off, 0)
+        for _, m in ipairs(city_maps) do
+            local tps = m.tile_pixel_size or ts
+            local ox  = ((m.world_mn_x or 1) - 1) * ts
+            local oy  = ((m.world_mn_y or 1) - 1) * ts
 
-        local zg = m.zone_grid
-        if not zg then goto next_logistics_map end
-        for gy_i = 1, #zg do
-            local row = zg[gy_i]
-            if row then
-                for gx_i = 1, #row do
-                    local zone = row[gx_i]
-                    if zone and zone ~= "none" then
-                        local tier
-                        if ZT.CAN_SEND[zone] then
-                            tier = 2
-                        elseif ZT.CAN_RECEIVE[zone] then
-                            tier = 1
-                        else
-                            tier = 0
+            local zg = m.zone_grid
+            if zg then
+                for gy_i = 1, #zg do
+                    local row = zg[gy_i]
+                    if row then
+                        for gx_i = 1, #row do
+                            local zone = row[gx_i]
+                            if zone and zone ~= "none" then
+                                local tier
+                                if ZT.CAN_SEND[zone] then
+                                    tier = 2
+                                elseif ZT.CAN_RECEIVE[zone] then
+                                    tier = 1
+                                else
+                                    tier = 0
+                                end
+                                local c = COL[tier]
+                                love.graphics.setColor(c[1], c[2], c[3], c[4])
+                                love.graphics.rectangle("fill",
+                                    ox + (gx_i-1) * tps, oy + (gy_i-1) * tps, tps, tps)
+                            end
                         end
-                        local c = COL[tier]
-                        love.graphics.setColor(c[1], c[2], c[3], c[4])
-                        love.graphics.rectangle("fill",
-                            ox + (gx_i-1) * tps, oy + (gy_i-1) * tps, tps, tps)
                     end
                 end
             end
         end
-        ::next_logistics_map::
-    end
+        love.graphics.pop()
+    end)
 
     love.graphics.pop()
     love.graphics.setColor(1, 1, 1)
@@ -1536,10 +1559,15 @@ function GameView:_drawRegionOverlay(active_map, sidebar_w, screen_w, screen_h)
 
     love.graphics.setColor(0.9, 0.7, 0.2, 0.75)
     love.graphics.setLineWidth(math.max(0.5, 1.5 / cs))
-    for i = 1, n do
-        local s = segs[i]
-        love.graphics.line(s.x1, s.y1, s.x2, s.y2)
-    end
+    require("views.WrapRender").eachOffset(Game, function(_off)
+        love.graphics.push()
+        love.graphics.translate(_off, 0)
+        for i = 1, n do
+            local s = segs[i]
+            love.graphics.line(s.x1, s.y1, s.x2, s.y2)
+        end
+        love.graphics.pop()
+    end)
     love.graphics.setLineWidth(1)
     love.graphics.pop()
     love.graphics.setColor(1, 1, 1)
@@ -1613,25 +1641,30 @@ function GameView:_drawBiomeOverlay(active_map, sidebar_w, screen_w, screen_h)
     local ox = (mn_x - 1) * ts
     local oy = (mn_y - 1) * ts
 
-    for wy = mn_y, mx_y do
-        for wx = mn_x, mx_x do
-            local bd = bdata[(wy - 1) * world_w + wx]
-            if bd then
-                local col     = BCOLORS[bd.name] or {0.55, 0.55, 0.55}
-                local px      = ox + (wx - mn_x) * cell_px
-                local py      = oy + (wy - mn_y) * cell_px
-                local hovered = hover_wx == wx and hover_wy == wy
-                love.graphics.setColor(col[1], col[2], col[3], hovered and 0.72 or 0.45)
-                love.graphics.rectangle("fill", px, py, cell_px, cell_px)
-                if hovered then
-                    love.graphics.setColor(1, 1, 1, 0.9)
-                    love.graphics.setLineWidth(math.max(1, tps * 0.15))
-                    love.graphics.rectangle("line", px, py, cell_px, cell_px)
-                    love.graphics.setLineWidth(1)
+    require("views.WrapRender").eachOffset(Game, function(_off)
+        love.graphics.push()
+        love.graphics.translate(_off, 0)
+        for wy = mn_y, mx_y do
+            for wx = mn_x, mx_x do
+                local bd = bdata[(wy - 1) * world_w + wx]
+                if bd then
+                    local col     = BCOLORS[bd.name] or {0.55, 0.55, 0.55}
+                    local px      = ox + (wx - mn_x) * cell_px
+                    local py      = oy + (wy - mn_y) * cell_px
+                    local hovered = hover_wx == wx and hover_wy == wy
+                    love.graphics.setColor(col[1], col[2], col[3], hovered and 0.72 or 0.45)
+                    love.graphics.rectangle("fill", px, py, cell_px, cell_px)
+                    if hovered then
+                        love.graphics.setColor(1, 1, 1, 0.9)
+                        love.graphics.setLineWidth(math.max(1, tps * 0.15))
+                        love.graphics.rectangle("line", px, py, cell_px, cell_px)
+                        love.graphics.setLineWidth(1)
+                    end
                 end
             end
         end
-    end
+        love.graphics.pop()
+    end)
     love.graphics.pop()
 
     -- Hover tooltip (screen space)
@@ -1696,6 +1729,9 @@ function GameView:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
     love.graphics.scale(cs, cs)
     love.graphics.translate(-Game.camera.x, -Game.camera.y)
 
+    require("views.WrapRender").eachOffset(Game, function(_off)
+        love.graphics.push()
+        love.graphics.translate(_off, 0)
     -- Filled tiles: all road types
     for uy = uy0, uy1 do
         local base = (uy - 1) * gw
@@ -1766,6 +1802,8 @@ function GameView:_drawUnifiedGridOverlay(sidebar_w, screen_w, screen_h)
         end)
     end
 
+        love.graphics.pop()
+    end)
     love.graphics.setLineWidth(1)
     love.graphics.pop()
     love.graphics.setColor(1, 1, 1)
@@ -2017,6 +2055,8 @@ function GameView:draw()
     end
     require("views.MapLabels").render(Game, sidebar_w, screen_w, screen_h)
     love.graphics.setScissor()
+    -- Clear the per-frame world wrap context (published in _drawWorldGenMode).
+    require("views.WrapRender").endFrame(Game)
     if Game.debug_f3 then self:_drawF3Overlay() end
 end
 
@@ -2186,60 +2226,69 @@ function GameView:_drawHighwayBuildGhost(sidebar_w, screen_w, screen_h)
     love.graphics.setLineJoin("bevel")
     love.graphics.setLineStyle("smooth")
 
-    -- Confirmed path legs — solid orange
-    if #ghost_cache.confirmed_pts >= 4 then
-        local smooth = PathUtils.chaikin(ghost_cache.confirmed_pts, 3)
-        love.graphics.setColor(1.0, 0.55, 0.1, 0.85)
-        love.graphics.setLineWidth(lw)
-        love.graphics.line(smooth)
-    end
+    -- Wrap the world-coord ghost draw so the build preview shows on every
+    -- visible looped copy of the world.
+    require("views.WrapRender").eachOffset(Game, function(_off)
+        love.graphics.push()
+        love.graphics.translate(_off, 0)
 
-    -- Preview leg — semi-transparent orange (or red dashes if no path found)
-    if #ghost_cache.preview_pts >= 4 then
-        if ghost_cache.preview_no_path then
-            love.graphics.setColor(1.0, 0.2, 0.2, 0.5)
-            love.graphics.setLineWidth(lw * 0.5)
-            love.graphics.setLineStyle("rough")
-            love.graphics.line(ghost_cache.preview_pts)
-            love.graphics.setLineStyle("smooth")
-        else
-            local smooth = PathUtils.chaikin(ghost_cache.preview_pts, 3)
-            love.graphics.setColor(1.0, 0.55, 0.1, 0.35)
+        -- Confirmed path legs — solid orange
+        if #ghost_cache.confirmed_pts >= 4 then
+            local smooth = PathUtils.chaikin(ghost_cache.confirmed_pts, 3)
+            love.graphics.setColor(1.0, 0.55, 0.1, 0.85)
             love.graphics.setLineWidth(lw)
             love.graphics.line(smooth)
         end
-    end
 
-    love.graphics.setLineWidth(1)
-    love.graphics.setLineStyle("rough")
-    love.graphics.setLineJoin("miter")
-
-    -- Node markers — yellow circles
-    love.graphics.setColor(1, 1, 0, 0.9)
-    for _, n in ipairs(nodes) do
-        love.graphics.circle("fill", (n.wx - 0.5) * ts, (n.wy - 0.5) * ts, ts * 0.3)
-    end
-
-    -- Hover cell highlight — colour-coded by terrain cost
-    if hwx then
-        if IS.isHighwayCell(hwx, hwy, Game) then
-            love.graphics.setColor(0.2, 1.0, 0.2, 0.65)   -- green: valid endpoint
-        else
-            local cost = IS.getTerrainCost(hwx, hwy, Game)
-            if cost >= math.huge then
-                love.graphics.setColor(1.0, 0.15, 0.15, 0.55)  -- red: impassable
-            elseif cost >= 6 then
-                love.graphics.setColor(1.0, 0.40, 0.05, 0.60)  -- dark orange: very expensive
-            elseif cost >= 3 then
-                love.graphics.setColor(1.0, 0.65, 0.10, 0.60)  -- orange: expensive
-            elseif cost >= 1.5 then
-                love.graphics.setColor(1.0, 0.90, 0.20, 0.55)  -- yellow: moderate
+        -- Preview leg — semi-transparent orange (or red dashes if no path found)
+        if #ghost_cache.preview_pts >= 4 then
+            if ghost_cache.preview_no_path then
+                love.graphics.setColor(1.0, 0.2, 0.2, 0.5)
+                love.graphics.setLineWidth(lw * 0.5)
+                love.graphics.setLineStyle("rough")
+                love.graphics.line(ghost_cache.preview_pts)
+                love.graphics.setLineStyle("smooth")
             else
-                love.graphics.setColor(0.55, 1.0, 0.30, 0.50)  -- light green: cheap
+                local smooth = PathUtils.chaikin(ghost_cache.preview_pts, 3)
+                love.graphics.setColor(1.0, 0.55, 0.1, 0.35)
+                love.graphics.setLineWidth(lw)
+                love.graphics.line(smooth)
             end
         end
-        love.graphics.rectangle("fill", (hwx - 1) * ts, (hwy - 1) * ts, ts, ts)
-    end
+
+        love.graphics.setLineWidth(1)
+        love.graphics.setLineStyle("rough")
+        love.graphics.setLineJoin("miter")
+
+        -- Node markers — yellow circles
+        love.graphics.setColor(1, 1, 0, 0.9)
+        for _, n in ipairs(nodes) do
+            love.graphics.circle("fill", (n.wx - 0.5) * ts, (n.wy - 0.5) * ts, ts * 0.3)
+        end
+
+        -- Hover cell highlight — colour-coded by terrain cost
+        if hwx then
+            if IS.isHighwayCell(hwx, hwy, Game) then
+                love.graphics.setColor(0.2, 1.0, 0.2, 0.65)   -- green: valid endpoint
+            else
+                local cost = IS.getTerrainCost(hwx, hwy, Game)
+                if cost >= math.huge then
+                    love.graphics.setColor(1.0, 0.15, 0.15, 0.55)  -- red: impassable
+                elseif cost >= 6 then
+                    love.graphics.setColor(1.0, 0.40, 0.05, 0.60)  -- dark orange: very expensive
+                elseif cost >= 3 then
+                    love.graphics.setColor(1.0, 0.65, 0.10, 0.60)  -- orange: expensive
+                elseif cost >= 1.5 then
+                    love.graphics.setColor(1.0, 0.90, 0.20, 0.55)  -- yellow: moderate
+                else
+                    love.graphics.setColor(0.55, 1.0, 0.30, 0.50)  -- light green: cheap
+                end
+            end
+            love.graphics.rectangle("fill", (hwx - 1) * ts, (hwy - 1) * ts, ts, ts)
+        end
+
+        love.graphics.pop()
+    end)
 
     love.graphics.pop()
     love.graphics.setColor(1, 1, 1)

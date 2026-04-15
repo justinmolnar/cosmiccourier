@@ -47,7 +47,11 @@ float fbm(vec2 p) {
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 {
     vec2 world_pos = (sc - vp_offset) / cam_scale + cam_pos;
-    vec2 mask_uv = world_pos / world_pixel_size;
+    // World wraps horizontally; sample the reveal/dist textures in tile-local
+    // UV so looped copies of the world inherit the same fog state. fract on y
+    // is a no-op for in-range positions.
+    vec2 mask_uv_raw = world_pos / world_pixel_size;
+    vec2 mask_uv = vec2(fract(mask_uv_raw.x), fract(mask_uv_raw.y));
     float revealed = Texel(reveal_mask, mask_uv).r;
 
     // Skip pixels deep inside the revealed area
