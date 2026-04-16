@@ -491,6 +491,26 @@ function InputController:handleGameWorldClick(x, y, button)
         local hit = self.game.entities:handle_click(world_x, world_y, self.game)
         -- tab unchanged: user stays on whichever tab they had open
     end
+
+    -- Update the City tab's selected city when the click landed inside a city.
+    -- Inlined (the module-level _worldToSubcell / _cityIdxForSubcell helpers
+    -- are declared later in the file and aren't visible to this closure).
+    if umap then
+        local gx = math.floor(world_x / umap.tile_pixel_size) + 1
+        local gy = math.floor(world_y / umap.tile_pixel_size) + 1
+        if gx >= 1 and gy >= 1 and gx <= umap._w and gy <= umap._h then
+            for i, cmap in ipairs(self.game.maps.all_cities or {}) do
+                local ox = (cmap.world_mn_x - 1) * 3
+                local oy = (cmap.world_mn_y - 1) * 3
+                local lx, ly = gx - ox, gy - oy
+                if lx >= 1 and ly >= 1
+                   and cmap.grid and lx <= #(cmap.grid[1] or {}) and ly <= #cmap.grid then
+                    require("services.ScopeSelectionService").setSelectedCity(self.game, i)
+                    break
+                end
+            end
+        end
+    end
 end
 
 function InputController:update(dt)

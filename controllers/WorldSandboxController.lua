@@ -432,7 +432,29 @@ function WorldSandboxController:sendToGame()
     end
 
     local MAX_REGEN_ATTEMPTS = C.WORLD_GEN.STARTING_CITY_MAX_REGEN_ATTEMPTS
-    local start_idx, chosen_rid = pickStartIdx()
+    local start_idx, chosen_rid
+
+    -- Save-reload path: SaveService.primeWorld sets _forced_start_idx so we
+    -- land on the exact city the save expects, regardless of RNG drift.
+    if self._forced_start_idx
+       and self.city_bounds_list
+       and self.city_bounds_list[self._forced_start_idx] then
+        start_idx = self._forced_start_idx
+        local any_ci = next(self.city_bounds_list[start_idx])
+        chosen_rid   = any_ci and self.region_map and self.region_map[any_ci] or nil
+        self._forced_start_idx = nil
+    else
+        start_idx, chosen_rid = pickStartIdx()
+    end
+
+    -- Stash the chosen starter index on game state so SaveService can pin it
+    -- for reloads. This is the REAL city_locations-space index that drives
+    -- fog + starter depot placement — not a post-hoc derivation from
+    -- all_cities ordering, which always puts the starter at [1].
+    if game.state then
+        game.state._world_start_idx = start_idx
+    end
+
     local regen_attempts = 0
     while not start_idx and regen_attempts < MAX_REGEN_ATTEMPTS do
         regen_attempts = regen_attempts + 1

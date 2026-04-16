@@ -42,6 +42,7 @@ local columns = {
     },
     {
         id = "city", label = "City", width = 90, min_width = 40,
+        required_scope_tier = 2,
         format = function(item, game)
             local c = depotCity(item, game)
             return c and (c.name or c.id) or "—"
@@ -53,6 +54,7 @@ local columns = {
     },
     {
         id = "district", label = "District", width = 90, min_width = 40,
+        required_scope_tier = 2,
         visible_default = false,
         format = function(item, game)
             local d = item.depot

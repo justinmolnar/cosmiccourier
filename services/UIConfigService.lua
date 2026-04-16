@@ -26,6 +26,46 @@ function UIConfigService.getGridConfig(game, grid_id)
     return cfg
 end
 
+-- ─── Accordion collapsed state ──────────────────────────────────────────────
+-- Parallel structure to datagrids; state.ui_config.accordions[tab_id][section_id].collapsed.
+
+local function ensureAccordions(game)
+    local root = ensureRoot(game)
+    root.accordions = root.accordions or {}
+    return root.accordions
+end
+
+function UIConfigService.getAccordion(game, tab_id, section_id, default_collapsed)
+    local acc = ensureAccordions(game)
+    acc[tab_id] = acc[tab_id] or {}
+    if acc[tab_id][section_id] == nil then
+        acc[tab_id][section_id] = { collapsed = default_collapsed and true or false }
+    end
+    return acc[tab_id][section_id]
+end
+
+function UIConfigService.setAccordionCollapsed(game, tab_id, section_id, collapsed)
+    local entry = UIConfigService.getAccordion(game, tab_id, section_id)
+    entry.collapsed = collapsed and true or false
+end
+
+function UIConfigService.toggleAccordion(game, tab_id, section_id)
+    local entry = UIConfigService.getAccordion(game, tab_id, section_id)
+    entry.collapsed = not entry.collapsed
+    return entry.collapsed
+end
+
+-- Drop accordion entries for sections/tabs that no longer exist in the UI definition.
+function UIConfigService.pruneAccordionOrphans(game, tab_id, valid_section_ids)
+    local acc = ensureAccordions(game)
+    if not acc[tab_id] then return end
+    local valid = {}
+    for _, id in ipairs(valid_section_ids) do valid[id] = true end
+    for id in pairs(acc[tab_id]) do
+        if not valid[id] then acc[tab_id][id] = nil end
+    end
+end
+
 function UIConfigService.setColumnWidth(game, grid_id, col_id, width)
     local cfg = UIConfigService.getGridConfig(game, grid_id)
     cfg.widths[col_id] = width

@@ -13,24 +13,18 @@ end
 function DrawingUtils.drawWorldIcon(game, icon, px, py)
     local g    = love.graphics
     local font = game.fonts.emoji
-    local hw   = math.floor(font:getWidth(icon) / 2)
-    local hh   = math.floor(font:getHeight()    / 2)
-    local cs   = game.camera.scale
 
-    -- Auto-wrap: render once per visible world copy. eachOffset runs the
-    -- callback once with offset=0 when no wrap context is published, so
-    -- non-wrapped contexts (e.g. fallback city view) keep working unchanged.
-    require("views.WrapRender").eachOffset(game, function(off)
-        g.push()
-        g.translate(px + off, py)
-        g.scale(1 / cs, 1 / cs)
-        g.setFont(font)
-        g.setColor(0, 0, 0, 0.6)
-        g.print(icon, -(hw - 1), -(hh - 1))
-        g.setColor(1, 1, 1)
-        g.print(icon, -hw, -hh)
-        g.pop()
-    end)
+    g.push()
+    g.translate(px, py)
+    g.scale(1 / game.camera.scale, 1 / game.camera.scale)
+    g.setFont(font)
+    local hw = math.floor(font:getWidth(icon) / 2)
+    local hh = math.floor(font:getHeight()    / 2)
+    g.setColor(0, 0, 0, 0.6)
+    g.print(icon, -(hw - 1), -(hh - 1))
+    g.setColor(1, 1, 1)
+    g.print(icon, -hw, -hh)
+    g.pop()
 end
 
 function DrawingUtils.setFontSafe(font)
@@ -173,30 +167,28 @@ end
 
 function DrawingUtils.drawCountBadge(game, count, px, py)
     if count <= 0 then return end
-    local g    = love.graphics
-    local cs   = game.camera.scale
-    local r    = 7   -- badge radius in screen pixels
-    local ox   = 10  -- offset right from entity center
-    local oy   = -10 -- offset up from entity center
+    local g   = love.graphics
+    local cs  = game.camera.scale
+    local r   = 7
+    local ox  = 10
+    local oy  = -10
+
+    g.push()
+    g.translate(px, py)
+    g.scale(1 / cs, 1 / cs)
+
+    g.setColor(0.85, 0.25, 0.2, 0.9)
+    g.circle("fill", ox, oy, r)
+
     local font = game.fonts.ui_small
+    g.setFont(font)
     local text = tostring(count)
-    local tw   = font:getWidth(text)
-    local th   = font:getHeight()
+    local tw = font:getWidth(text)
+    local th = font:getHeight()
+    g.setColor(1, 1, 1, 1)
+    g.print(text, ox - tw / 2, oy - th / 2)
 
-    require("views.WrapRender").eachOffset(game, function(off)
-        g.push()
-        g.translate(px + off, py)
-        g.scale(1 / cs, 1 / cs)
-
-        g.setColor(0.85, 0.25, 0.2, 0.9)
-        g.circle("fill", ox, oy, r)
-
-        g.setFont(font)
-        g.setColor(1, 1, 1, 1)
-        g.print(text, ox - tw / 2, oy - th / 2)
-
-        g.pop()
-    end)
+    g.pop()
 end
 
 return DrawingUtils

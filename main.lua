@@ -247,6 +247,7 @@ function love.load()
             SaveService.applyEntities(Game, save)
         end, "Save Game Loading")
     end
+
     Game.error_service.logInfo("Main", "Game initialization completed successfully")
 end
 

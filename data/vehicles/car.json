@@ -5,7 +5,7 @@
   "dot_color": [0.4, 0.6, 1.0],
   "base_speed": 120,
   "base_capacity": 3,
-  "base_cost": 600,
+  "base_cost": 300,
   "cost_multiplier": 1.2,
   "locked_to_zone": "city",
   "transport_mode": "road",

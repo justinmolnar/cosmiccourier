@@ -66,6 +66,7 @@ local columns = {
     },
     {
         id = "scope", label = "Scope", width = 60, min_width = 40,
+        required_scope_tier = 2,  -- at tier 1 all trips are district-scoped; column is noise
         format   = function(item) return item.scope or "—" end,
         sort_key = function(item) return item.scope or "" end,
     },

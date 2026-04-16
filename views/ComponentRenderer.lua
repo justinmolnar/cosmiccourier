@@ -8,10 +8,18 @@
 local CR = {}
 
 local DataGrid = require("views.DataGrid")
+local UIConfig = require("services.UIConfigService")
 
 local ICON_SIZE    = 64
 local ICON_SPACING = 12
 local ICON_ROW_H   = ICON_SIZE + 20
+
+-- Accordion section
+local ACC_HEADER_H = 26
+local ACC_PAD      = 6
+
+-- Scope selector
+local SSEL_H = 30
 
 -- Line heights per style (must match font sizes in game.fonts)
 local LINE_H = { body = 20, small = 16, heading = 22, muted = 20 }
@@ -66,8 +74,128 @@ function CR._drawComp(comp, px, pw, p, y, game)
         local h = DataGrid.totalHeight(comp, game)
         DataGrid.draw(comp, px, pw, p, y, game)
         return h
+    elseif t == "accordion_section" then
+        return CR._accordionSection(comp, px, pw, p, y, game)
+    elseif t == "scope_selector" then
+        return CR._scopeSelector(comp, px, pw, p, y, game)
     end
     return comp.h or 0
+end
+
+-- ─── Accordion section ──────────────────────────────────────────────────────
+
+local function accordionCollapsed(comp, game)
+    if not (comp.tab_id and comp.section_id and game) then return false end
+    return UIConfig.getAccordion(game, comp.tab_id, comp.section_id).collapsed == true
+end
+
+local function accordionHeight(comp, game)
+    if accordionCollapsed(comp, game) then return ACC_HEADER_H end
+    local h = ACC_HEADER_H
+    for _, child in ipairs(comp.children or {}) do
+        h = h + CR._compHeight(child, game)
+    end
+    return h + ACC_PAD
+end
+
+-- Measure a single component's height without drawing. Mirrors _drawComp's
+-- height calculation. Keeps accordion recursion accurate.
+function CR._compHeight(comp, game)
+    local t = comp.type
+    if t == "button" then return (function()
+        local lines = comp.lines
+        if not lines or #lines == 0 then return 32 end
+        local h = BTN_PAD
+        for _, line in ipairs(lines) do
+            h = h + (LINE_H[line.style or "body"] or 20)
+        end
+        return h
+    end)()
+    elseif t == "label"    then return comp.h or 24
+    elseif t == "icon_row" then return comp.h or ICON_ROW_H
+    elseif t == "divider"  then return comp.h or 6
+    elseif t == "spacer"   then return comp.h or 8
+    elseif t == "custom"   then return comp.h or 0
+    elseif t == "datagrid" then return DataGrid.totalHeight(comp, game)
+    elseif t == "accordion_section" then return accordionHeight(comp, game)
+    elseif t == "scope_selector"    then return SSEL_H
+    end
+    return comp.h or 0
+end
+
+function CR._accordionSection(comp, px, pw, p, y, game)
+    local collapsed = accordionCollapsed(comp, game)
+    local x = px + p
+    local w = pw - p * 2
+
+    -- Header bar
+    love.graphics.setColor(0.18, 0.18, 0.24)
+    love.graphics.rectangle("fill", x, y, w, ACC_HEADER_H, 3)
+    love.graphics.setColor(0.30, 0.30, 0.40)
+    love.graphics.rectangle("line", x, y, w, ACC_HEADER_H, 3)
+
+    love.graphics.setFont(game.fonts.ui)
+    love.graphics.setColor(0.95, 0.95, 1.0)
+    local glyph = collapsed and "▶" or "▼"
+    love.graphics.print(glyph, x + 8, y + (ACC_HEADER_H - game.fonts.ui:getHeight()) * 0.5)
+
+    local header = comp.header or comp.section_id or ""
+    love.graphics.print(header, x + 28, y + (ACC_HEADER_H - game.fonts.ui:getHeight()) * 0.5)
+
+    -- Optional badge (e.g., count) right-aligned
+    if comp.badge then
+        local ok, badge_val = pcall(comp.badge, game)
+        if ok and badge_val ~= nil then
+            local text = tostring(badge_val)
+            love.graphics.setFont(game.fonts.ui_small)
+            love.graphics.setColor(0.65, 0.70, 0.85)
+            local tw = game.fonts.ui_small:getWidth(text)
+            love.graphics.print(text, x + w - tw - 10,
+                y + (ACC_HEADER_H - game.fonts.ui_small:getHeight()) * 0.5)
+        end
+    end
+
+    if collapsed then return ACC_HEADER_H end
+
+    -- Expanded: draw children stacked below the header
+    local child_y = y + ACC_HEADER_H
+    for _, child in ipairs(comp.children or {}) do
+        local ch = CR._drawComp(child, px, pw, p, child_y, game)
+        child_y = child_y + (ch or 0)
+    end
+    return (child_y - y) + ACC_PAD
+end
+
+-- ─── Scope selector ─────────────────────────────────────────────────────────
+
+function CR._scopeSelector(comp, px, pw, p, y, game)
+    local x = px + p
+    local w = pw - p * 2
+    local h = SSEL_H
+
+    -- Background (subtle — this is a header affordance, not a call-to-action)
+    love.graphics.setColor(0.14, 0.14, 0.20)
+    love.graphics.rectangle("fill", x, y, w, h, 3)
+    love.graphics.setColor(0.30, 0.30, 0.40)
+    love.graphics.rectangle("line", x, y, w, h, 3)
+
+    love.graphics.setFont(game.fonts.ui)
+    local fh = game.fonts.ui:getHeight()
+    local label = comp.label or "Scope:"
+    local name  = comp.value_fn and comp.value_fn(game) or "—"
+
+    love.graphics.setColor(0.65, 0.70, 0.85)
+    love.graphics.print(label, x + 8, y + (h - fh) * 0.5)
+    local prefix_w = game.fonts.ui:getWidth(label) + 14
+
+    love.graphics.setColor(1.0, 1.0, 1.0)
+    love.graphics.print(name, x + prefix_w, y + (h - fh) * 0.5)
+
+    -- Chevron on the right
+    love.graphics.setColor(0.7, 0.7, 0.85)
+    love.graphics.print("▾", x + w - 20, y + (h - fh) * 0.5)
+
+    return h
 end
 
 function CR._label(comp, px, pw, p, y, game)
@@ -213,6 +341,38 @@ function CR.hitTest(components, panel_x, panel_w, cx, cy, game)
                 local hit = DataGrid.hitTest(comp, panel_x, panel_w, p,
                     cy - cursor_y, cx, cy, _game)
                 if hit then return hit end
+            end
+
+        elseif comp.type == "accordion_section" then
+            h = accordionHeight(comp, _game)
+            -- Header: toggle
+            if cy >= cursor_y and cy < cursor_y + ACC_HEADER_H then
+                return { id = "accordion_toggle", data = {
+                    tab_id = comp.tab_id, section_id = comp.section_id,
+                }}
+            end
+            -- Body: recurse children at their own y offset
+            if cy >= cursor_y + ACC_HEADER_H and cy < cursor_y + h
+               and not accordionCollapsed(comp, _game) then
+                local child_cursor = cursor_y + ACC_HEADER_H
+                for _, child in ipairs(comp.children or {}) do
+                    local child_h = CR._compHeight(child, _game)
+                    if cy >= child_cursor and cy < child_cursor + child_h then
+                        local hit = CR.hitTest({ child }, panel_x, panel_w,
+                            cx, cy - child_cursor, _game)
+                        if hit then return hit end
+                        break
+                    end
+                    child_cursor = child_cursor + child_h
+                end
+            end
+
+        elseif comp.type == "scope_selector" then
+            h = SSEL_H
+            if cy >= cursor_y and cy < cursor_y + h then
+                return { id = "scope_select_open", data = {
+                    sx = cx, sy = cy,
+                }}
             end
 
         else

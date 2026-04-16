@@ -5,7 +5,7 @@
   "dot_color": [0.2, 0.5, 0.9],
   "base_speed": 45,
   "base_capacity": 20,
-  "base_cost": 3000,
+  "base_cost": 1500,
   "cost_multiplier": 1.5,
   "max_range": null,
   "transport_mode": "water",

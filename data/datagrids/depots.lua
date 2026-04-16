@@ -12,6 +12,7 @@ local columns = {
     },
     {
         id = "city", label = "City", width = 80, min_width = 40,
+        required_scope_tier = 2,
         format = function(item, game)
             local c = item:getCity(game)
             return c and (c.name or c.id) or "—"
@@ -23,6 +24,7 @@ local columns = {
     },
     {
         id = "district", label = "District", width = 90, min_width = 40,
+        required_scope_tier = 2,
         format   = function(item, game) return item:getDistrict(game) or "—" end,
         sort_key = function(item, game) return item:getDistrict(game) or "" end,
     },

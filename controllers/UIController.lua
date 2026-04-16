@@ -355,6 +355,16 @@ function UIController:handleMouseDown(x, y, button)
     elseif id == "datagrid_filter_popup" and button == 1 then
         DataGrid.openFilterPopup(data.grid_id, data.source, data.col_id, x, y + 4, Game)
 
+    elseif id == "accordion_toggle" and button == 1 then
+        UIConfig.toggleAccordion(Game, data.tab_id, data.section_id)
+
+    elseif id == "scope_select_open" and button == 1 then
+        local ScopeSelector = require("views.components.ScopeSelector")
+        local items = ScopeSelector.buildCityMenuItems(Game)
+        if items and #items > 0 then
+            ui_manager:showContextMenu(x, y, items)
+        end
+
     end
 
     return true

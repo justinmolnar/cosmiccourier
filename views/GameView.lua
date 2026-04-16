@@ -790,13 +790,11 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
     love.graphics.setColor(1, 1, 1)
 
     -- LAYER: Entities — depot, clients, vehicles (unified world pixels, tiled).
-    -- Wrap via WrapRender so DrawingUtils helpers called inside (drawWorldIcon,
-    -- drawCountBadge) see the active wrap depth and don't double-iterate.
     local umap = Game.maps.unified
     local uts  = umap and umap.tile_pixel_size or (ts / 3)
-    require("views.WrapRender").eachOffset(Game, function(_off)
+    for i = tile_i0, tile_i1 do
         love.graphics.push()
-        love.graphics.translate(_off, 0)
+        love.graphics.translate(i * mpw, 0)
 
         -- Depots
         if cs >= Z.ZONE_THRESHOLD then
@@ -949,7 +947,7 @@ function GameView:_drawWorldGenMode(active_map, ui_manager, sidebar_w, screen_w,
         end
 
         love.graphics.pop()
-    end)
+    end
 
     -- LAYER: Trip preview (multi-modal route via entrance graph, cached per trip)
     local _hov2 = Game.ui and Game.ui.hovered_entity

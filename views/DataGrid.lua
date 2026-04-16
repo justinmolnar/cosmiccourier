@@ -48,15 +48,26 @@ DataGrid.chooser = nil    -- { grid_id, source, x, y, w, h }
 -- ─── Column resolution ───────────────────────────────────────────────────────
 
 -- Returns { {col, width}, ... } for visible columns in definition order.
+-- A column's `required_scope_tier` (optional) hard-gates visibility: below
+-- the player's current tier, the column never appears regardless of the
+-- user's hidden/visible toggle. Width + sort + filter state persist through
+-- this (UIConfigService.pruneOrphans keeps them as long as the source still
+-- declares the column).
 function DataGrid.effectiveColumns(source, game)
-    local cfg = UIConfig.getGridConfig(game, source.id)
-    local out = {}
+    local cfg  = UIConfig.getGridConfig(game, source.id)
+    local tier = require("services.LicenseService").getCurrentTier(game)
+    local out  = {}
     for _, col in ipairs(source.columns) do
-        local override = cfg.hidden[col.id]
+        local scope_req = col.required_scope_tier
         local shown
-        if override == true then shown = false
-        elseif override == false then shown = true
-        else shown = col.visible_default ~= false end
+        if scope_req and tier < scope_req then
+            shown = false   -- scope gate wins over user toggle
+        else
+            local override = cfg.hidden[col.id]
+            if override == true then shown = false
+            elseif override == false then shown = true
+            else shown = col.visible_default ~= false end
+        end
         if shown then
             local w = cfg.widths[col.id] or col.width or 60
             out[#out+1] = { col = col, width = w }
@@ -209,11 +220,13 @@ function DataGrid.draw(comp, panel_x, panel_w, p, y, game)
         cell_x = cell_x + cw
     end
 
-    -- Filter row (DevExpress-style search/whitelist per column).
+    -- Filter row — intentionally subdued so it blends into the header band
+    -- until the user engages with it. Focused/active cells get a brighter
+    -- accent for usability.
     local filter_y = y + DataGrid.HEADER_H
     if show_filters then
-        -- Row background
-        love.graphics.setColor(0.12, 0.12, 0.16)
+        -- Row background matches the header so unfocused cells feel ambient.
+        love.graphics.setColor(0.14, 0.14, 0.18)
         love.graphics.rectangle("fill", gx, filter_y, gw, DataGrid.FILTER_ROW_H)
 
         cell_x = gx
@@ -232,24 +245,26 @@ function DataGrid.draw(comp, panel_x, panel_w, p, y, game)
                 local input_w  = cw - funnel_w - 4
                 local input_h  = DataGrid.FILTER_ROW_H - 6
 
-                -- Background + border (focused input brighter).
                 local is_focused = DataGrid._focused_filter
                                and DataGrid._focused_filter.grid_id == source.id
                                and DataGrid._focused_filter.col_id  == col.id
+
+                -- Background + border. Unfocused fades into the row bg; focused
+                -- pops slightly so the active cell is obvious.
                 if is_focused then
                     love.graphics.setColor(0.05, 0.08, 0.15)
-                else
-                    love.graphics.setColor(0.08, 0.08, 0.12)
-                end
-                love.graphics.rectangle("fill", input_x, input_y, input_w, input_h, 2)
-                if is_focused then
+                    love.graphics.rectangle("fill", input_x, input_y, input_w, input_h, 2)
                     love.graphics.setColor(0.45, 0.65, 1.0)
+                    love.graphics.rectangle("line", input_x, input_y, input_w, input_h, 2)
                 else
-                    love.graphics.setColor(0.3, 0.3, 0.4)
+                    love.graphics.setColor(0.14, 0.14, 0.18)
+                    love.graphics.rectangle("fill", input_x, input_y, input_w, input_h, 2)
+                    love.graphics.setColor(0.20, 0.20, 0.26)
+                    love.graphics.rectangle("line", input_x, input_y, input_w, input_h, 2)
                 end
-                love.graphics.rectangle("line", input_x, input_y, input_w, input_h, 2)
 
                 -- Text: either the focused buffer or the persisted query.
+                -- No placeholder text — empty cell stays empty, ambient by design.
                 local text
                 if is_focused then
                     text = DataGrid._focused_filter.buffer or ""
@@ -258,13 +273,9 @@ function DataGrid.draw(comp, panel_x, panel_w, p, y, game)
                     text = f.query or ""
                 end
 
-                local fh = game.fonts.ui_small:getHeight()
-                local ty = input_y + (input_h - fh) * 0.5
-                if text == "" and not is_focused then
-                    love.graphics.setColor(0.5, 0.5, 0.55)
-                    love.graphics.printf("Filter…", input_x + pad, ty,
-                        input_w - pad * 2, "left")
-                else
+                if text ~= "" then
+                    local fh = game.fonts.ui_small:getHeight()
+                    local ty = input_y + (input_h - fh) * 0.5
                     love.graphics.setColor(1, 1, 1)
                     love.graphics.printf(text, input_x + pad, ty,
                         input_w - pad * 2, "left")
@@ -281,31 +292,26 @@ function DataGrid.draw(comp, panel_x, panel_w, p, y, game)
                     end
                 end
 
-                -- Funnel icon (highlighted if a filter is set for this column).
+                -- Funnel glyph — no button chrome until a filter is actually set.
                 local funnel_x = cell_x + cw - funnel_w - 2
                 local active   = UIConfig.isFilterActive(game, source.id, col.id)
                 if active then
-                    love.graphics.setColor(0.25, 0.55, 0.90)
+                    love.graphics.setColor(0.22, 0.34, 0.52)
                     love.graphics.rectangle("fill", funnel_x, input_y,
                         funnel_w, input_h, 2)
-                    love.graphics.setColor(1, 1, 1)
+                    love.graphics.setColor(0.95, 0.95, 1.0)
                 else
-                    love.graphics.setColor(0.22, 0.22, 0.30)
-                    love.graphics.rectangle("fill", funnel_x, input_y,
-                        funnel_w, input_h, 2)
-                    love.graphics.setColor(0.7, 0.7, 0.85)
+                    love.graphics.setColor(0.40, 0.40, 0.48)
                 end
-                love.graphics.printf("▼", funnel_x, input_y + 2,
+                love.graphics.printf("▾", funnel_x, input_y + 2,
                     funnel_w, "center")
             else
-                -- Non-filterable column: empty greyed cell.
-                love.graphics.setColor(0.10, 0.10, 0.14)
-                love.graphics.rectangle("fill", cell_x + 2, filter_y + 3,
-                    cw - 4, DataGrid.FILTER_ROW_H - 6, 2)
+                -- Non-filterable column: pure row bg (no greyed rectangle).
             end
 
-            -- Column separator (same as header).
-            love.graphics.setColor(0.4, 0.4, 0.5)
+            -- Column separator — matches the muted header tone so it doesn't
+            -- draw attention on its own.
+            love.graphics.setColor(0.24, 0.24, 0.30)
             love.graphics.rectangle("fill", cell_x + cw - 1, filter_y + 2, 1,
                 DataGrid.FILTER_ROW_H - 4)
             cell_x = cell_x + cw

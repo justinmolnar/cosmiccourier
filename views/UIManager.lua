@@ -5,14 +5,11 @@ UIManager.__index = UIManager
 local CR            = require("views.ComponentRenderer")
 local DataGrid      = require("views.DataGrid")
 local ColumnChooser = require("views.ColumnChooser")
-local TripsTab      = require("views.tabs.TripsTab")
-local VehiclesTab  = require("views.tabs.VehiclesTab")
-local UpgradesTab  = require("views.tabs.UpgradesTab")
-local ClientsTab   = require("views.tabs.ClientsTab")
 
-local DepotTab            = require("views.tabs.DepotTab")
-local InfrastructureTab   = require("views.tabs.InfrastructureTab")
-local DispatchTab         = require("views.tabs.DispatchTab")
+local CityTab           = require("views.tabs.CityTab")
+local DispatchTab       = require("views.tabs.DispatchTab")
+local UpgradesTab       = require("views.tabs.UpgradesTab")
+local InfrastructureTab = require("views.tabs.InfrastructureTab")
 
 local PANEL_Y = 148   -- pixels below top of sidebar where panel begins
 
@@ -29,21 +26,20 @@ function UIManager:new(C, game)
     local screen_h = love.graphics.getHeight()
     instance.panel = Panel:new(0, PANEL_Y, C.UI.SIDEBAR_WIDTH, screen_h - PANEL_Y)
 
-    instance.panel:registerTab({ id = "trips",    label = "Trips",    icon = "📦", priority = 1,
-        build = function(g) return TripsTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "vehicles", label = "Vehicles", icon = "🚗", priority = 2,
-        build = function(g) return VehiclesTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "dispatch", label = "Dispatch", icon = "⚡", priority = 3,
+    instance.panel:registerTab({ id = "city",     label = "City",     icon = "🏙️", priority = 1,
+        build = function(g) return CityTab.build(g, instance) end })
+    instance.panel:registerTab({ id = "dispatch", label = "Dispatch", icon = "⚡", priority = 2,
         build = function(g) return DispatchTab.build(g, instance) end,
         visible_when = function(g) return g.state.upgrades.auto_dispatch_unlocked == true end })
-    instance.panel:registerTab({ id = "upgrades", label = "Upgrades", icon = "⬆️", priority = 4,
+    instance.panel:registerTab({ id = "upgrades", label = "Upgrades", icon = "⬆️", priority = 3,
         build = function(g) return UpgradesTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "clients",  label = "Clients",  icon = "🏢", priority = 5,
-        build = function(g) return ClientsTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "depot",    label = "Depot",    icon = "🏗️", priority = 6,
-        build = function(g) return DepotTab.build(g, instance) end })
-    instance.panel:registerTab({ id = "infrastructure", label = "Roads", icon = "🛣️", priority = 7,
-        build = function(g) return InfrastructureTab.build(g, instance) end })
+    instance.panel:registerTab({ id = "building", label = "Building", icon = "🏗️", priority = 4,
+        build = function(g) return InfrastructureTab.build(g, instance) end,
+        visible_when = function(g)
+            local u = g.state.upgrades
+            return u.building_highway_unlocked == true
+                or u.building_dock_unlocked    == true
+        end })
 
     instance.modal_manager  = ModalManager:new()
     instance.context_menu   = nil   -- active ContextMenu instance or nil

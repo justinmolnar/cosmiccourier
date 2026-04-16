@@ -105,6 +105,12 @@ function SaveService.saveGame(game, filename)
     local wsc  = game.world_sandbox_controller
     local seed = gs._world_seed or { a = 0, b = 0 }
 
+    -- `_world_start_idx` is set by WorldSandboxController:sendToGame when it
+    -- picks/forces the starter city. It's the index into city_locations
+    -- (NOT all_cities — all_cities always has the starter at [1]). Saving
+    -- this lets the reload force the same starter through pickStartIdx.
+    local start_idx = gs._world_start_idx
+
     local save = {
         version   = SAVE_VERSION,
         timestamp = os.time(),
@@ -118,8 +124,9 @@ function SaveService.saveGame(game, filename)
         state = gs:serialize(),
 
         world = {
-            seed   = { a = seed.a, b = seed.b },
-            params = wsc and wsc.params or {},
+            seed      = { a = seed.a, b = seed.b },
+            params    = wsc and wsc.params or {},
+            start_idx = start_idx,
         },
 
         trips = serializeTripsTable(game),
@@ -180,6 +187,13 @@ function SaveService.primeWorld(game, save)
     game.state._world_seed = { a = seed.a, b = seed.b }
 
     local wsc = game.world_sandbox_controller
+    -- Force the same starter city on reload. Without this, the next
+    -- pickStartIdx() inside sendToGame rolls the RNG and can land on a
+    -- different city than the save — fog reveals the wrong place while the
+    -- saved entities sit hidden in the real starter.
+    if wsc and save.world.start_idx then
+        wsc._forced_start_idx = save.world.start_idx
+    end
     if wsc and save.world.params then
         wsc.params = wsc.params or {}
         for k, v in pairs(save.world.params) do

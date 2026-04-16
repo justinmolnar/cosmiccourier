@@ -5,7 +5,7 @@
   "dot_color": [0.3, 0.88, 0.35],
   "base_speed": 80,
   "base_capacity": 1,
-  "base_cost": 150,
+  "base_cost": 75,
   "cost_multiplier": 1.15,
   "locked_to_zone": "district",
   "required_depot_district": "downtown",

@@ -33,11 +33,13 @@ local columns = {
     },
     {
         id = "district", label = "District", width = 90, min_width = 40,
+        required_scope_tier = 2,   -- at tier 1 you have one district; column is noise
         format   = function(item, game) return item:getDistrict(game) or "—" end,
         sort_key = function(item, game) return item:getDistrict(game) or "" end,
     },
     {
         id = "city", label = "City", width = 70, min_width = 40,
+        required_scope_tier = 2,
         visible_default = false,
         format = function(item, game)
             local c = item:getCity(game)
