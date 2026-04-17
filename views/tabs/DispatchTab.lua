@@ -1936,6 +1936,47 @@ function DispatchTab.build(game, ui_manager)
         end
     end
 
+    -- ── Card Shop ─────────────────────────────────────────────────────────────
+    do
+        local ScopeService  = require("services.ScopeService")
+        local PackService   = require("services.PackService")
+        local all_packs     = require("data.rule_packs")
+        local all_templates = require("data.rule_templates")
+        local tier          = ScopeService.getTier(game)
+        local money         = game.state.money or 0
+
+        table.insert(comps, { type = "spacer", h = 12 })
+        table.insert(comps, { type = "label", style = "heading", h = 26, text = "Card Shop" })
+
+        local any_visible = false
+        for _, pack in ipairs(all_packs) do
+            if pack.shop_cost and (pack.scope_tier or 1) <= tier then
+                any_visible = true
+                local has_cards = PackService.hasCardsRemaining(pack, all_templates, game.state)
+                local can_afford = money >= pack.shop_cost
+                local label
+                if not has_cards then
+                    label = string.format("🃏 %s — No new cards", pack.name)
+                elseif can_afford then
+                    label = string.format("🃏 %s — $%d", pack.name, pack.shop_cost)
+                else
+                    label = string.format("🃏 %s — $%d (need $%d)", pack.name, pack.shop_cost, pack.shop_cost - money)
+                end
+                table.insert(comps, {
+                    type     = "button",
+                    id       = "dispatch_buy_pack",
+                    data     = { pack_id = pack.id },
+                    disabled = not has_cards or not can_afford,
+                    lines    = {{ text = label, style = "body" }},
+                })
+            end
+        end
+        if not any_visible then
+            table.insert(comps, { type = "label", style = "muted", h = 20,
+                text = "No card packs available at current license tier." })
+        end
+    end
+
     -- ── Dropdown Overlay ─────────────────────────────────────────────────────
     if state.active_dropdown then
         table.insert(comps, {

@@ -489,7 +489,17 @@ function InputController:handleGameWorldClick(x, y, button)
 
     if self.game.entities and self.game.entities.handle_click then
         local hit = self.game.entities:handle_click(world_x, world_y, self.game)
-        -- tab unchanged: user stays on whichever tab they had open
+        if hit and hit.kind then
+            local ok, DETAILS = pcall(require, "data.entity_details")
+            if ok and DETAILS and DETAILS[hit.kind] then
+                local DetailModal = require("views.components.DetailModal")
+                local desc = DETAILS[hit.kind]
+                local um = self.game.ui_manager
+                um.modal_manager:show(
+                    DetailModal:new(desc, hit.entity, self.game,
+                        function() um.modal_manager:hide() end))
+            end
+        end
     end
 
     -- Update the City tab's selected city when the click landed inside a city.

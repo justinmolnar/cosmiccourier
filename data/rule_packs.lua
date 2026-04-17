@@ -23,6 +23,7 @@ return {
         tags           = { "starter" },
         count          = 2,
         max_complexity = 1,
+        guaranteed     = { "assign_any_vehicle" },
     },
 
     -- ── Tier 2: City ─────────────────────────────────────────────────────────
@@ -33,6 +34,7 @@ return {
         tags           = { "assignment" },
         count          = 3,
         max_complexity = 2,
+        shop_cost      = 500,
     },
 
     {   id             = "routing_pack",
@@ -41,6 +43,7 @@ return {
         tags           = { "routing" },
         count          = 3,
         max_complexity = 3,
+        shop_cost      = 800,
     },
 
     -- ── Tier 3: Region ───────────────────────────────────────────────────────
@@ -51,6 +54,7 @@ return {
         tags           = { "hub" },
         count          = 2,
         max_complexity = 3,
+        shop_cost      = 1200,
     },
 
     {   id             = "vehicle_pack",
@@ -59,6 +63,7 @@ return {
         tags           = { "vehicle" },
         count          = 2,
         max_complexity = 3,
+        shop_cost      = 1200,
     },
 
     -- ── Tier 4: Continent ────────────────────────────────────────────────────
@@ -69,6 +74,7 @@ return {
         tags           = { "economy" },
         count          = 2,
         max_complexity = 3,
+        shop_cost      = 2000,
     },
 
     {   id             = "queue_pack",
@@ -77,6 +83,7 @@ return {
         tags           = { "queue" },
         count          = 2,
         max_complexity = 2,
+        shop_cost      = 2000,
     },
 
 }

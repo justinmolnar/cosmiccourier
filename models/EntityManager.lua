@@ -242,27 +242,37 @@ function Entities:update(dt, game)
 end
 
 function Entities:handle_click(x, y, game)
-    local active_map = game.maps[game.active_map_key]
-    local uts = active_map.tile_pixel_size or game.C.MAP.TILE_SIZE
-    
-    -- Check depots first — depot.plot is always in unified sub-cell coords
-    local umap = game.maps.unified
+    local umap  = game.maps.unified
     local u_uts = umap and umap.tile_pixel_size or game.C.MAP.TILE_SIZE
-    local depot_click_r = 20 / game.camera.scale  -- 20 screen-px hit area
+    local cs    = game.camera.scale
+
+    -- Check depots first
+    local depot_r_sq = (20 / cs) ^ 2
     for _, depot in ipairs(self.depots) do
         if depot.plot then
             local dpx = (depot.plot.x - 0.5) * u_uts
             local dpy = (depot.plot.y - 0.5) * u_uts
-            if (x - dpx)^2 + (y - dpy)^2 < depot_click_r^2 then
+            if (x - dpx)^2 + (y - dpy)^2 < depot_r_sq then
                 self.selected_depot = depot
                 self.selected_vehicle = nil
-                return true
+                return { kind = "depot", entity = depot }
             end
         end
     end
 
-    local click_r    = game.C.UI.VEHICLE_CLICK_RADIUS / game.camera.scale
-    local radius_sq  = click_r * click_r
+    -- Check clients (same radius as depots)
+    for _, client in ipairs(self.clients) do
+        if client.px and client.py then
+            if (x - client.px)^2 + (y - client.py)^2 < depot_r_sq then
+                self.selected_client = client
+                return { kind = "client", entity = client }
+            end
+        end
+    end
+
+    -- Check vehicles
+    local click_r   = game.C.UI.VEHICLE_CLICK_RADIUS / cs
+    local radius_sq = click_r * click_r
     local candidates = {}
     for _, vehicle in ipairs(self.vehicles) do
         local dist_sq = (x - vehicle.px)^2 + (y - vehicle.py)^2
@@ -273,8 +283,9 @@ function Entities:handle_click(x, y, game)
 
     if #candidates == 0 then
         self.selected_vehicle = nil
-        self.selected_depot = nil
-        return false
+        self.selected_depot   = nil
+        self.selected_client  = nil
+        return nil
     end
 
     local pick = candidates[1]
@@ -285,7 +296,7 @@ function Entities:handle_click(x, y, game)
         end
     end
     self.selected_vehicle = pick
-    return true
+    return { kind = "vehicle", entity = pick }
 end
 
 return Entities

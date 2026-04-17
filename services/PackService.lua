@@ -75,8 +75,31 @@ function PackService.openPack(pack_def, all_templates, state)
         end
     end
 
-    -- Pick from pool
-    local picked = weightedPick(pool, pack_def.count or 3)
+    -- Guaranteed templates: if the pack declares `guaranteed = {"id", ...}`,
+    -- those templates are picked first (if in the pool and not already owned).
+    -- Remaining slots filled randomly from whatever's left.
+    local picked = {}
+    local used = {}
+    if pack_def.guaranteed then
+        for _, gid in ipairs(pack_def.guaranteed) do
+            for pi, t in ipairs(pool) do
+                if t.id == gid and not used[pi] then
+                    picked[#picked + 1] = t
+                    used[pi] = true
+                    break
+                end
+            end
+        end
+    end
+    local remaining_count = (pack_def.count or 3) - #picked
+    if remaining_count > 0 then
+        local leftover = {}
+        for pi, t in ipairs(pool) do
+            if not used[pi] then leftover[#leftover + 1] = t end
+        end
+        local extras = weightedPick(leftover, remaining_count)
+        for _, t in ipairs(extras) do picked[#picked + 1] = t end
+    end
 
     -- Grant unlocks
     local new_keys = {}
@@ -134,6 +157,21 @@ function PackService.findPack(pack_id, all_packs)
         if p.id == pack_id then return p end
     end
     return nil
+end
+
+--- Returns true if the pack still has unowned templates in its pool.
+function PackService.hasCardsRemaining(pack_def, all_templates, state)
+    local min_c = pack_def.min_complexity or 1
+    local max_c = pack_def.max_complexity or 5
+    for _, t in ipairs(all_templates) do
+        local c = t.complexity or 1
+        if c >= min_c and c <= max_c
+           and matchesTags(t, pack_def.tags or {})
+           and not isOwned(t, state) then
+            return true
+        end
+    end
+    return false
 end
 
 return PackService

@@ -56,7 +56,9 @@
       "Bash(ls data/datagrids)",
       "Bash(mkdir -p data/datagrids)",
       "Bash(sed 's/\".*//')",
-      "Bash(ls *)"
+      "Bash(ls *)",
+      "Bash(python3 *)",
+      "Bash(python *)"
     ]
   }
 }

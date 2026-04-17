@@ -102,7 +102,16 @@ function EventService.setupUIEvents(state, game)
         local archetype_id = data and data.archetype_id
         local archetype    = validateAndCharge(archetype_id)
         if not archetype then return end
-        game.entities:addClient(game, game.entities.depots[1], archetype.id)
+        -- Place in the selected city (not hardcoded depots[1]) so multi-city
+        -- players get clients where they intend.
+        local ScopeSel = require("services.ScopeSelectionService")
+        local sel_city = ScopeSel.getSelectedCity(game)
+        local depot
+        for _, d in ipairs(game.entities.depots or {}) do
+            if d.getCity and d:getCity(game) == sel_city then depot = d; break end
+        end
+        depot = depot or game.entities.depots[1]
+        game.entities:addClient(game, depot, archetype.id)
     end)
 
     game.EventBus:subscribe("ui_market_for_clients_clicked", function(data)
@@ -132,7 +141,15 @@ function EventService.setupVehicleEvents(state, game)
 
         state.money = state.money - cost
         state.costs[vehicleType] = math.floor(cost * vcfg.cost_multiplier)
-        game.entities:addVehicle(game, vehicleType)
+        -- Hire at the selected city's depot so multi-city players get
+        -- vehicles where they intend.
+        local ScopeSel = require("services.ScopeSelectionService")
+        local sel_city = ScopeSel.getSelectedCity(game)
+        local target_depot
+        for _, d in ipairs(game.entities.depots or {}) do
+            if d.getCity and d:getCity(game) == sel_city then target_depot = d; break end
+        end
+        game.entities:addVehicle(game, vehicleType, target_depot)
     end)
 
     game.EventBus:subscribe("ui_buy_vehicle_at_depot_clicked", function(data)

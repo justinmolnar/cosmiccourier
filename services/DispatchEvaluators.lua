@@ -84,22 +84,28 @@ local function find_match(block, ctx)
         end
     end)
 
-    local best = filtered[1]
-    if out_key ~= "" then
-        setVar(ctx.game, out_key, best)
+    -- ── Execute body with each candidate until one succeeds ────────────────
+    -- A find block iterates sorted candidates rather than committing to the
+    -- single "best". If the nearest vehicle is busy, the next-nearest is
+    -- tried, and so on. First successful body result wins.
+    for _, candidate in ipairs(filtered) do
+        if out_key ~= "" then
+            setVar(ctx.game, out_key, candidate)
+        end
+
+        local inner_ctx = {
+            game        = ctx.game,
+            trip        = ctx.trip,
+            vehicle     = ctx.vehicle,
+            _rule_id    = ctx._rule_id,
+            _call_depth = (ctx._call_depth or 0),
+        }
+        inner_ctx[col.ctx_key] = candidate
+
+        local res = RE.evalStack(block.body, inner_ctx)
+        if res then return res end
     end
-
-    -- ── Execute body with best match in context ─────────────────────────────
-    local inner_ctx = { 
-        game       = ctx.game, 
-        trip       = ctx.trip, 
-        vehicle    = ctx.vehicle,
-        _rule_id   = ctx._rule_id, 
-        _call_depth = (ctx._call_depth or 0) 
-    }
-    inner_ctx[col.ctx_key] = best
-
-    return RE.evalStack(block.body, inner_ctx)
+    return false
 end
 
 -- ── Conditions: Trip ─────────────────────────────────────────────────────────

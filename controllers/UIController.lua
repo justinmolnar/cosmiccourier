@@ -355,6 +355,28 @@ function UIController:handleMouseDown(x, y, button)
     elseif id == "datagrid_filter_popup" and button == 1 then
         DataGrid.openFilterPopup(data.grid_id, data.source, data.col_id, x, y + 4, Game)
 
+    elseif id == "dispatch_buy_pack" and button == 1 then
+        local PackService   = require("services.PackService")
+        local all_packs     = require("data.rule_packs")
+        local all_templates = require("data.rule_templates")
+        local pack_def = PackService.findPack(data.pack_id, all_packs)
+        if pack_def and pack_def.shop_cost then
+            local cost = pack_def.shop_cost
+            if Game.state.money >= cost
+               and PackService.hasCardsRemaining(pack_def, all_templates, Game.state) then
+                Game.state.money = Game.state.money - cost
+                local result = PackService.openPack(pack_def, all_templates, Game.state)
+                local count  = result and result.new_keys and #result.new_keys or 0
+                if Game.info_feed and Game.info_feed.push then
+                    Game.info_feed:push({
+                        text  = string.format("Opened %s — %d new unlock%s!",
+                                              pack_def.name, count, count == 1 and "" or "s"),
+                        color = { 0.4, 0.9, 0.5 },
+                    })
+                end
+            end
+        end
+
     elseif id == "accordion_toggle" and button == 1 then
         UIConfig.toggleAccordion(Game, data.tab_id, data.section_id)
 
